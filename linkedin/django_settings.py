@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "linkedin",
     "crm",
     "chat",
+    "google_integration",
 ]
 
 MIDDLEWARE = [
@@ -117,6 +118,16 @@ if not supabase_url:
     )
 
 DATABASES = {"default": _database_from_url(supabase_url)}
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_BASE = os.environ.get("GOOGLE_REDIRECT_BASE", "")
+
+if DEBUG and (
+    not os.environ.get("OAUTHLIB_INSECURE_TRANSPORT")
+    and (GOOGLE_REDIRECT_BASE.startswith("http://") if GOOGLE_REDIRECT_BASE else True)
+):
+    os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "/static/"

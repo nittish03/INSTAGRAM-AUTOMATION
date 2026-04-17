@@ -49,9 +49,23 @@ def dashboard_callback(request, context):
 
     active_profile = LinkedInProfile.objects.filter(active=True).first()
 
+    google_status = "Disconnected"
+    google_email = ""
+    try:
+        from google_integration.models import GoogleAccount
+        ga = GoogleAccount.objects.filter(user=request.user).first()
+        if ga and ga.is_connected:
+            google_status = "Connected"
+            google_email = ga.google_email
+    except Exception:
+        pass
+
     context.update({
         "greeting": "LeadPilot Console",
         "tagline": "Autonomous B2B Lead Generation Active",
+        "google_status": google_status,
+        "google_email": google_email,
+        "google_url": "/admin/google/",
         "kpi": [
             {
                 "title": "Total Leads",

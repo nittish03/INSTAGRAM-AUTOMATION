@@ -15,7 +15,7 @@ admin.site.unregister(Group)
 
 @admin.register(SiteConfig)
 class SiteConfigAdmin(ModelAdmin):
-    list_display = ("ai_model", "llm_api_key_status", "llm_api_base")
+    list_display = ("ai_model", "llm_api_key_status", "llm_api_base", "google_workspace_link")
     icon = "settings"
     
     def llm_api_key_status(self, obj):
@@ -24,6 +24,15 @@ class SiteConfigAdmin(ModelAdmin):
 
     def has_add_permission(self, request):
         return not SiteConfig.objects.exists()
+
+    def google_workspace_link(self, obj):
+        return format_html(
+            '<a href="/admin/google/" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
+            "{}"
+            "</a>",
+            "Connect Google",
+        )
+    google_workspace_link.short_description = "Google Workspace"
 
 @admin.register(Campaign)
 class CampaignAdmin(ModelAdmin):

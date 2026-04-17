@@ -584,4 +584,330 @@ Behavioral impact:
 
 ---
 
+### 18.7 Google Workspace Integration (OAuth + Sheets)
+
+Goal:
+- Add Google sign-in for the app and a built-in Google Sheets workspace.
+- LinkedIn automation remains on its own credential/cookie path (Playwright). Google is for app + Sheets only — explicitly NOT used for LinkedIn auth.
+
+New Django app: `google_integration/`
+- `models.py`
+  - `GoogleAccount(user OneToOne)` storing encrypted `access_token`/`refresh_token`,
+    `token_expiry`, `scopes`, `google_email`, `google_sub`.
+  - Reuses `linkedin.models.encrypt_value/decrypt_value` (Fernet-based) so all
+    Google credentials are encrypted at rest using `LEADPILOT_ENCRYPTION_KEY`.
+  - `is_connected`, `is_token_expired`, `to_credentials_dict()`, `update_from_credentials()`.
+- `oauth.py`
+  - `build_flow(redirect_uri, state)` constructs a `google_auth_oauthlib.flow.Flow`
+    from `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`.
+  - `credentials_for(account)` returns live `Credentials` and refreshes the
+    access token transparently when expired.
+  - Scopes: `openid`, `userinfo.email`, `userinfo.profile`,
+    `auth/spreadsheets`, `auth/drive.file`.
+- `services.py`
+  - `list_spreadsheets`, `create_spreadsheet`, `get_spreadsheet_meta`,
+    `get_values`, `update_values`, `append_rows`, `clear_range`.
+  - Uses `googleapiclient.discovery.build("sheets","v4")` and `("drive","v3")`.
+- `views.py`
+  - `connect` — landing page with "Continue with Google" or "Open Sheets".
+  - `auth_start`, `auth_callback`, `disconnect` — full OAuth lifecycle.
+  - `sheets_list`, `sheets_create` — drive-backed listing and quick create.
+  - `sheet_view`, `sheet_save`, `sheet_append` — inline grid editor with
+    JSON save and append endpoints.
+  - All Sheets routes are gated by `_require_account()` to ensure a valid
+    `GoogleAccount` exists before calling Google APIs.
+- `urls.py` namespaced under `google_integration` and mounted at `/admin/google/`.
+- `admin.py` registers `GoogleAccount` for visibility (read-only fields).
+
+Templates (`google_integration/templates/google_integration/*`):
+- `base.html`, `connect.html`, `sheets_list.html`, `sheet_view.html`.
+- Tailwind via CDN to match the purple Unfold theme without coupling to admin.
+- `sheet_view.html` provides an inline editable grid with add row/column,
+  range selector, and save (POST JSON to `sheet_save`).
+
+Settings changes (`linkedin/django_settings.py`):
+- Added `"google_integration"` to `INSTALLED_APPS`.
+- Added `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_BASE`
+  (read from environment).
+- In `DEBUG` with no HTTPS redirect base configured, sets
+  `OAUTHLIB_INSECURE_TRANSPORT=1` so OAuth works on `http://127.0.0.1`.
+
+URL changes (`linkedin/urls.py`):
+- Added `path("admin/google/", include("google_integration.urls", namespace="google_integration"))`.
+
+Dashboard surface (`linkedin/views.py`):
+- `dashboard_callback` now exposes `google_status`, `google_email`,
+  `google_url` so the admin dashboard template can show a "Connect Google"
+  card (the value reflects the request user's `GoogleAccount`).
+
+Dependencies added (`requirements/base.txt`):
+- `google-auth`
+- `google-auth-oauthlib`
+- `google-api-python-client`
+
+Migrations:
+- `google_integration/migrations/0001_initial.py` creates the `GoogleAccount` table.
+
+Operational steps for users:
+1. Create Google Cloud OAuth Web credentials and enable Sheets + Drive APIs.
+2. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` in `.env`.
+3. Add redirect URI `http://127.0.0.1:8000/admin/google/auth/callback/` in Google Cloud.
+4. Visit `/admin/google/` while logged into the Django admin to connect.
+5. Manage spreadsheets at `/admin/google/sheets/`.
+
+Security considerations:
+- Tokens are encrypted at rest (Fernet) using the same key as LinkedIn passwords.
+- Sheets routes require `login_required`; OAuth state is validated against the session.
+- `drive.file` scope limits the app to files it creates or the user explicitly opens.
+
+Explicit non-goals:
+- Google sign-in is NOT wired to LinkedIn account creation. LinkedIn automation
+  continues to depend on `LinkedInProfile` credentials and Playwright cookie sessions.
+
+---
+
+### 18.8 Admin Surface Hotfix (Django 6 `format_html`)
+
+Problem:
+- Visiting `admin/linkedin/siteconfig/` returned HTTP 500 after adding the
+  "Connect Google" button in `SiteConfigAdmin.list_display`.
+
+Root cause:
+- `google_workspace_link()` used `format_html()` with a static string and no
+  interpolation arguments. Django 6 raises:
+  `TypeError: args or kwargs must be provided.`
+
+Fix:
+- Updated `linkedin/admin.py` so `format_html()` receives an interpolated
+  placeholder argument (`{}` → `"Connect Google"`), satisfying Django 6 API.
+
+Verification:
+- `DEBUG=true python manage.py check` passes with no issues.
+
+---
+
+### 18.9 Admin-Namespace Routing Alignment for Google Workspace
+
+Goal:
+- Keep Google integration under admin URL space for UX consistency.
+
+Changes:
+- Remounted Google integration routes from `/google/...` to `/admin/google/...`
+  in `linkedin/urls.py`.
+- Updated SiteConfig admin "Connect Google" CTA target to `/admin/google/`.
+- Updated dashboard context `google_url` to `/admin/google/`.
+- Updated README and operational docs to use admin-scoped callback/UI URLs.
+
+Operational impact:
+- Access path is now consistent with admin namespace and navigation expectations.
+- OAuth redirect URI in Google Cloud must match the new callback path:
+  `http://127.0.0.1:8000/admin/google/auth/callback/`.
+
+---
+
+### 18.10 OAuth PKCE Verifier Persistence Fix
+
+Problem observed:
+- Google OAuth callback reached app, but token exchange failed with:
+  `InvalidGrantError: (invalid_grant) Missing code verifier.`
+
+Root cause:
+- Authorization flow used PKCE but did not persist/restore `code_verifier`
+  between `auth_start` and `auth_callback`.
+
+Fix:
+- `google_integration/oauth.py`
+  - `build_flow(..., autogenerate_code_verifier=True)` enabled.
+- `google_integration/views.py`
+  - `auth_start` now stores `flow.code_verifier` in session.
+  - `auth_callback` restores session verifier into `flow.code_verifier`
+    before `fetch_token(...)`.
+
+Verification:
+- `DEBUG=true python manage.py check` passes after patch.
+
+Behavioral impact:
+- OAuth code exchange now includes the expected PKCE verifier, allowing
+  Google connect flow to complete successfully under current OAuth settings.
+
+---
+
+### 18.11 Django 6 Timezone Compatibility Fix (`timezone.utc`)
+
+Problem observed:
+- OAuth callback crashed after token exchange with:
+  `AttributeError: module 'django.utils.timezone' has no attribute 'utc'`
+  in `google_integration/models.py`.
+
+Root cause:
+- `update_from_credentials()` used `timezone.utc`, which is unavailable in
+  Django 6 utility module.
+
+Fix:
+- Updated `google_integration/models.py` to use Python stdlib UTC:
+  - `from datetime import timezone as dt_timezone`
+  - `timezone.make_aware(expiry, dt_timezone.utc)`
+
+Verification:
+- `DEBUG=true python manage.py check` passes.
+- Lints clean for `google_integration/models.py`.
+
+Behavioral impact:
+- OAuth callback now persists token expiry without raising timezone attribute errors.
+
+---
+
+### 18.12 Google Workspace Theme Parity (Dark/Light)
+
+Goal:
+- Make Google Workspace pages follow dark/light theme behavior like the rest of the app UX.
+
+Changes:
+- Updated `google_integration/templates/google_integration/base.html`:
+  - Added theme initialization script:
+    - reads `leadpilot_google_theme` from `localStorage`,
+    - falls back to `prefers-color-scheme`.
+  - Added dark-theme CSS overrides for existing Tailwind utility classes used
+    across Google templates (`bg-slate-*`, `text-slate-*`, `border-slate-*`,
+    input/background colors, header colors).
+  - Added a top-nav `Toggle Theme` button to switch between light/dark and persist preference.
+
+Behavioral impact:
+- Google pages under `/admin/google/` now support both light and dark themes.
+- Theme preference persists per browser via `localStorage`.
+
+Verification:
+- `DEBUG=true python manage.py check` passes.
+- Lints clean for updated template.
+
+---
+
+### 18.13 Google Sheet Visual Parity Upgrade (Formatting-Aware Grid)
+
+Problem observed:
+- The in-app sheet view showed plain unformatted values, visually diverging from
+  native Google Sheets (header fills, text styles, alignment, links, etc.).
+
+Root cause:
+- Existing implementation read only `spreadsheets.values.get(...)`, which returns
+  value matrices but not cell formatting metadata.
+
+Fix implemented:
+- `google_integration/services.py`
+  - Added `get_grid_data(...)` using:
+    `spreadsheets.get(..., includeGridData=True, ranges=[...])`
+  - Extracts per-cell:
+    - `formattedValue`
+    - `effectiveFormat.backgroundColor`
+    - `effectiveFormat.textFormat` (foreground/bold/italic)
+    - `effectiveFormat.horizontalAlignment`
+    - `hyperlink`
+  - Returns structured `{values, styles}` payload.
+- `google_integration/views.py`
+  - `sheet_view` now uses `get_grid_data(...)`.
+  - Passes `styles_json` into template.
+- `google_integration/templates/google_integration/sheet_view.html`
+  - Renders input cells with inline style computed from Google format metadata.
+  - Applies background color, text color, alignment, bold/italic.
+  - Preserves hyperlinks and opens link on cell double-click.
+  - Keeps editing/saving behavior intact (`USER_ENTERED` on save).
+
+Behavioral impact:
+- In-app sheet table now visually tracks Google formatting much more closely.
+- Native advanced widgets (e.g., full dropdown chip UI) remain constrained by
+  custom rendering, but key visual formatting fidelity is significantly improved.
+
+Verification:
+- `DEBUG=true python manage.py check` passes.
+- No linter errors in changed files.
+
+---
+
+### 18.14 Sheet UX: Resizable Rows/Columns + Auto-Save
+
+Problem observed:
+- In-app sheet grid did not support drag-resizing row/column sizes like Google Sheets.
+- Users wanted automatic persistence similar to Google Sheets after edits.
+
+Fix implemented (`google_integration/templates/google_integration/sheet_view.html`):
+- Replaced `<table>` rendering with a CSS grid layout (`#sheet-grid`) where:
+  - column widths are explicit pixel tracks,
+  - row heights are explicit minimum heights per row.
+- Added resize handles:
+  - column: thin vertical drag strip on the right edge of each column header,
+  - row: thin horizontal drag strip on the bottom edge of each row number cell.
+- Persisted layout locally per `(spreadsheetId, range)` in `localStorage` under
+  `leadpilot_sheet_layout:<id>:<range>` so refreshes keep sizing.
+- Added **Auto-save** toggle (default on) with debounced saves (~1200ms idle)
+  posting the same payload as manual save (`range` + `values` matrix).
+- Added `beforeunload` guard when there are unsaved edits or a pending debounced save.
+- Manual **Save changes** flushes pending debounce immediately.
+
+Behavioral impact:
+- Operators can resize columns/rows for readability without leaving LeadPilot.
+- Edits auto-sync back to Google Sheets when auto-save is enabled.
+- Column/row sizing is a local UI preference (not written back to Google column widths).
+
+Verification:
+- `DEBUG=true python manage.py check` passes.
+- Template lints clean.
+
+---
+
+### 18.15 Sheet Cell Text Contrast Fix (Light Theme)
+
+Problem observed:
+- In light theme, some sheet cells showed **white text on a white/near-white background**,
+  making values effectively invisible.
+
+Root cause:
+- Google `effectiveFormat.textFormat.foregroundColor` can be white (common on dark
+  sheet themes). Our renderer applied that color onto `<input>` cells whose default
+  background remained light, producing illegible contrast.
+
+Fix implemented (`google_integration/templates/google_integration/sheet_view.html`):
+- Added luminance-based contrast gating before applying Google foreground color.
+- If foreground/background contrast is too low, foreground styling is omitted so
+  the cell inherits normal readable theme text colors.
+
+Behavioral impact:
+- Light theme readability is restored for typical spreadsheet color combinations.
+- Dark-colored cells can still receive explicit foreground colors when contrast is sufficient.
+
+Verification:
+- Template lints clean after change.
+
+---
+
+### 18.16 Sheet Grid Layout Recovery (Broken `grid-template-columns`)
+
+Problem observed:
+- Sheet UI sometimes rendered as a **single vertical column** (letters A..J stacked,
+  then row numbers and cell values stacked), instead of a horizontal spreadsheet grid.
+
+Root cause:
+- **Primary:** `colTemplate()` built the row-label gutter as a bare number (`44`) instead of
+  `44px`, producing values like `grid-template-columns: 44 140px 140px …`. A length without a
+  unit is invalid, so the **entire** declaration was dropped and the sheet stacked vertically.
+- **Secondary:** persisted layout arrays in `localStorage` could also inject invalid tracks
+  (e.g., `NaNpx`); sanitization and a `v2` layout key mitigate that.
+
+Fix implemented:
+- `google_integration/templates/google_integration/sheet_view.html`
+  - Gutter track is now `${gutterPx}px` so `grid-template-columns` is always valid.
+  - Bumped layout storage key to `leadpilot_sheet_layout:v2:...` to ignore corrupted v1 payloads.
+  - Added `sanitizeNumberArray(...)` to coerce/validate widths/heights on load and on every render.
+- `google_integration/templates/google_integration/base.html`
+  - Explicit light-theme defaults for form controls to avoid invisible text when theme is `light`.
+
+Behavioral impact:
+- Grid layout is stable again even if local layout storage was previously corrupted.
+- Light theme form controls have predictable readable defaults.
+
+Verification:
+- `DEBUG=true python manage.py check` passes.
+- Template lints clean.
+
+---
+
 This document is a system-level interpretation of current repository behavior and design intent, including operational caveats that are visible from code structure and module contracts.

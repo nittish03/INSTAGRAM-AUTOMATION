@@ -1,0 +1,56 @@
+{% extends "google_integration/base.html" %}
+
+{% block title %}Sheets · LeadPilot{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Your Spreadsheets</h1>
+    <p class="text-slate-600 text-sm mt-1">Connected as <span class="font-medium">{{ account.google_email }}</span></p>
+  </div>
+  <form method="post" action="{% url 'google_integration:sheets_create' %}" class="flex items-center gap-2">
+    {% csrf_token %}
+    <input type="text" name="title" placeholder="New spreadsheet title"
+           class="rounded-lg border border-slate-300 px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-purple-500" />
+    <button class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      Create
+    </button>
+  </form>
+</div>
+
+{% if error %}
+  <div class="mt-6 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
+{% endif %}
+
+<div class="mt-6 bg-white border border-slate-200 rounded-2xl overflow-hidden">
+  {% if spreadsheets %}
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-slate-500 uppercase text-xs">
+        <tr>
+          <th class="text-left px-5 py-3">Name</th>
+          <th class="text-left px-5 py-3">Modified</th>
+          <th class="text-right px-5 py-3">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for s in spreadsheets %}
+          <tr>
+            <td class="px-5 py-3 font-medium text-slate-900">{{ s.name }}</td>
+            <td class="px-5 py-3 text-slate-500">{{ s.modifiedTime }}</td>
+            <td class="px-5 py-3 text-right">
+              <a href="{% url 'google_integration:sheet_view' spreadsheet_id=s.id %}"
+                 class="text-purple-700 hover:text-purple-900 font-medium">Open</a>
+              <a href="{{ s.webViewLink }}" target="_blank"
+                 class="ml-3 text-slate-500 hover:text-slate-700">Google ↗</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="px-6 py-10 text-center text-slate-500">
+      No spreadsheets yet. Create one above to get started.
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

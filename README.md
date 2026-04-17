@@ -32,7 +32,19 @@ Create `.env` in project root:
 SUPABASE_URL=postgresql://<user>:<url_encoded_password>@<host>:5432/postgres?sslmode=require
 DEBUG=true
 ALLOWED_HOSTS=127.0.0.1,localhost
+
+# Google Workspace integration (optional, enables /admin/google/ Sheets workspace)
+GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
+GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
+GOOGLE_REDIRECT_BASE=http://127.0.0.1:8000
 ```
+
+### Google Workspace (Sheets) setup
+1. Create OAuth credentials in Google Cloud Console (type: Web application).
+2. Add authorized redirect URI: `http://127.0.0.1:8000/admin/google/auth/callback/`.
+3. Enable APIs: **Google Sheets API** and **Google Drive API**.
+4. Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
+5. Visit `http://127.0.0.1:8000/admin/google/` and click "Continue with Google".
 
 ### 3. Initialization
 ```bash
