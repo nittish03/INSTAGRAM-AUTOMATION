@@ -295,6 +295,7 @@ def apply(config: OnboardConfig) -> None:
                 _create_seed_leads(campaign, config.seed_urls)
 
     # 2. LinkedIn Account
+    created_profile = False
     if config.linkedin_email and not LinkedInProfile.objects.filter(linkedin_username=config.linkedin_email).exists():
         _create_account(
             campaign,
@@ -305,6 +306,37 @@ def apply(config: OnboardConfig) -> None:
             connect_weekly=config.connect_weekly_limit,
             follow_up_daily=config.follow_up_daily_limit,
         )
+        created_profile = True
+
+    # 2b. Ensure campaign membership is linked for existing accounts too.
+    if campaign:
+        linked = False
+        if config.linkedin_email:
+            existing_profile = LinkedInProfile.objects.filter(
+                linkedin_username=config.linkedin_email
+            ).select_related("user").first()
+            if existing_profile:
+                campaign.users.add(existing_profile.user)
+                linked = True
+                if not created_profile:
+                    logger.info(
+                        "Linked existing user %s to campaign %s",
+                        existing_profile.user.username,
+                        campaign.name,
+                    )
+
+        # Auto-heal common fresh-start scenario: one active profile, no campaign users.
+        if not linked and not campaign.users.exists():
+            active_profiles = list(
+                LinkedInProfile.objects.filter(active=True).select_related("user")
+            )
+            if len(active_profiles) == 1:
+                campaign.users.add(active_profiles[0].user)
+                logger.info(
+                    "Auto-linked sole active user %s to campaign %s",
+                    active_profiles[0].user.username,
+                    campaign.name,
+                )
 
 
     # 3. LLM Configuration

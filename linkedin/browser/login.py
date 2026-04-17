@@ -1,6 +1,7 @@
 # linkedin/browser/login.py
 import logging
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 from termcolor import colored
@@ -11,6 +12,7 @@ from linkedin.conf import (
     BROWSER_LOGIN_TIMEOUT_MS,
     BROWSER_SLOW_MO,
 )
+from linkedin.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +20,55 @@ LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login"
 LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
 
 SELECTORS = {
-    "email": 'input#username',
-    "password": 'input#password',
-    "submit": 'button[type="submit"]',
+    "email": [
+        'input#username',
+        'input[name="session_key"]',
+        'input[autocomplete="username"]',
+        'input[name="username"]',
+    ],
+    "password": [
+        'input#password',
+        'input[name="session_password"]',
+        'input[autocomplete="current-password"]',
+        'input[name="password"]',
+    ],
+    "submit": [
+        'button[type="submit"]',
+        'button[data-litms-control-urn*="login-submit"]',
+        'button[aria-label*="Sign in"]',
+    ],
 }
 
+CHALLENGE_SELECTORS = [
+    'iframe[src*="captcha"]',
+    'input#captcha-internal',
+    'input[name="pin"]',
+    'h1:has-text("Security verification")',
+    'h1:has-text("Let’s do a quick security check")',
+]
 
-def playwright_login(session: "AccountSession"):
+
+def _first_visible(page, selectors: list[str], timeout_ms: int = 5000):
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator
+        except PlaywrightTimeoutError:
+            continue
+    return None
+
+
+def _raise_auth_diagnostic(page, reason: str):
+    title = ""
+    try:
+        title = page.title()
+    except Exception:  # pragma: no cover - diagnostic only
+        title = "<unavailable>"
+    raise AuthenticationError(f"{reason}. URL={page.url!r} TITLE={title!r}")
+
+
+def playwright_login(session):
     page = session.page
     lp = session.linkedin_profile
     logger.info(colored("Fresh login sequence starting", "cyan") + f" for {session}")
@@ -36,15 +80,25 @@ def playwright_login(session: "AccountSession"):
         error_message="Failed to load login page",
     )
 
-    human_type(page.locator(SELECTORS["email"]), lp.linkedin_username)
+    email_input = _first_visible(page, SELECTORS["email"], timeout_ms=10000)
+    password_input = _first_visible(page, SELECTORS["password"], timeout_ms=3000)
+    if not email_input or not password_input:
+        if _first_visible(page, CHALLENGE_SELECTORS, timeout_ms=1500):
+            _raise_auth_diagnostic(page, "LinkedIn presented a challenge/captcha page")
+        _raise_auth_diagnostic(page, "LinkedIn login form fields not found")
+
+    human_type(email_input, lp.linkedin_username)
     session.wait()
-    human_type(page.locator(SELECTORS["password"]), lp.linkedin_password)
+    human_type(password_input, lp.linkedin_password)
 
     session.wait()
+    submit_button = _first_visible(page, SELECTORS["submit"], timeout_ms=7000)
+    if not submit_button:
+        _raise_auth_diagnostic(page, "LinkedIn submit button not found")
 
     goto_page(
         session,
-        action=lambda: page.locator(SELECTORS["submit"]).click(),
+        action=lambda: submit_button.click(),
         expected_url_pattern="/feed",
         timeout=BROWSER_LOGIN_TIMEOUT_MS,
         error_message="Login failed – no redirect to feed",
@@ -69,7 +123,7 @@ def _save_cookies(session):
     session.linkedin_profile.save(update_fields=["cookie_data"])
 
 
-def start_browser_session(session: "AccountSession"):
+def start_browser_session(session):
     logger.debug("Configuring browser for %s", session)
 
     session.linkedin_profile.refresh_from_db(fields=["cookie_data"])

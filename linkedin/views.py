@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from linkedin.models import Campaign, LinkedInProfile, Task, ActionLog
@@ -13,6 +15,8 @@ def dashboard_callback(request, context):
     
     from django.utils import timezone
     from linkedin.enums import ProfileState
+    today = timezone.localdate()
+    last_week = timezone.now() - timedelta(days=7)
     
     # [LOW-04] Three separate queries: Lead count, Deal aggregates, ActionLog aggregates.
     # These are distinct tables with no join relationship; batching isn't possible.

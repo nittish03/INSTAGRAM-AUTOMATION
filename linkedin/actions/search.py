@@ -1,6 +1,7 @@
 # linkedin/actions/search.py
 
 import logging
+import time
 from typing import Dict, Any
 from urllib.parse import urlparse, parse_qs, urlencode
 
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 SELECTORS = {
     "search_bar": "//input[contains(@placeholder, 'Search')]",
     "profile_links": 'a[href*="/in/"]',
+    "results_container": "ul[role='list'], div.search-results-container, main",
+    "no_results_text": "No results found",
 }
 
 
@@ -76,6 +79,36 @@ def _paginate_to_next_page(session: "AccountSession", page_num: int):
     )
 
 
+def _extract_search_urls_with_retry(session: "AccountSession", attempts: int = 3) -> set[str]:
+    """Extract profile URLs with lazy-load aware retries.
+
+    LinkedIn search results are often rendered after initial navigation and may
+    require short wait+scroll cycles before profile links appear.
+    """
+    page = session.page
+    urls: set[str] = set()
+
+    for i in range(attempts):
+        try:
+            page.locator(SELECTORS["results_container"]).first.wait_for(state="visible", timeout=5000)
+        except Exception:
+            pass
+
+        urls = extract_in_urls(page)
+        if urls:
+            return urls
+
+        if page.get_by_text(SELECTORS["no_results_text"], exact=False).count() > 0:
+            logger.info("Search returned 'No results found'")
+            return set()
+
+        # Trigger lazy rendering for results grids before retrying.
+        page.mouse.wheel(0, 1800)
+        time.sleep(1.2 + (i * 0.4))
+
+    return urls
+
+
 def search_people(session: "AccountSession", keyword: str, page: int = 1):
     """Search LinkedIn People by keyword and navigate to the given page."""
     session.ensure_browser()
@@ -83,7 +116,9 @@ def search_people(session: "AccountSession", keyword: str, page: int = 1):
     if page > 1:
         _paginate_to_next_page(session, page)
 
-    urls = extract_in_urls(session.page)
+    urls = _extract_search_urls_with_retry(session)
+    if not urls:
+        logger.debug("No /in/ links extracted for keyword=%r page=%s", keyword, page)
     discover_and_enrich(session, urls)
 
 

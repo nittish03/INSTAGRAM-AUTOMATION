@@ -23,7 +23,18 @@ pip install -r requirements/local.txt
 playwright install chromium
 ```
 
-### 2. Initialization
+### 2. Environment
+Supabase is mandatory (no SQLite fallback).
+
+Create `.env` in project root:
+
+```bash
+SUPABASE_URL=postgresql://<user>:<url_encoded_password>@<host>:5432/postgres?sslmode=require
+DEBUG=true
+ALLOWED_HOSTS=127.0.0.1,localhost
+```
+
+### 3. Initialization
 ```bash
 # Database setup
 python manage.py migrate
@@ -33,7 +44,7 @@ python manage.py setup_crm
 python manage.py createsuperuser
 ```
 
-### 3. Execution
+### 4. Execution
 The system requires two processes to run concurrently:
 
 **Dashboard (UI):**

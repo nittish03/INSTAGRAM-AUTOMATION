@@ -23,3 +23,5 @@ django-cors-headers
 questionary
 django-import-export
 django-simple-history
+psycopg[binary]
+python-dotenv

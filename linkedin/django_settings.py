@@ -5,6 +5,7 @@ Minimal Django settings for LeadPilot - Premium Unfold UI (Fixed).
 import os
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 from django.core.exceptions import ImproperlyConfigured
 
 # Playwright's sync API runs inside an async event loop
@@ -12,6 +13,14 @@ os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BASE_DIR = ROOT_DIR
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional convenience in local/dev envs
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv(ROOT_DIR / ".env")
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     if os.environ.get("ENV") == "production":
@@ -78,12 +87,36 @@ TEMPLATES = [
     },
 ]
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": str(ROOT_DIR / "db.sqlite3"),
+def _database_from_url(db_url: str) -> dict:
+    parsed = urlparse(db_url)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured(
+            "Unsupported database URL scheme. Use postgres:// or postgresql://"
+        )
+
+    query = {k: v[-1] for k, v in parse_qs(parsed.query).items()}
+    options = {"sslmode": query.pop("sslmode", "require"), **query}
+
+    config = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": parsed.path.lstrip("/") or "postgres",
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname or "",
+        "PORT": str(parsed.port or 5432),
     }
-}
+    if options:
+        config["OPTIONS"] = options
+    return config
+
+
+supabase_url = os.environ.get("SUPABASE_URL")
+if not supabase_url:
+    raise ImproperlyConfigured(
+        "SUPABASE_URL must be set. SQLite/local fallback has been removed."
+    )
+
+DATABASES = {"default": _database_from_url(supabase_url)}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "/static/"
