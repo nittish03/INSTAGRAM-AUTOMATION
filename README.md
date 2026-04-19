@@ -1,6 +1,6 @@
-# LeadPilot: B2B LinkedIn Outreach System
+# EshLead: B2B LinkedIn Outreach System
 
-LeadPilot is a system for automated LinkedIn outreach, integrating lead discovery, qualification, and messaging into a unified CRM pipeline.
+EshLead is a system for automated LinkedIn outreach, integrating lead discovery, qualification, and messaging into a unified CRM pipeline.
 
 ## System Components
 

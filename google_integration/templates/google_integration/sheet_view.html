@@ -1,6 +1,6 @@
 {% extends "google_integration/base.html" %}
 
-{% block title %}{{ title|default:"Sheet" }} · LeadPilot{% endblock %}
+{% block title %}{{ title|default:"Sheet" }} · EshLead{% endblock %}
 
 {% block content %}
 <div class="flex items-end justify-between gap-4 flex-wrap">
@@ -131,14 +131,21 @@
 
   function rgbFromGoogle(colorObj) {
     if (!colorObj || typeof colorObj !== "object") return "";
-    const r = Math.round((colorObj.red ?? 1) * 255);
-    const g = Math.round((colorObj.green ?? 1) * 255);
-    const b = Math.round((colorObj.blue ?? 1) * 255);
+    const has = (k) => typeof colorObj[k] === "number" && Number.isFinite(colorObj[k]);
+    if (!has("red") && !has("green") && !has("blue")) return "";
+    const r = Math.round((has("red") ? colorObj.red : 0) * 255);
+    const g = Math.round((has("green") ? colorObj.green : 0) * 255);
+    const b = Math.round((has("blue") ? colorObj.blue : 0) * 255);
+    if (has("alpha")) {
+      const a = Math.min(1, Math.max(0, colorObj.alpha));
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
     return `rgb(${r}, ${g}, ${b})`;
   }
 
   function luminanceFromRgbStr(rgb) {
-    const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(rgb || "");
+    const m =
+      /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(rgb || "");
     if (!m) return null;
     const rs = +m[1] / 255, gs = +m[2] / 255, bs = +m[3] / 255;
     const lin = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
@@ -155,6 +162,19 @@
     const contrast = (Math.max(Lf, Lb) + 0.05) / (Math.min(Lf, Lb) + 0.05);
     if (contrast < 1.35) return "";
     return fgRgb;
+  }
+
+  /**
+   * Light Google fills with no usable fg would inherit dark-theme sheet text (#e2e8f0)
+   * while inline background stays white → invisible. Force a dark default on light bgs.
+   */
+  function ensureReadableForeground(bgCss, fgCss) {
+    if (fgCss) return fgCss;
+    if (!bgCss) return "";
+    const Lb = luminanceFromRgbStr(bgCss);
+    if (Lb === null) return "";
+    if (Lb > 0.55) return "#0f172a";
+    return "";
   }
 
   function escapeHtml(text) {
@@ -287,7 +307,7 @@
         const v = row[c] ?? "";
         const bg = rgbFromGoogle(cellStyle.bg);
         const fgRaw = rgbFromGoogle(cellStyle.text);
-        const fg = effectiveTextColor(fgRaw, bg);
+        const fg = ensureReadableForeground(bg, effectiveTextColor(fgRaw, bg));
         const alignMap = { LEFT: "left", CENTER: "center", RIGHT: "right" };
         const align = alignMap[cellStyle.align] || "left";
         const weight = cellStyle.bold ? "700" : "400";
@@ -301,7 +321,7 @@
         ].filter(Boolean).join(";");
         const text = escapeHtml(v);
         const href = cellStyle.hyperlink ? `data-link="${escapeHtml(cellStyle.hyperlink)}"` : "";
-        html += `<div class="border-r border-slate-100 p-0 min-h-0 flex"><input ${href} data-r="${r}" data-c="${c}" style="${styleAttr}" class="flex-1 min-w-0 w-full px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-inset focus:ring-purple-500" value="${text}" /></div>`;
+        html += `<div class="border-r border-slate-100 p-0 min-h-0 flex"><input ${href} data-r="${r}" data-c="${c}" style="${styleAttr}" class="sheet-cell-input flex-1 min-w-0 w-full px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-inset focus:ring-purple-500" value="${text}" /></div>`;
       }
       html += `</div>`;
     });

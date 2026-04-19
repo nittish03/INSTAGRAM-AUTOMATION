@@ -349,9 +349,9 @@ def apply(config: OnboardConfig) -> None:
         cfg.llm_api_base = config.llm_api_base
     cfg.save()
 
-    logger.info("Onboarding successful — LeadPilot is ready.")
+    logger.info("Onboarding successful — EshLead is ready.")
     print("\n" + "="*60)
-    print("🚀 SUCCESS: Onboarding complete. LeadPilot is ready.")
+    print("🚀 SUCCESS: Onboarding complete. EshLead is ready.")
     print("="*60)
     print("\n🛡️  SECURITY NOTE: Your Django user accounts have been created with")
     print("   UNUSABLE passwords for safety.")

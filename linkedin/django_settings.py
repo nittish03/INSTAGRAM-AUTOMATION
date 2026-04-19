@@ -1,12 +1,14 @@
 # linkedin/django_settings.py
 """
-Minimal Django settings for LeadPilot - Premium Unfold UI (Fixed).
+Minimal Django settings for EshLead - Premium Unfold UI (Fixed).
 """
 import os
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from django.core.exceptions import ImproperlyConfigured
+
+from linkedin.unfold_sidebar import unfold_sidebar_navigation
 
 # Playwright's sync API runs inside an async event loop
 os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
@@ -141,10 +143,16 @@ USE_I18N = True
 USE_TZ = True
 
 UNFOLD = {
-    "SITE_TITLE": "LeadPilot",
-    "SITE_HEADER": "LeadPilot Admin",
+    "SITE_TITLE": "EshLead",
+    "SITE_HEADER": "EshLead Admin",
     "SITE_URL": "/",
     "DASHBOARD_CALLBACK": "linkedin.views.dashboard_callback",
+    "SIDEBAR": {
+        "show_search": True,
+        "command_search": False,
+        "show_all_applications": False,
+        "navigation": unfold_sidebar_navigation,
+    },
     "COLORS": {
         "primary": {
             "50": "250 245 255",

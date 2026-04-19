@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
-    help = "Create or update an admin user for the LeadPilot dashboard."
+    help = "Create or update an admin user for the EshLead dashboard."
 
     def add_arguments(self, parser):
         parser.add_argument("email", help="Email/Username for the admin user")

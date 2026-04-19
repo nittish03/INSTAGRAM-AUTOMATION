@@ -1,45 +1,69 @@
 {% extends "admin/base_site.html" %}
-{% load i18n admin_urls static %}
+{% load i18n l10n admin_urls static unfold %}
 
-{% block breadcrumbs %}
-<div class="breadcrumbs">
-<a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
-&rsaquo; <a href="{% url 'admin:app_list' app_label='linkedin' %}">Linkedin</a>
-&rsaquo; <a href="{% url 'admin:linkedin_campaign_changelist' %}">Campaigns</a>
-&rsaquo; {% translate 'Import leads' %}
-</div>
-{% endblock %}
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} import-leads{% endblock %}
 
 {% block content %}
-<div id="content-main" class="p-4 max-w-2xl">
-    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <h1 class="text-2xl font-bold text-gray-900 mb-4">{% translate 'Import Leads from CSV' %}</h1>
-        <p class="text-gray-600 mb-6">
-            {% translate 'Upload a CSV file containing LinkedIn URLs. We will parse the file and add discovered leads to the selected campaigns.' %}
-        </p>
-
-        <form method="post" enctype="multipart/form-data">
-            {% csrf_token %}
-            
-            {% for obj in queryset %}
-                <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk|unlocalize }}">
-            {% endfor %}
-            <input type="hidden" name="action" value="{{ action }}">
-            <input type="hidden" name="apply" value="True">
-
-            <div class="mb-6">
-                {{ form.as_p }}
+<div class="flex flex-col items-center justify-start w-full">
+    <div class="w-full max-w-xl">
+        <div class="bg-white border border-base-200 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 overflow-hidden">
+            <div class="border-b border-base-200 bg-base-50/80 px-5 py-4 dark:border-base-800 dark:bg-base-800/40">
+                <h2 class="text-[15px] font-semibold leading-snug text-font-important-light dark:text-font-important-dark">
+                    {% translate "Import leads from CSV" %}
+                </h2>
+                <p class="mt-1.5 text-sm leading-relaxed text-font-subtle-light dark:text-font-subtle-dark">
+                    {% translate "Upload a CSV of LinkedIn profile URLs (one per line or column). Parsed leads are added as seeds to the selected campaign(s)." %}
+                </p>
+                {% if queryset|length > 1 %}
+                    <p class="mt-2 text-xs font-medium text-primary-600 dark:text-primary-500">
+                        {% blocktranslate with n=queryset|length trimmed %}
+                            {{ n }} campaigns selected — the same leads will be seeded for each.
+                        {% endblocktranslate %}
+                    </p>
+                {% endif %}
             </div>
 
-            <div class="flex items-center gap-4">
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded transition-colors">
-                    {% translate 'Upload and Import' %}
-                </button>
-                <a href="#" onclick="window.history.back(); return false;" class="text-gray-500 hover:text-gray-700">
-                    {% translate 'Cancel' %}
-                </a>
+            <div class="px-5 py-5">
+                {% if form.non_field_errors %}
+                    <div class="mb-4">
+                        {% include "unfold/helpers/messages/error.html" with errors=form.non_field_errors %}
+                    </div>
+                {% endif %}
+
+                <form method="post" enctype="multipart/form-data" id="csv_import_form" class="flex flex-col gap-5">
+                    {% csrf_token %}
+
+                    {% for obj in queryset %}
+                        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk|unlocalize }}">
+                    {% endfor %}
+                    <input type="hidden" name="action" value="{{ action }}">
+                    <input type="hidden" name="apply" value="True">
+
+                    <div>
+                        <label for="{{ form.csv_file.id_for_label }}" class="block text-sm font-medium mb-2 text-font-important-light dark:text-font-important-dark">
+                            {{ form.csv_file.label }}
+                        </label>
+                        {{ form.csv_file }}
+                        {% if form.csv_file.errors %}
+                            <ul class="mt-2 text-sm text-red-600 dark:text-red-400">
+                                {% for err in form.csv_file.errors %}<li>{{ err }}</li>{% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
+
+                    <div class="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:justify-end sm:items-center">
+                        {% url opts|admin_urlname:'changelist' as changelist_url %}
+                        {% component "unfold/components/button.html" with href=changelist_url variant="default" class="w-full sm:w-auto justify-center" %}
+                            {% translate "Cancel" %}
+                        {% endcomponent %}
+                        {% component "unfold/components/button.html" with submit=1 class="w-full sm:w-auto justify-center" %}
+                            <span class="material-symbols-outlined text-[18px]">upload_file</span>
+                            {% translate "Upload and import" %}
+                        {% endcomponent %}
+                    </div>
+                </form>
             </div>
-        </form>
+        </div>
     </div>
 </div>
 {% endblock %}

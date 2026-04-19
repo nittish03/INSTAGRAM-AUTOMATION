@@ -7,7 +7,7 @@ from crm.models.lead import Lead
 
 def dashboard_callback(request, context):
     """
-    Enhanced LeadPilot Dashboard Callback.
+    Enhanced EshLead Dashboard Callback.
     Returns structured data for the Unfold Dashboard.
     """
     from django.db.models import Count, Q
@@ -61,7 +61,7 @@ def dashboard_callback(request, context):
         pass
 
     context.update({
-        "greeting": "LeadPilot Console",
+        "greeting": "EshLead Console",
         "tagline": "Autonomous B2B Lead Generation Active",
         "google_status": google_status,
         "google_email": google_email,

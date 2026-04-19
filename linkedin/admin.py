@@ -1,8 +1,13 @@
 # linkedin/admin.py
+from types import SimpleNamespace
+
 from django.contrib import admin
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.http import HttpResponseRedirect, HttpResponse
+from django.urls import path, reverse
+from django.shortcuts import render, get_object_or_404
 
 from unfold.admin import ModelAdmin
 
@@ -51,6 +56,17 @@ class CampaignAdmin(ModelAdmin):
         }),
     )
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "import-leads/<int:campaign_id>/",
+                self.admin_site.admin_view(self.import_leads_single_view),
+                name="linkedin_campaign_import_leads_single",
+            ),
+        ]
+        return custom_urls + urls
+
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         obj.users.add(request.user)
@@ -77,12 +93,10 @@ class CampaignAdmin(ModelAdmin):
     failed_count.short_description = _("Failed")
 
     def import_leads_button(self, obj):
-        from django.urls import reverse
-        from django.utils.html import format_html
         return format_html(
             '<a href="{}" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
             'Import Leads</a>',
-            reverse("admin:linkedin_campaign_changelist") + f"?action=import_leads_action&_selected_action={obj.pk}"
+            reverse("admin:linkedin_campaign_import_leads_single", args=[obj.pk]),
         )
     import_leads_button.short_description = "Quick Import"
 
@@ -93,13 +107,24 @@ class CampaignAdmin(ModelAdmin):
     def import_leads_action(self, request, queryset):
         from django import forms
         from django.core.validators import FileExtensionValidator
-        from django.shortcuts import render
         from linkedin.setup.seeds import parse_seed_csv, create_seed_leads
 
         class CSVImportForm(forms.Form):
             csv_file = forms.FileField(
-                label="Select CSV file",
-                validators=[FileExtensionValidator(allowed_extensions=['csv'])]
+                label=_("CSV file"),
+                validators=[FileExtensionValidator(allowed_extensions=["csv"])],
+                widget=forms.FileInput(
+                    attrs={
+                        "class": (
+                            "block w-full cursor-pointer text-sm text-font-default-light "
+                            "file:inline-flex file:items-center file:rounded-default "
+                            "file:border-0 file:bg-primary-600 file:px-4 file:py-2 "
+                            "file:text-sm file:font-medium file:text-white "
+                            "hover:file:bg-primary-600/90 "
+                            "dark:text-font-default-dark dark:file:bg-primary-600"
+                        ),
+                    }
+                ),
             )
 
         if 'apply' in request.POST:
@@ -124,16 +149,34 @@ class CampaignAdmin(ModelAdmin):
         else:
             form = CSVImportForm()
 
-        return render(
-            request,
-            "admin/csv_import.html",
-            {
-                'queryset': queryset,
-                'form': form,
-                'action': 'import_leads_action',
-                'title': 'Import Leads from CSV'
-            }
+        request.current_app = self.admin_site.name
+        subtitle = ""
+        if queryset.count() == 1:
+            one = queryset.first()
+            subtitle = _("Campaign: %(name)s") % {"name": one.name}
+        fake_cl = SimpleNamespace(
+            model_admin=self,
+            opts=self.opts,
+            full_result_count=0,
+            result_count=0,
         )
+        context = {
+            **self.admin_site.each_context(request),
+            "queryset": queryset,
+            "form": form,
+            "action": "import_leads_action",
+            "title": _("Import leads from CSV"),
+            "subtitle": subtitle,
+            "action_checkbox_name": ACTION_CHECKBOX_NAME,
+            "opts": self.opts,
+            "cl": fake_cl,
+        }
+        return render(request, "admin/csv_import.html", context)
+
+    def import_leads_single_view(self, request, campaign_id: int):
+        campaign = get_object_or_404(Campaign, pk=campaign_id)
+        queryset = Campaign.objects.filter(pk=campaign.pk)
+        return self.import_leads_action(request, queryset)
 
 
 
