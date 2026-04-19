@@ -100,7 +100,9 @@ def handle_connect(task, session, qualifiers):
         enqueue_connect(campaign_id, delay_seconds=cfg["connect_no_candidate_delay_seconds"])
         return
 
-    public_id = candidate["public_identifier"]
+    public_id = candidate.get("public_identifier") or candidate.get("public_id")
+    if not public_id:
+        raise TaskSkipped("Candidate missing public identifier.")
     profile = candidate.get("profile") or candidate
 
     # Freemium campaigns need a Deal before set_profile_state

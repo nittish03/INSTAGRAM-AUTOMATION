@@ -13,17 +13,20 @@ from simple_history.models import HistoricalRecords
 logger = logging.getLogger(__name__)
 
 def _get_cipher():
-    # [NEW-CRIT-02] Use dedicated environment variable for encryption
+    # [NEW-CRIT-02] Dedicated env var for encryption; dev fallback matches django_settings (non-production).
     from django.core.exceptions import ImproperlyConfigured
+
     raw_key = os.environ.get("LEADPILOT_ENCRYPTION_KEY", "").encode()
+    is_production = os.environ.get("ENV", "").lower() == "production"
     if not raw_key or len(raw_key) < 32:
-        if settings.DEBUG:
-            # Secure fallback for local dev: use SECRET_KEY derived key
+        if settings.DEBUG or not is_production:
             import hashlib
+
             key = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
             return Fernet(base64.urlsafe_b64encode(key))
-        from django.core.exceptions import ImproperlyConfigured
-        raise ImproperlyConfigured("LEADPILOT_ENCRYPTION_KEY must be set to a 32-byte string in production.")
+        raise ImproperlyConfigured(
+            "LEADPILOT_ENCRYPTION_KEY must be set (UTF-8 string at least 32 bytes) when ENV=production."
+        )
     
     key = base64.urlsafe_b64encode(raw_key[:32])
     return Fernet(key)

@@ -45,8 +45,7 @@ class CampaignAdmin(ModelAdmin):
     list_filter = ("is_freemium", "users")
     search_fields = ("name",)
     icon = "send"
-    actions_detail = ["import_leads_action"]
-    
+
     fieldsets = (
         (_("Campaign Configuration"), {
             "fields": (("name", "is_freemium"), ("booking_link", "action_fraction"))

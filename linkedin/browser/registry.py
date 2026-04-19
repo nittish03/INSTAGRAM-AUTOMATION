@@ -46,6 +46,9 @@ def cli_parser(description: str):
     import argparse
     import os
 
+    from linkedin.env_bootstrap import load_project_dotenv
+
+    load_project_dotenv()
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "linkedin.django_settings")
 
     import django

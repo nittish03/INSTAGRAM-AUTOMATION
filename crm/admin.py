@@ -42,7 +42,7 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
         deals = list(obj.deal_set.all())
         deal = deals[0] if deals else None
         if not deal:
-            return format_html('<span class="text-gray-400">UNQUALIFIED</span>')
+            return format_html('<span class="text-gray-400">{}</span>', "UNQUALIFIED")
         
         from linkedin.enums import ProfileState
         class_map = {

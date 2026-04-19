@@ -42,7 +42,7 @@ class OnboardConfig:
     booking_link: str = ""
     seed_urls: str = ""
     llm_api_key: str = ""
-    ai_model: str = "gemini-1.5-pro"
+    ai_model: str = ""
     llm_api_base: str = ""
     newsletter: bool = True
     connect_daily_limit: int = DEFAULT_CONNECT_DAILY_LIMIT
@@ -117,7 +117,7 @@ SELF_HOSTED_QUESTIONS = [
     Question("booking_link", "Booking Link (optional)", required=False),
     Question("seed_urls", "Seed LinkedIn URLs (comma separated)", required=False),
     Question("llm_api_key", "LLM API Key (Gemini/OpenAI)"),
-    Question("ai_model", "Model Identifier", default="gemini-1.5-pro"),
+    Question("ai_model", "Model Identifier", default=""),
     Question("llm_api_base", "LLM API Base URL (optional)", required=False),
     Question("connect_daily_limit", "Daily Connection Limit", default=str(DEFAULT_CONNECT_DAILY_LIMIT)),
     Question("connect_weekly_limit", "Weekly Connection Limit", default=str(DEFAULT_CONNECT_WEEKLY_LIMIT)),

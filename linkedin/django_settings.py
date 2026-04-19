@@ -8,6 +8,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from django.core.exceptions import ImproperlyConfigured
 
+from linkedin.env_bootstrap import load_project_dotenv
+
+load_project_dotenv()
+
 from linkedin.unfold_sidebar import unfold_sidebar_navigation
 
 # Playwright's sync API runs inside an async event loop
@@ -16,13 +20,6 @@ os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BASE_DIR = ROOT_DIR
 
-try:
-    from dotenv import load_dotenv
-except ImportError:  # pragma: no cover - optional convenience in local/dev envs
-    load_dotenv = None
-
-if load_dotenv is not None:
-    load_dotenv(ROOT_DIR / ".env")
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     if os.environ.get("ENV") == "production":
@@ -30,12 +27,23 @@ if not SECRET_KEY:
     SECRET_KEY = "leadpilot-local-dev-key-change-in-production"
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+_IS_PRODUCTION = os.environ.get("ENV", "").lower() == "production"
 
-raw_hosts = os.environ.get("ALLOWED_HOSTS", "*" if DEBUG else "")
+# Local/dev without DEBUG: runserver and tests still work without exporting ALLOWED_HOSTS.
+_default_allowed = (
+    "" if _IS_PRODUCTION else "localhost,127.0.0.1"
+)
+raw_hosts = os.environ.get("ALLOWED_HOSTS", "*" if DEBUG else _default_allowed)
 ALLOWED_HOSTS = [h.strip() for h in raw_hosts.split(",") if h.strip()]
 
-if not ALLOWED_HOSTS and not DEBUG:
+if not ALLOWED_HOSTS and _IS_PRODUCTION:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be set in production.")
+
+# Django's test client uses host "testserver"; narrow .env ALLOWED_HOSTS often omits it.
+if not _IS_PRODUCTION and ALLOWED_HOSTS != ["*"]:
+    for _h in ("testserver", "localhost", "127.0.0.1"):
+        if _h not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(_h)
 
 INSTALLED_APPS = [
     "unfold",
@@ -116,7 +124,8 @@ def _database_from_url(db_url: str) -> dict:
 supabase_url = os.environ.get("SUPABASE_URL")
 if not supabase_url:
     raise ImproperlyConfigured(
-        "SUPABASE_URL must be set. SQLite/local fallback has been removed."
+        "SUPABASE_URL must be set to your Supabase Postgres connection string "
+        "(project root `.env` is loaded automatically when using manage.py)."
     )
 
 DATABASES = {"default": _database_from_url(supabase_url)}
@@ -125,7 +134,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_BASE = os.environ.get("GOOGLE_REDIRECT_BASE", "")
 
-if DEBUG and (
+if not _IS_PRODUCTION and (
     not os.environ.get("OAUTHLIB_INSECURE_TRANSPORT")
     and (GOOGLE_REDIRECT_BASE.startswith("http://") if GOOGLE_REDIRECT_BASE else True)
 ):
