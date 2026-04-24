@@ -178,12 +178,32 @@ def get_values(
     return resp.get("values", [])
 
 
+def _cell_display_and_style(cell: dict, palette: dict[str, dict[str, float]]) -> tuple[str, dict]:
+    display_value = cell.get("formattedValue", "")
+    eff = cell.get("effectiveFormat") or {}
+    tf = eff.get("textFormat") if isinstance(eff, dict) else None
+    tf = tf if isinstance(tf, dict) else {}
+    style = {
+        "bg": _effective_background(eff if isinstance(eff, dict) else None, palette),
+        "text": _effective_foreground(eff if isinstance(eff, dict) else None, palette),
+        "bold": bool(tf.get("bold")),
+        "italic": bool(tf.get("italic")),
+        "align": eff.get("horizontalAlignment", "") if isinstance(eff, dict) else "",
+        "hyperlink": cell.get("hyperlink", ""),
+    }
+    return display_value, style
+
+
 def get_grid_data(
     account: GoogleAccount,
     spreadsheet_id: str,
     range_a1: str,
 ) -> dict:
-    """Return values + lightweight style metadata for a rendered sheet grid."""
+    """Return values + lightweight style metadata for a rendered sheet grid.
+
+    Honors each GridData ``startRow`` / ``startColumn`` so cells align to the
+    correct columns (sparse rows no longer shift J into A).
+    """
     sheets = _sheets_service(account)
     resp = sheets.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
@@ -191,7 +211,7 @@ def get_grid_data(
         includeGridData=True,
         fields=(
             "properties(spreadsheetTheme(themeColors(colorType,color(rgbColor,themeColor)))),"
-            "sheets(data(rowData(values("
+            "sheets(data(startRow,startColumn,rowData(values("
             "formattedValue,effectiveValue,hyperlink,"
             "effectiveFormat("
             "backgroundColor,backgroundColorStyle(rgbColor,themeColor),"
@@ -203,38 +223,60 @@ def get_grid_data(
     ).execute()
 
     palette = _palette_from_response(resp)
-    rows: list[list[str]] = []
-    styles: list[list[dict]] = []
+    blocks: list[tuple[int, int, list]] = []
+    max_row_excl = 0
+    max_col_excl = 0
 
     for sheet in resp.get("sheets", []):
         for data_block in sheet.get("data", []):
-            for row in data_block.get("rowData", []):
-                row_values: list[str] = []
-                row_styles: list[dict] = []
-                for cell in row.get("values", []):
-                    display_value = cell.get("formattedValue", "")
-                    row_values.append(display_value)
-                    eff = cell.get("effectiveFormat") or {}
-                    tf = eff.get("textFormat") if isinstance(eff, dict) else None
-                    tf = tf if isinstance(tf, dict) else {}
-                    row_styles.append(
-                        {
-                            "bg": _effective_background(
-                                eff if isinstance(eff, dict) else None, palette
-                            ),
-                            "text": _effective_foreground(
-                                eff if isinstance(eff, dict) else None, palette
-                            ),
-                            "bold": bool(tf.get("bold")),
-                            "italic": bool(tf.get("italic")),
-                            "align": eff.get("horizontalAlignment", "") if isinstance(eff, dict) else "",
-                            "hyperlink": cell.get("hyperlink", ""),
-                        }
-                    )
-                rows.append(row_values)
-                styles.append(row_styles)
+            if not isinstance(data_block, dict):
+                continue
+            start_row = int(data_block.get("startRow") or 0)
+            start_col = int(data_block.get("startColumn") or 0)
+            row_data = data_block.get("rowData") or []
+            end_row = start_row + len(row_data)
+            end_col = start_col
+            for row in row_data:
+                if row and isinstance(row, dict) and row.get("values"):
+                    end_col = max(end_col, start_col + len(row["values"]))
+            max_row_excl = max(max_row_excl, end_row)
+            max_col_excl = max(max_col_excl, end_col)
+            blocks.append((start_row, start_col, row_data))
+
+    if max_row_excl <= 0 or max_col_excl <= 0:
+        return {"values": [], "styles": []}
+
+    rows: list[list[str]] = [[""] * max_col_excl for _ in range(max_row_excl)]
+    styles: list[list[dict]] = [[{} for _ in range(max_col_excl)] for _ in range(max_row_excl)]
+
+    for start_row, start_col, row_data in blocks:
+        for i, row in enumerate(row_data):
+            if row is None or not isinstance(row, dict):
+                continue
+            r = start_row + i
+            if r < 0 or r >= max_row_excl:
+                continue
+            for j, cell in enumerate(row.get("values") or []):
+                if not isinstance(cell, dict):
+                    continue
+                c = start_col + j
+                if c < 0 or c >= max_col_excl:
+                    continue
+                text, st = _cell_display_and_style(cell, palette)
+                rows[r][c] = text
+                styles[r][c] = st
 
     return {"values": rows, "styles": styles}
+
+
+def range_anchor_top_left_a1(range_a1: str) -> str:
+    """Return ``Tab!A1`` so values.update can expand to fit any ``values`` size."""
+    raw = (range_a1 or "Sheet1!A1").strip()
+    if "!" in raw:
+        tab, _ = raw.split("!", 1)
+        tab = tab.strip() or "Sheet1"
+        return f"{tab}!A1"
+    return f"{raw}!A1" if raw else "Sheet1!A1"
 
 
 def update_values(

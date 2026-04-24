@@ -13,7 +13,7 @@
   </div>
   <form method="get" class="flex items-center gap-2">
     <label class="text-sm text-slate-600">Range:</label>
-    <input type="text" name="range" value="{{ range_a1 }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm w-56" />
+    <input type="text" name="range" value="{{ range_a1 }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm w-80 max-w-full font-mono text-xs" title="Widen past ZZ if the sheet has more columns (e.g. Sheet1!A1:AAA500)" />
     <button class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Load</button>
   </form>
 </div>
@@ -58,12 +58,44 @@
   const CSRF_TOKEN = "{{ csrf_token }}";
   const LAYOUT_KEY = `leadpilot_sheet_layout:v2:${SPREADSHEET_ID}:${RANGE}`;
 
+  const MIN_ROWS = 10;
+  /** At least A–Z; grid grows when data or + Column adds past this. */
+  const MIN_COLS = 26;
+
+  function colLabel(index) {
+    let s = "";
+    let n = index;
+    while (n >= 0) {
+      s = String.fromCharCode(65 + (n % 26)) + s;
+      n = Math.floor(n / 26) - 1;
+    }
+    return s;
+  }
+
   let data = JSON.parse(document.getElementById("initial-data").textContent || "[]");
   let styles = JSON.parse(document.getElementById("initial-styles").textContent || "[]");
-  if (!Array.isArray(data) || data.length === 0) {
-    data = Array.from({length: 10}, () => Array.from({length: 6}, () => ""));
-    styles = Array.from({length: 10}, () => Array.from({length: 6}, () => ({})));
+  if (!Array.isArray(data)) data = [];
+  if (!Array.isArray(styles)) styles = [];
+
+  function padToMinimum() {
+    const currentCols = data.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
+    const cols = Math.max(currentCols, MIN_COLS);
+    data.forEach((r, i) => {
+      if (!Array.isArray(r)) data[i] = r = [];
+      while (r.length < cols) r.push("");
+    });
+    while (data.length < MIN_ROWS) {
+      data.push(Array.from({length: cols}, () => ""));
+    }
+    styles.forEach((sr, i) => {
+      if (!Array.isArray(sr)) styles[i] = sr = [];
+      while (sr.length < cols) sr.push({});
+    });
+    while (styles.length < data.length) {
+      styles.push(Array.from({length: cols}, () => ({})));
+    }
   }
+  padToMinimum();
 
   const grid = document.getElementById("sheet-grid");
   const status = document.getElementById("status");
@@ -290,7 +322,7 @@
     html += `<div class="sheet-row border-b border-slate-200" style="display:grid; grid-template-columns:${tpl};">`;
     html += `<div class="relative bg-slate-50 border-r border-slate-200"></div>`;
     for (let c = 0; c < maxCols; c++) {
-      html += `<div class="relative bg-slate-50 text-xs font-semibold text-slate-600 flex items-center justify-center border-r border-slate-200 select-none">${String.fromCharCode(65 + (c % 26))}`;
+      html += `<div class="relative bg-slate-50 text-xs font-semibold text-slate-600 flex items-center justify-center border-r border-slate-200 select-none">${colLabel(c)}`;
       html += `<span class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-purple-400/60" data-col-resize="${c}"></span>`;
       html += `</div>`;
     }
@@ -351,7 +383,7 @@
   }
 
   document.getElementById("add-row-btn").addEventListener("click", () => {
-    const cols = data[0]?.length || 6;
+    const cols = data.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0) || MIN_COLS;
     data.push(Array.from({length: cols}, () => ""));
     styles.push(Array.from({length: cols}, () => ({})));
     renderGrid();

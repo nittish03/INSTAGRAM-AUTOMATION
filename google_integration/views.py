@@ -182,7 +182,7 @@ def sheet_view(request, spreadsheet_id: str):
     if not account:
         return redirect("google_integration:connect")
 
-    range_a1 = request.GET.get("range") or "Sheet1!A1:Z200"
+    range_a1 = request.GET.get("range") or "Sheet1!A1:ZZ500"
     error = None
     meta = {}
     values: list[list[str]] = []
@@ -230,13 +230,14 @@ def sheet_save(request, spreadsheet_id: str):
     except json.JSONDecodeError:
         return JsonResponse({"ok": False, "error": "invalid json"}, status=400)
 
-    range_a1 = payload.get("range") or "Sheet1!A1"
+    range_a1 = payload.get("range") or "Sheet1!A1:ZZ500"
     values = payload.get("values") or []
     if not isinstance(values, list):
         return JsonResponse({"ok": False, "error": "values must be a 2D list"}, status=400)
 
     try:
-        result = services.update_values(account, spreadsheet_id, range_a1, values)
+        anchor = services.range_anchor_top_left_a1(range_a1)
+        result = services.update_values(account, spreadsheet_id, anchor, values)
     except Exception as exc:
         logger.exception("Failed to update values")
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)

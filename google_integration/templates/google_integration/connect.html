@@ -17,9 +17,9 @@
         {% endif %}
       </div>
       <div class="flex items-center gap-3">
-        <a href="{% url 'google_integration:sheets_list' %}"
+        <a href="{% url 'google_integration:connect' %}"
            class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
-          Open Sheets
+          Open Google Workspace
         </a>
         <form method="post" action="{% url 'google_integration:disconnect' %}">
           {% csrf_token %}

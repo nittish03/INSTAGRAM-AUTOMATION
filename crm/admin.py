@@ -19,8 +19,27 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
     list_display = ("full_name", "company_name_status", "linkedin_link", "current_status", "creation_date")
     list_filter = ("disqualified", "company_name")
     search_fields = ("first_name", "last_name", "company_name", "public_identifier")
-    readonly_fields = ("linkedin_url", "public_identifier", "creation_date", "update_date", "profile_summary", "deal_navigation")
+    readonly_fields = (
+        "linkedin_url",
+        "public_identifier",
+        "creation_date",
+        "update_date",
+        "sheet_exported_at",
+        "profile_summary",
+        "deal_navigation",
+    )
     icon = "users"
+    actions = ["export_to_google_sheet"]
+
+    @admin.action(description=_("Export selected leads to Google Sheet (only leads not exported yet)"))
+    def export_to_google_sheet(self, request, queryset):
+        from google_integration.sheet_sync import sync_lead_to_google_sheet
+
+        ok = 0
+        for lead in queryset.filter(sheet_exported_at__isnull=True):
+            if sync_lead_to_google_sheet(lead):
+                ok += 1
+        self.message_user(request, _("Exported %(n)d lead(s) to the configured Google Sheet.") % {"n": ok})
 
     # (Removed duplicate company_name_status)
 

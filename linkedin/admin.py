@@ -20,7 +20,13 @@ admin.site.unregister(Group)
 
 @admin.register(SiteConfig)
 class SiteConfigAdmin(ModelAdmin):
-    list_display = ("ai_model", "llm_api_key_status", "llm_api_base", "google_workspace_link")
+    list_display = (
+        "ai_model",
+        "llm_api_key_status",
+        "llm_api_base",
+        "google_sheet_sync_enabled",
+        "google_workspace_link",
+    )
     icon = "settings"
     
     def llm_api_key_status(self, obj):
@@ -30,12 +36,56 @@ class SiteConfigAdmin(ModelAdmin):
     def has_add_permission(self, request):
         return not SiteConfig.objects.exists()
 
+    fieldsets = (
+        (
+            _("LLM"),
+            {"fields": ("llm_api_key", "ai_model", "llm_api_base")},
+        ),
+        (
+            _("Google Sheet — auto export leads"),
+            {
+                "fields": (
+                    "google_sheet_sync_enabled",
+                    "google_sheet_id",
+                    "google_sheet_tab",
+                    "google_sheet_sync_user",
+                ),
+                "description": _(
+                    "Enable sync, paste the full Google Sheets link or the bare spreadsheet id, and ensure "
+                    "the chosen user (or a superuser) has connected Google under /admin/google/. "
+                    "New rows use columns A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."
+                ),
+            },
+        ),
+    )
+
     def google_workspace_link(self, obj):
+        from google_integration.models import GoogleAccount
+        from google_integration.sheet_sync import resolve_google_sync_user
+
+        user = resolve_google_sync_user(obj)
+        if user:
+            acct = GoogleAccount.objects.filter(user=user).first()
+            if acct and acct.is_connected:
+                label = acct.google_email or user.email or user.get_username()
+                return format_html(
+                    '<div class="inline-flex items-center gap-2">'
+                    '<span class="inline-flex items-center text-emerald-600 dark:text-emerald-400 font-semibold text-xs" title="{}">'
+                    '<span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300" aria-hidden="true">✓</span>'
+                    "</span>"
+                    '<a href="{}" target="_blank" rel="noopener noreferrer" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1 px-2 rounded text-[10px] uppercase transition-colors">'
+                    "{}"
+                    "</a>"
+                    "</div>",
+                    label,
+                    "/admin/google/",
+                    _("Open Google Workspace"),
+                )
         return format_html(
             '<a href="/admin/google/" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
             "{}"
             "</a>",
-            "Connect Google",
+            _("Connect Google"),
         )
     google_workspace_link.short_description = "Google Workspace"
 
