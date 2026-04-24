@@ -11,4 +11,7 @@ def load_project_dotenv() -> None:
         from dotenv import load_dotenv
     except ImportError:  # pragma: no cover
         return
-    load_dotenv(_ROOT / ".env")
+    # Ensure project-root `.env` is the single source of truth across machines.
+    # - override=True prevents stale shell exports from silently winning.
+    # - interpolate=False keeps raw values (safer for passwords with `$` etc.).
+    load_dotenv(_ROOT / ".env", override=True, interpolate=False)
