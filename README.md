@@ -82,3 +82,17 @@ python manage.py rundaemon
 3.  **Connection**: System dispatches connection requests. Once accepted, the deal transitions to `CONNECTED`.
 4.  **Messaging (Human-In-The-Loop)**: System generates a personalized message draft.
 5.  **Approval**: Operators review drafts in the dashboard and trigger dispatch.
+
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -V
+
+pip install --upgrade pip
+pip install -r requirements/local.txt
+playwright install chromium
+
+python3 manage.py migrate
+python3 manage.py setup_crm
+python3 manage.py createsuperuser
+python3 manage.py check

@@ -1,5 +1,8 @@
 """Push CRM leads to a configured Google Sheet (append rows).
 
+Sync only runs once a Lead reaches the CONNECTED state on at least one Deal —
+pre-connection rows would clutter the sheet without any actionable signal.
+
 Uses SiteConfig for spreadsheet id / tab and OAuth via GoogleAccount.
 """
 from __future__ import annotations
@@ -70,7 +73,10 @@ def _lead_position(lead: "Lead") -> str:
 
 
 def build_sheet_row(lead: "Lead") -> list[str]:
-    """One row aligned to A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."""
+    """One row aligned to A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action.
+
+    Sync only fires after a CONNECTED transition, so ``Connected`` is always TRUE here.
+    """
     name = f"{lead.first_name} {lead.last_name}".strip()
     if not name:
         name = lead.public_identifier or ""
@@ -79,7 +85,7 @@ def build_sheet_row(lead: "Lead") -> list[str]:
         lead.company_name or "",
         _lead_position(lead),
         lead.linkedin_url or "",
-        "FALSE",
+        "TRUE",
         "Cold",
         "",
     ]
@@ -88,8 +94,11 @@ def build_sheet_row(lead: "Lead") -> list[str]:
 def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
     """Append one lead row to the configured sheet. Returns True if a row was written.
 
-    Skips if sync is disabled, OAuth missing, or (unless force) lead was already exported.
+    Only exports leads that have a CONNECTED Deal (i.e. the prospect accepted
+    the connection). Also skips if sync is disabled, OAuth missing, or the lead
+    was already exported (unless ``force`` is set).
     """
+    from linkedin.enums import ProfileState
     from linkedin.models import SiteConfig
 
     cfg = SiteConfig.load()
@@ -106,6 +115,10 @@ def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
         return False
     # Avoid exporting url-only stubs; wait until Voyager enrichment (or other) sets profile_data.
     if lead.profile_data is None:
+        return False
+
+    has_connected_deal = lead.deal_set.filter(state=ProfileState.CONNECTED).exists()
+    if not has_connected_deal and not force:
         return False
 
     user = resolve_google_sync_user(cfg)

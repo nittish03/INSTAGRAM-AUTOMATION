@@ -31,15 +31,24 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
     icon = "users"
     actions = ["export_to_google_sheet"]
 
-    @admin.action(description=_("Export selected leads to Google Sheet (only leads not exported yet)"))
+    @admin.action(description=_("Export selected leads to Google Sheet (only CONNECTED, not exported yet)"))
     def export_to_google_sheet(self, request, queryset):
         from google_integration.sheet_sync import sync_lead_to_google_sheet
+        from linkedin.enums import ProfileState
+
+        eligible = queryset.filter(
+            sheet_exported_at__isnull=True,
+            deal__state=ProfileState.CONNECTED,
+        ).distinct()
 
         ok = 0
-        for lead in queryset.filter(sheet_exported_at__isnull=True):
+        for lead in eligible:
             if sync_lead_to_google_sheet(lead):
                 ok += 1
-        self.message_user(request, _("Exported %(n)d lead(s) to the configured Google Sheet.") % {"n": ok})
+        self.message_user(
+            request,
+            _("Exported %(n)d connected lead(s) to the configured Google Sheet.") % {"n": ok},
+        )
 
     # (Removed duplicate company_name_status)
 
