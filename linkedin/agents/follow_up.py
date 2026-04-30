@@ -45,7 +45,7 @@ class FollowUpDecision(BaseModel):
         if self.action == "mark_completed" and not self.reason:
             raise ValueError("reason is required when action='mark_completed'")
         if self.action in ("send_message", "wait") and self.follow_up_hours is None:
-            self.follow_up_hours = 72
+            self.follow_up_hours = 4
         return self
 
 

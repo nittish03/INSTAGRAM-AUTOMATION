@@ -54,7 +54,7 @@ REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 24,
+    "check_pending_recheck_after_hours": 1,
     "enrich_min_interval": 1,
     "min_action_interval": 120,
     "qualification_n_mc_samples": 100,
@@ -67,6 +67,7 @@ CAMPAIGN_CONFIG = {
     # Omit (default): one sleep for the full time until the next task (sleep timer).
     # Positive number: wake periodically at most that often (for faster shutdown / checks).
     # 0: short poll slices (~15s) instead of one long sleep.
+    "daemon_idle_sleep_cap_seconds": 30,
 }
 
 # ----------------------------------------------------------------------

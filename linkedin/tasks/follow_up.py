@@ -1,8 +1,14 @@
 # linkedin/tasks/follow_up.py
-"""Follow-up task — runs the agentic follow-up for one CONNECTED profile."""
+"""Follow-up task — runs the agentic follow-up for one CONNECTED profile.
+
+HITL mode: when the agent suggests ``send_message``, we store a draft in
+``ChatMessage`` and wait for admin approval. Admin action ``approve_and_send``
+creates the ``send_message`` task.
+"""
 from __future__ import annotations
 
 import logging
+import uuid
 
 from termcolor import colored
 
@@ -14,11 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 def handle_follow_up(task, session, qualifiers):
-    from linkedin.actions.message import send_raw_message
+    from chat.models import ChatMessage
+    from crm.models import Lead
+    from crm.models.deal import Deal
+    from django.contrib.contenttypes.models import ContentType
+
     from linkedin.agents.follow_up import run_follow_up_agent
     from linkedin.db.deals import set_profile_state
     from linkedin.enums import ProfileState
-    from linkedin.tasks.connect import enqueue_follow_up, _seconds_until_tomorrow
+    from linkedin.tasks.connect import _seconds_until_tomorrow, enqueue_follow_up
 
     payload = task.payload
     public_id = payload["public_id"]
@@ -29,9 +39,7 @@ def handle_follow_up(task, session, qualifiers):
         session.campaign, colored("\u25b6 follow_up", "green", attrs=["bold"]), public_id,
     )
 
-    # Rate limit check
     if not session.linkedin_profile.can_execute(ActionLog.ActionType.FOLLOW_UP):
-        from crm.models.deal import Deal
         deal = Deal.objects.filter(lead__public_identifier=public_id, campaign=session.campaign).first()
         enqueue_follow_up(campaign_id, public_id, delay_seconds=_seconds_until_tomorrow(), deal=deal)
         raise TaskSkipped("Daily follow-up limit reached")
@@ -47,44 +55,41 @@ def handle_follow_up(task, session, qualifiers):
     decision = run_follow_up_agent(session, public_id, profile)
 
     if decision.action == "send_message":
-        logger.info("[%s] follow_up drafted message for %s (awaiting approval)", session.campaign, public_id)
-        
-        from chat.models import ChatMessage
-        from django.contrib.contenttypes.models import ContentType
-        from crm.models import Lead
-        from crm.models.deal import Deal
-        import uuid
-        
         deal = Deal.objects.filter(lead__public_identifier=public_id, campaign=session.campaign).first()
-        if deal:
-            # Dedup guard: check for existing pending draft
-            has_draft = ChatMessage.objects.filter(
-                content_type=ContentType.objects.get_for_model(Lead),
+        if not deal:
+            logger.warning("follow_up: drafted message but no Deal — skipping draft for %s", public_id)
+            return
+
+        lead_ct = ContentType.objects.get_for_model(Lead)
+        has_draft = ChatMessage.objects.filter(
+            content_type=lead_ct,
+            object_id=deal.lead.pk,
+            is_draft=True,
+        ).exists()
+        if has_draft:
+            logger.info("[%s] follow_up: draft already exists for %s — skipping", session.campaign, public_id)
+        else:
+            ChatMessage.objects.create(
+                content_type=lead_ct,
                 object_id=deal.lead.pk,
-                is_draft=True
-            ).exists()
-            
-            if not has_draft:
-                # Standardize on Lead as the target object
-                ChatMessage.objects.create(
-                    content_type=ContentType.objects.get_for_model(Lead),
-                    object_id=deal.lead.pk,
-                    campaign=deal.campaign,
-                    content=decision.message,
-                    is_outgoing=True,
-                    is_draft=True,
-                    is_approved=False,
-                    owner=session.linkedin_profile.user,
-                    linkedin_urn=f"draft_{uuid.uuid4()}"
-                )
-                logger.info("Draft saved safely to Dashboard. Admin approval required.")
-            else:
-                logger.info("A draft message already exists for %s — skipping creation.", public_id)
+                campaign=deal.campaign,
+                content=decision.message,
+                is_outgoing=True,
+                is_draft=True,
+                is_approved=False,
+                owner=session.linkedin_profile.user,
+                linkedin_urn=f"draft_{uuid.uuid4()}",
+            )
+            logger.info(
+                "[%s] follow_up drafted message for %s (awaiting admin approval)",
+                session.campaign,
+                public_id,
+            )
 
     elif decision.action == "mark_completed":
         set_profile_state(session, public_id, ProfileState.COMPLETED.value, reason=decision.reason)
 
     elif decision.action == "wait":
-        from crm.models.deal import Deal
         deal = Deal.objects.filter(lead__public_identifier=public_id, campaign=session.campaign).first()
-        enqueue_follow_up(campaign_id, public_id, delay_seconds=decision.follow_up_hours * 3600, deal=deal)
+        wait_hours = max(0.5, float(decision.follow_up_hours or 4))
+        enqueue_follow_up(campaign_id, public_id, delay_seconds=wait_hours * 3600, deal=deal)
