@@ -11,12 +11,23 @@ def dashboard_callback(request, context):
     Returns structured data for the Unfold Dashboard.
     """
     from django.db.models import Count, Q
+    from django.urls import reverse
+    from chat.models import ChatMessage
     from crm.models.deal import Deal
-    
+
     from django.utils import timezone
     from linkedin.enums import ProfileState
     today = timezone.localdate()
     last_week = timezone.now() - timedelta(days=7)
+
+    drafts_awaiting = ChatMessage.objects.filter(is_draft=True, is_approved=False).count()
+    try:
+        drafts_url = (
+            reverse("admin:chat_chatmessage_changelist")
+            + "?is_draft__exact=1&is_approved__exact=0"
+        )
+    except Exception:
+        drafts_url = "/admin/chat/chatmessage/?is_draft__exact=1&is_approved__exact=0"
     
     # [LOW-04] Three separate queries: Lead count, Deal aggregates, ActionLog aggregates.
     # These are distinct tables with no join relationship; batching isn't possible.
@@ -80,6 +91,13 @@ def dashboard_callback(request, context):
                 "color": "success" if acceptance_rate > 30 else "warning",
             },
             {
+                "title": "Drafts awaiting approval",
+                "metric": str(drafts_awaiting),
+                "icon": "mark_email_unread",
+                "color": "warning" if drafts_awaiting else "success",
+                "url": drafts_url,
+            },
+            {
                 "title": "Actions Today",
                 "metric": str(actions_today),
                 "icon": "activity",
@@ -92,6 +110,8 @@ def dashboard_callback(request, context):
                 "color": "primary",
             },
         ],
+        "drafts_awaiting": drafts_awaiting,
+        "drafts_url": drafts_url,
         "profile_status": "🟢 CONNECTED" if (active_profile and active_profile.cookie_data) else "🔴 DISCONNECTED",
     })
 
