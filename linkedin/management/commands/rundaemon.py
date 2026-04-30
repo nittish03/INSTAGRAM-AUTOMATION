@@ -85,10 +85,10 @@ class Command(BaseCommand):
 
     def _create_session(self):
         from linkedin.browser.registry import get_first_active_profile, get_or_create_session
-        from linkedin.conf import get_llm_config
+        from linkedin.conf import get_llm_site_config
 
-        llm_api_key, _, _ = get_llm_config()
-        if not llm_api_key:
+        cfg = get_llm_site_config()
+        if not cfg.llm_api_key:
             logger.error("LLM_API_KEY is required. Set it in Site Configuration (Django Admin).")
             sys.exit(1)
 

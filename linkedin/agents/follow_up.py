@@ -10,11 +10,10 @@ import logging
 from typing import Literal
 
 import jinja2
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, model_validator
 
-from linkedin.conf import PROMPTS_DIR, get_llm_config
+from linkedin.conf import PROMPTS_DIR, get_llm_site_config
+from linkedin.llm import build_chat_llm
 
 logger = logging.getLogger(__name__)
 
@@ -99,22 +98,8 @@ def run_follow_up_agent(
     conversation_text = _format_conversation(messages)
     system_prompt = _render_system_prompt(session, profile, conversation_text)
 
-    llm_api_key, ai_model, llm_api_base = get_llm_config()
-    if "gemini" in ai_model.lower():
-        llm = ChatGoogleGenerativeAI(
-            model=ai_model,
-            google_api_key=llm_api_key,
-            temperature=0.7,
-            timeout=60,
-        )
-    else:
-        llm = ChatOpenAI(
-            model=ai_model,
-            temperature=0.7,
-            api_key=llm_api_key,
-            base_url=llm_api_base,
-            timeout=60,
-        )
+    site_config = get_llm_site_config()
+    llm = build_chat_llm(site_config, temperature=0.7, timeout=60)
     structured_llm = llm.with_structured_output(FollowUpDecision)
     decision = structured_llm.invoke(system_prompt)
     if decision is None:

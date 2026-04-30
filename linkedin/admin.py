@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from django.contrib import admin
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.contrib import messages
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.http import HttpResponseRedirect, HttpResponse
@@ -39,7 +40,17 @@ class SiteConfigAdmin(ModelAdmin):
     fieldsets = (
         (
             _("LLM"),
-            {"fields": ("llm_api_key", "ai_model", "llm_api_base")},
+            {
+                "fields": (
+                    "llm_api_key",
+                    "llm_provider",
+                    "ai_model",
+                    "llm_api_base",
+                    "azure_deployment",
+                    "azure_api_version",
+                    "llm_connection_test",
+                )
+            },
         ),
         (
             _("Google Sheet — auto export leads"),
@@ -58,6 +69,41 @@ class SiteConfigAdmin(ModelAdmin):
             },
         ),
     )
+
+    readonly_fields = ("llm_connection_test",)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "test-llm/<int:config_id>/",
+                self.admin_site.admin_view(self.test_llm_connection_view),
+                name="linkedin_siteconfig_test_llm",
+            ),
+        ]
+        return custom_urls + urls
+
+    def llm_connection_test(self, obj):
+        if not obj or not obj.pk:
+            return _("Save this configuration first, then test connection.")
+        return format_html(
+            '<a href="{}" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
+            "{}"
+            "</a>",
+            reverse("admin:linkedin_siteconfig_test_llm", args=[obj.pk]),
+            _("Test LLM Connection"),
+        )
+    llm_connection_test.short_description = "LLM Connectivity"
+
+    def test_llm_connection_view(self, request, config_id: int):
+        from linkedin.llm import test_llm_connection
+
+        config = get_object_or_404(SiteConfig, pk=config_id)
+        ok, detail = test_llm_connection(config)
+        level = messages.SUCCESS if ok else messages.ERROR
+        prefix = _("LLM connection successful.") if ok else _("LLM connection failed.")
+        self.message_user(request, f"{prefix} {detail}", level=level)
+        return HttpResponseRedirect(reverse("admin:linkedin_siteconfig_change", args=[config.pk]))
 
     def google_workspace_link(self, obj):
         from google_integration.models import GoogleAccount
