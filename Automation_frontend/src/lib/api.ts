@@ -125,6 +125,18 @@ export const api = {
   me: () => request<{ user: User }>("/api/auth/me"),
   dashboard: () => request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>("/api/dashboard"),
   campaigns: () => request<{ items: Campaign[] }>("/api/campaigns"),
+  createCampaign: (payload: {
+    name: string;
+    isFreemium?: boolean;
+    actionFraction?: number;
+    bookingLink?: string;
+    objective?: string;
+    userIds?: number[];
+  }) =>
+    request<{ item: Campaign }>("/api/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   leads: (params: URLSearchParams) => request<{ items: Lead[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/leads?${params.toString()}`),
   deals: (params: URLSearchParams) => request<{ items: Deal[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/deals?${params.toString()}`),
   tasks: (params: URLSearchParams) => request<{ items: TaskItem[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/tasks?${params.toString()}`),

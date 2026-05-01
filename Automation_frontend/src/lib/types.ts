@@ -29,7 +29,7 @@ export type Campaign = {
   actionFraction: number;
   bookingLink: string;
   objective: string;
-  users: string[];
+  users: { id: number; username: string }[];
 };
 
 export type Lead = {
@@ -95,6 +95,7 @@ export type ActionLog = {
 
 export type LinkedInProfileItem = {
   id: number;
+  userId: number;
   djangoUser: string;
   djangoEmail: string;
   linkedinUsername: string;

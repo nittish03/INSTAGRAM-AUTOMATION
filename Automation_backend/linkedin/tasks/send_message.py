@@ -42,6 +42,11 @@ def handle_send_message(task, session, qualifiers=None):
 
     profile = profile_dict.get("profile") or profile_dict
 
+    # Send path requires an active Playwright page; initialize browser explicitly.
+    session.ensure_browser()
+    if not session.page:
+        raise RuntimeError("Cannot send message: browser page is unavailable.")
+
     logger.info("[%s] Dispatching approved message for %s...", session.campaign, public_id)
     sent = send_raw_message(session, profile, msg.content)
     

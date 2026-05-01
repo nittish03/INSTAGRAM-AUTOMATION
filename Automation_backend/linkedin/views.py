@@ -257,22 +257,73 @@ def _parse_int(value: str | None, default: int, minimum: int, maximum: int):
     return max(minimum, min(parsed, maximum))
 
 
+def _campaign_payload(campaign: Campaign) -> dict:
+    """Serialize a Campaign with linked Django user accounts (id + username)."""
+    return {
+        "id": campaign.id,
+        "name": campaign.name,
+        "isFreemium": campaign.is_freemium,
+        "actionFraction": campaign.action_fraction,
+        "bookingLink": campaign.booking_link,
+        "objective": campaign.campaign_objective,
+        "users": [{"id": u.id, "username": u.username} for u in campaign.users.all()],
+    }
+
+
 @login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def api_campaigns(request):
-    qs = Campaign.objects.all().order_by("name")
-    data = [
-        {
-            "id": c.id,
-            "name": c.name,
-            "isFreemium": c.is_freemium,
-            "actionFraction": c.action_fraction,
-            "bookingLink": c.booking_link,
-            "objective": c.campaign_objective,
-            "users": [u.username for u in c.users.all()],
-        }
-        for c in qs
-    ]
+    if request.method == "POST":
+        import json as _json
+        from django.contrib.auth.models import User
+
+        try:
+            payload = _json.loads(request.body or b"{}")
+        except _json.JSONDecodeError:
+            return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"ok": False, "error": "name is required"}, status=400)
+        if Campaign.objects.filter(name__iexact=name).exists():
+            return JsonResponse({"ok": False, "error": "Campaign with this name already exists"}, status=400)
+
+        try:
+            action_fraction = float(payload.get("actionFraction", 0.2))
+        except (TypeError, ValueError):
+            return JsonResponse({"ok": False, "error": "actionFraction must be a number"}, status=400)
+        if action_fraction <= 0 or action_fraction > 1:
+            return JsonResponse({"ok": False, "error": "actionFraction must be in (0, 1]"}, status=400)
+
+        user_ids_raw = payload.get("userIds") or []
+        if not isinstance(user_ids_raw, list):
+            return JsonResponse({"ok": False, "error": "userIds must be an array"}, status=400)
+        try:
+            user_ids = [int(uid) for uid in user_ids_raw]
+        except (TypeError, ValueError):
+            return JsonResponse({"ok": False, "error": "userIds must be integers"}, status=400)
+
+        if user_ids:
+            users_qs = User.objects.filter(pk__in=user_ids)
+            if users_qs.count() != len(set(user_ids)):
+                return JsonResponse({"ok": False, "error": "One or more userIds were not found"}, status=400)
+        else:
+            users_qs = User.objects.filter(pk=request.user.pk)
+
+        campaign = Campaign.objects.create(
+            name=name,
+            is_freemium=bool(payload.get("isFreemium", False)),
+            action_fraction=action_fraction,
+            booking_link=(payload.get("bookingLink") or "").strip(),
+            campaign_objective=(payload.get("objective") or "").strip(),
+        )
+        for u in users_qs:
+            campaign.users.add(u)
+
+        return JsonResponse({"ok": True, "item": _campaign_payload(campaign)})
+
+    qs = Campaign.objects.all().prefetch_related("users").order_by("name")
+    data = [_campaign_payload(c) for c in qs]
     return JsonResponse({"ok": True, "items": data})
 
 
@@ -475,6 +526,7 @@ def api_linkedin_profiles(request):
     items = [
         {
             "id": p.id,
+            "userId": p.user_id,
             "djangoUser": p.user.username,
             "djangoEmail": p.user.email,
             "linkedinUsername": p.linkedin_username,

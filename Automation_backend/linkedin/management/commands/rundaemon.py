@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 import sys
 
 from django.core.management import call_command
@@ -21,10 +22,29 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self._configure_logging()
         self._print_version()
+        self._ensure_playwright_browsers()
         self._ensure_db()
         self._ensure_onboarded(options["onboard"])
         session = self._create_session()
-        self._ensure_newsletter(session)
+
+        from linkedin.exceptions import AuthenticationError
+
+        try:
+            self._ensure_newsletter(session)
+        except AuthenticationError as exc:
+            logger.error("LinkedIn authentication failed: %s", exc)
+            logger.error(
+                "Tip: log in manually once on this machine, complete any "
+                "security checkpoint, then re-run the daemon."
+            )
+            session.close()
+            sys.exit(1)
+        except RuntimeError as exc:
+            # goto_page surfaces RuntimeError for unexpected URLs; treat unknown
+            # navigation outcomes as auth failures rather than crashes.
+            logger.error("Browser navigation failed during startup: %s", exc)
+            session.close()
+            sys.exit(1)
 
         import signal
         def graceful_exit(sig, frame):
@@ -55,6 +75,27 @@ class Command(BaseCommand):
             "httpcore", "fastembed", "huggingface_hub", "filelock", "asyncio",
         ):
             logging.getLogger(name).setLevel(logging.WARNING)
+
+    def _ensure_playwright_browsers(self):
+        """Fail fast when Playwright browser binaries are missing."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            logger.error("Playwright import failed: %s", exc)
+            logger.error("Install dependencies first: python -m pip install -r requirements/local.txt")
+            sys.exit(1)
+
+        try:
+            with sync_playwright() as p:
+                chromium_path = Path(p.chromium.executable_path)
+            if not chromium_path.exists():
+                logger.error("Playwright Chromium binary not found: %s", chromium_path)
+                logger.error("Run this once in backend venv: playwright install chromium")
+                sys.exit(1)
+        except Exception as exc:
+            logger.error("Playwright is not ready: %s", exc)
+            logger.error("Run this once in backend venv: playwright install chromium")
+            sys.exit(1)
 
     def _ensure_db(self):
         call_command("migrate", "--no-input")
@@ -102,7 +143,11 @@ class Command(BaseCommand):
         session = get_or_create_session(profile)
 
         if not session.campaigns:
-            logger.error("No campaigns found for this user.")
+            logger.error(
+                "No campaigns linked to %s. Open the frontend Campaigns page, "
+                "create or assign a campaign to this account, and re-run.",
+                session.django_user.username,
+            )
             sys.exit(1)
         campaign = next(
             (c for c in session.campaigns if not c.is_freemium), None,

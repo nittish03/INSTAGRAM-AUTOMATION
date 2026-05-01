@@ -19,6 +19,9 @@ SELECTORS = {
 
 
 def _go_to_profile(session: "AccountSession", url: str, public_identifier: str):
+    session.ensure_browser()
+    if not session.page:
+        raise RuntimeError("Browser page is unavailable after ensure_browser().")
     if f"/in/{public_identifier}" in session.page.url:
         return
     logger.debug("Direct navigation → %s", public_identifier)

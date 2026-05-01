@@ -1,5 +1,6 @@
 # linkedin/browser/login.py
 import logging
+import time
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -13,6 +14,14 @@ from linkedin.conf import (
     BROWSER_SLOW_MO,
 )
 from linkedin.exceptions import AuthenticationError
+
+CHALLENGE_URL_FRAGMENTS = (
+    "/checkpoint/challenge",
+    "/checkpoint/lg/login-submit",
+    "/checkpoint/rm/",
+    "/uas/captcha",
+)
+MANUAL_CHALLENGE_TIMEOUT_S = 5 * 60  # 5 minutes for the user to solve the challenge
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +77,52 @@ def _raise_auth_diagnostic(page, reason: str):
     raise AuthenticationError(f"{reason}. URL={page.url!r} TITLE={title!r}")
 
 
+def _is_challenge_url(url: str) -> bool:
+    return any(frag in url for frag in CHALLENGE_URL_FRAGMENTS)
+
+
+def _wait_for_feed_with_manual_challenge(page, timeout_s: int = MANUAL_CHALLENGE_TIMEOUT_S):
+    """Poll the URL; if a checkpoint shows up, ask the user to solve it manually.
+
+    Returns when URL contains '/feed'. Raises AuthenticationError on timeout.
+    """
+    deadline = time.time() + timeout_s
+    notified = False
+    while time.time() < deadline:
+        try:
+            current = page.url
+        except Exception:
+            current = ""
+
+        if "/feed" in current:
+            return
+
+        if _is_challenge_url(current) and not notified:
+            logger.warning(
+                colored(
+                    "LinkedIn security checkpoint detected. Please complete the "
+                    "verification (captcha / 2FA / email code) in the open browser "
+                    "window. Waiting up to %d minutes...",
+                    "yellow",
+                    attrs=["bold"],
+                ),
+                timeout_s // 60,
+            )
+            notified = True
+
+        try:
+            page.wait_for_timeout(2000)
+        except Exception:
+            time.sleep(2)
+
+    raise AuthenticationError(
+        "Login did not reach /feed within "
+        f"{timeout_s}s. Last URL: {page.url!r}. "
+        "If LinkedIn showed a security challenge, complete it manually next time "
+        "or use a fresh, verified account."
+    )
+
+
 def playwright_login(session):
     page = session.page
     lp = session.linkedin_profile
@@ -96,13 +151,22 @@ def playwright_login(session):
     if not submit_button:
         _raise_auth_diagnostic(page, "LinkedIn submit button not found")
 
-    goto_page(
-        session,
-        action=lambda: submit_button.click(),
-        expected_url_pattern="/feed",
-        timeout=BROWSER_LOGIN_TIMEOUT_MS,
-        error_message="Login failed – no redirect to feed",
-    )
+    submit_button.click()
+
+    # Give LinkedIn a brief moment to settle. If it sends us to a challenge URL,
+    # wait for the user to solve it manually instead of crashing the daemon.
+    try:
+        page.wait_for_url(
+            lambda url: "/feed" in url or _is_challenge_url(url),
+            timeout=BROWSER_LOGIN_TIMEOUT_MS,
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+    if "/feed" not in page.url:
+        _wait_for_feed_with_manual_challenge(page)
+
+    logger.debug("Login navigation complete: %s", page.url)
 
 
 def launch_browser(storage_state=None):

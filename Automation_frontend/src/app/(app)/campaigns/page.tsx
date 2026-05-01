@@ -4,36 +4,136 @@ import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeleton";
-import type { Campaign } from "@/lib/types";
+import type { Campaign, LinkedInProfileItem } from "@/lib/types";
+
+type FormState = {
+  name: string;
+  isFreemium: boolean;
+  actionFraction: string;
+  bookingLink: string;
+  objective: string;
+  userIds: number[];
+};
+
+const blankForm: FormState = {
+  name: "",
+  isFreemium: false,
+  actionFraction: "0.2",
+  bookingLink: "",
+  objective: "",
+  userIds: [],
+};
 
 export default function CampaignsPage() {
   const [items, setItems] = useState<Campaign[]>([]);
+  const [profiles, setProfiles] = useState<LinkedInProfileItem[]>([]);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState<FormState>(blankForm);
+
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [campaignsRes, profilesRes] = await Promise.all([
+        api.campaigns(),
+        api.linkedinProfiles(),
+      ]);
+      setItems(campaignsRes.items);
+      setProfiles(profilesRes.items);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load campaigns");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const data = await api.campaigns();
-        setItems(data.items);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load campaigns");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void loadAll();
   }, []);
+
+  function openModal() {
+    setForm(blankForm);
+    setError("");
+    setInfo("");
+    setShowModal(true);
+  }
+
+  function closeModal() {
+    if (creating) return;
+    setShowModal(false);
+  }
+
+  function toggleUser(userId: number) {
+    setForm((f) =>
+      f.userIds.includes(userId)
+        ? { ...f, userIds: f.userIds.filter((id) => id !== userId) }
+        : { ...f, userIds: [...f.userIds, userId] },
+    );
+  }
+
+  async function createCampaign() {
+    if (!form.name.trim()) {
+      setError("Campaign name is required.");
+      return;
+    }
+    if (form.userIds.length === 0) {
+      setError("Select at least one account to link this campaign to.");
+      return;
+    }
+    setCreating(true);
+    setError("");
+    setInfo("");
+    try {
+      await api.createCampaign({
+        name: form.name.trim(),
+        isFreemium: form.isFreemium,
+        actionFraction: Number(form.actionFraction || 0.2),
+        bookingLink: form.bookingLink.trim(),
+        objective: form.objective.trim(),
+        userIds: form.userIds,
+      });
+      setInfo("Campaign created successfully.");
+      setShowModal(false);
+      setForm(blankForm);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create campaign");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
-      <section className="card p-5">
-        <h2 className="text-2xl font-semibold">Campaigns</h2>
-        <p className="mt-1 text-sm text-slate-400">Configured campaigns from your Django backend.</p>
+      <section className="card flex items-center justify-between p-5">
+        <div>
+          <h2 className="text-2xl font-semibold">Campaigns</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Each campaign runs against the LinkedIn accounts it is linked to.
+          </p>
+        </div>
+        <button
+          aria-label="Add campaign"
+          className="btn-primary flex h-10 w-10 items-center justify-center px-0! text-2xl"
+          onClick={openModal}
+        >
+          +
+        </button>
       </section>
-      {error ? <p className="text-sm text-rose-400">{error}</p> : null}
+
+      {error && !showModal ? <p className="text-sm text-rose-400">{error}</p> : null}
+      {info ? <p className="text-sm text-emerald-400">{info}</p> : null}
+
       {loading ? (
         <TableSkeleton rows={6} cols={5} />
+      ) : items.length === 0 ? (
+        <section className="card p-8 text-center text-sm text-slate-400">
+          No campaigns yet. Click the <strong>+</strong> button above to create one and link
+          it to a LinkedIn account.
+        </section>
       ) : (
         <section className="card overflow-hidden">
           <table className="w-full">
@@ -43,7 +143,7 @@ export default function CampaignsPage() {
                 <th className="th">Type</th>
                 <th className="th">Action Fraction</th>
                 <th className="th">Booking Link</th>
-                <th className="th">Users</th>
+                <th className="th">Linked accounts</th>
               </tr>
             </thead>
             <tbody>
@@ -54,20 +154,190 @@ export default function CampaignsPage() {
                   <td className="td">{c.actionFraction}</td>
                   <td className="td">
                     {c.bookingLink ? (
-                      <a href={c.bookingLink} target="_blank" className="text-violet-300 hover:underline" rel="noreferrer">
+                      <a
+                        href={c.bookingLink}
+                        target="_blank"
+                        className="text-violet-300 hover:underline"
+                        rel="noreferrer"
+                      >
                         Open
                       </a>
                     ) : (
                       "-"
                     )}
                   </td>
-                  <td className="td">{c.users.join(", ") || "-"}</td>
+                  <td className="td">
+                    {c.users.length === 0 ? (
+                      <span className="text-rose-300">no account linked</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {c.users.map((u) => (
+                          <span
+                            key={u.id}
+                            className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-200"
+                          >
+                            {u.username}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </section>
       )}
+
+      {showModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+          onClick={closeModal}
+        >
+          <div
+            className="card w-full max-w-2xl space-y-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Add new campaign</h3>
+              <button
+                className="text-slate-400 hover:text-slate-200"
+                onClick={closeModal}
+                disabled={creating}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {error ? <p className="text-sm text-rose-400">{error}</p> : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm text-slate-300">Name</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Q3 outbound"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm text-slate-300">
+                  Action fraction (0-1)
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0.01}
+                  max={1}
+                  step={0.01}
+                  value={form.actionFraction}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, actionFraction: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div className="flex items-end">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={form.isFreemium}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, isFreemium: e.target.checked }))
+                    }
+                  />
+                  Freemium campaign
+                </label>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm text-slate-300">
+                  Booking link (optional)
+                </label>
+                <input
+                  className="input"
+                  placeholder="https://cal.com/..."
+                  value={form.bookingLink}
+                  onChange={(e) => setForm((f) => ({ ...f, bookingLink: e.target.value }))}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm text-slate-300">
+                  Objective (optional)
+                </label>
+                <input
+                  className="input"
+                  placeholder="e.g. Book sales calls"
+                  value={form.objective}
+                  onChange={(e) => setForm((f) => ({ ...f, objective: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm text-slate-300">
+                Link to LinkedIn account(s)
+              </label>
+              {profiles.length === 0 ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                  No LinkedIn profiles found. Add a profile first.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {profiles.map((p) => {
+                    const checked = form.userIds.includes(p.userId);
+                    return (
+                      <label
+                        key={p.id}
+                        className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
+                          checked
+                            ? "border-violet-400/60 bg-violet-500/10"
+                            : "border-slate-700 hover:border-slate-500"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => toggleUser(p.userId)}
+                        />
+                        <div>
+                          <div className="font-medium text-slate-100">{p.djangoUser}</div>
+                          <div className="text-xs text-slate-400">
+                            {p.linkedinUsername || p.djangoEmail}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                className="btn-secondary"
+                onClick={closeModal}
+                disabled={creating}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={createCampaign}
+                disabled={creating || !form.name.trim() || form.userIds.length === 0}
+              >
+                {creating ? "Creating..." : "Create campaign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
