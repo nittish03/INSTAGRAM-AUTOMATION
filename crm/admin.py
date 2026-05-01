@@ -19,8 +19,36 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
     list_display = ("full_name", "company_name_status", "linkedin_link", "current_status", "creation_date")
     list_filter = ("disqualified", "company_name")
     search_fields = ("first_name", "last_name", "company_name", "public_identifier")
-    readonly_fields = ("linkedin_url", "public_identifier", "creation_date", "update_date", "profile_summary", "deal_navigation")
+    readonly_fields = (
+        "linkedin_url",
+        "public_identifier",
+        "creation_date",
+        "update_date",
+        "sheet_exported_at",
+        "profile_summary",
+        "deal_navigation",
+    )
     icon = "users"
+    actions = ["export_to_google_sheet"]
+
+    @admin.action(description=_("Export selected leads to Google Sheet (only CONNECTED, not exported yet)"))
+    def export_to_google_sheet(self, request, queryset):
+        from google_integration.sheet_sync import sync_lead_to_google_sheet
+        from linkedin.enums import ProfileState
+
+        eligible = queryset.filter(
+            sheet_exported_at__isnull=True,
+            deal__state=ProfileState.CONNECTED,
+        ).distinct()
+
+        ok = 0
+        for lead in eligible:
+            if sync_lead_to_google_sheet(lead):
+                ok += 1
+        self.message_user(
+            request,
+            _("Exported %(n)d connected lead(s) to the configured Google Sheet.") % {"n": ok},
+        )
 
     # (Removed duplicate company_name_status)
 
@@ -42,7 +70,7 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
         deals = list(obj.deal_set.all())
         deal = deals[0] if deals else None
         if not deal:
-            return format_html('<span class="text-gray-400">UNQUALIFIED</span>')
+            return format_html('<span class="text-gray-400">{}</span>', "UNQUALIFIED")
         
         from linkedin.enums import ProfileState
         class_map = {

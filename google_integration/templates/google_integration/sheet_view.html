@@ -1,0 +1,425 @@
+{% extends "google_integration/base.html" %}
+
+{% block title %}{{ title|default:"Sheet" }} · EshLead{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between gap-4 flex-wrap">
+  <div>
+    <a href="{% url 'google_integration:sheets_list' %}" class="text-sm text-purple-700 hover:underline">← All sheets</a>
+    <h1 class="text-2xl font-semibold text-slate-900 mt-1">{{ title|default:"(untitled)" }}</h1>
+    <p class="text-slate-500 text-sm">
+      {% if spreadsheet_url %}<a href="{{ spreadsheet_url }}" target="_blank" class="hover:underline">Open in Google Sheets ↗</a>{% endif %}
+    </p>
+  </div>
+  <form method="get" class="flex items-center gap-2">
+    <label class="text-sm text-slate-600">Range:</label>
+    <input type="text" name="range" value="{{ range_a1 }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm w-80 max-w-full font-mono text-xs" title="Widen past ZZ if the sheet has more columns (e.g. Sheet1!A1:AAA500)" />
+    <button class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Load</button>
+  </form>
+</div>
+
+{% if error %}
+  <div class="mt-6 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
+{% endif %}
+
+{% if sheet_tabs %}
+<div class="mt-4 text-xs text-slate-500">
+  Tabs: {% for t in sheet_tabs %}<span class="inline-block bg-slate-100 rounded px-2 py-0.5 mr-1">{{ t }}</span>{% endfor %}
+</div>
+{% endif %}
+
+<div class="mt-4 bg-white border border-slate-200 rounded-2xl p-4">
+  <div class="flex items-center gap-2 mb-3 flex-wrap">
+    <button id="add-row-btn" class="text-sm bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md">+ Row</button>
+    <button id="add-col-btn" class="text-sm bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md">+ Column</button>
+    <label class="ml-2 flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+      <input type="checkbox" id="autosave-toggle" class="rounded border-slate-300" checked />
+      Auto-save
+    </label>
+    <div class="ml-auto flex items-center gap-2">
+      <span id="status" class="text-xs text-slate-500"></span>
+      <button id="save-btn" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+        Save changes
+      </button>
+    </div>
+  </div>
+
+  <div class="overflow-auto max-h-[70vh] border border-slate-100 rounded-lg">
+    <div id="sheet-grid" class="text-sm min-w-max"></div>
+  </div>
+</div>
+
+<script id="initial-data" type="application/json">{{ values_json|safe }}</script>
+<script id="initial-styles" type="application/json">{{ styles_json|safe }}</script>
+<script>
+  const SPREADSHEET_ID = "{{ spreadsheet_id }}";
+  const RANGE = "{{ range_a1 }}";
+  const SAVE_URL = "{% url 'google_integration:sheet_save' spreadsheet_id=spreadsheet_id %}";
+  const CSRF_TOKEN = "{{ csrf_token }}";
+  const LAYOUT_KEY = `leadpilot_sheet_layout:v2:${SPREADSHEET_ID}:${RANGE}`;
+
+  const MIN_ROWS = 10;
+  /** At least A–Z; grid grows when data or + Column adds past this. */
+  const MIN_COLS = 26;
+
+  function colLabel(index) {
+    let s = "";
+    let n = index;
+    while (n >= 0) {
+      s = String.fromCharCode(65 + (n % 26)) + s;
+      n = Math.floor(n / 26) - 1;
+    }
+    return s;
+  }
+
+  let data = JSON.parse(document.getElementById("initial-data").textContent || "[]");
+  let styles = JSON.parse(document.getElementById("initial-styles").textContent || "[]");
+  if (!Array.isArray(data)) data = [];
+  if (!Array.isArray(styles)) styles = [];
+
+  function padToMinimum() {
+    const currentCols = data.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
+    const cols = Math.max(currentCols, MIN_COLS);
+    data.forEach((r, i) => {
+      if (!Array.isArray(r)) data[i] = r = [];
+      while (r.length < cols) r.push("");
+    });
+    while (data.length < MIN_ROWS) {
+      data.push(Array.from({length: cols}, () => ""));
+    }
+    styles.forEach((sr, i) => {
+      if (!Array.isArray(sr)) styles[i] = sr = [];
+      while (sr.length < cols) sr.push({});
+    });
+    while (styles.length < data.length) {
+      styles.push(Array.from({length: cols}, () => ({})));
+    }
+  }
+  padToMinimum();
+
+  const grid = document.getElementById("sheet-grid");
+  const status = document.getElementById("status");
+  const autosaveToggle = document.getElementById("autosave-toggle");
+
+  const DEFAULT_COL = 140;
+  const DEFAULT_ROW = 28;
+  let colWidths = [];
+  let rowHeights = [];
+  let autosaveTimer = null;
+  let saveInFlight = false;
+  let pendingSave = false;
+  let dirty = false;
+
+  function sanitizeNumberArray(arr, fallback, min, max) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map((x) => {
+      const n = Number(x);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(max, Math.max(min, Math.round(n)));
+    });
+  }
+
+  function loadLayout() {
+    try {
+      const raw = localStorage.getItem(LAYOUT_KEY);
+      if (!raw) return;
+      const j = JSON.parse(raw);
+      if (Array.isArray(j.colWidths)) {
+        colWidths = sanitizeNumberArray(j.colWidths, DEFAULT_COL, 32, 2000);
+      }
+      if (Array.isArray(j.rowHeights)) {
+        rowHeights = sanitizeNumberArray(j.rowHeights, DEFAULT_ROW, 18, 800);
+      }
+    } catch (_) {}
+  }
+
+  function saveLayout() {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify({ colWidths, rowHeights }));
+    } catch (_) {}
+  }
+
+  function ensureStyleArrays() {
+    const rows = data.length;
+    const cols = data.reduce((m, r) => Math.max(m, r.length), 0);
+    while (styles.length < rows) styles.push([]);
+    styles.forEach((sr, ri) => {
+      while (sr.length < (data[ri]?.length || cols)) sr.push({});
+    });
+  }
+
+  function ensureDimensions() {
+    const maxCols = data.reduce((m, r) => Math.max(m, r.length), 0);
+    colWidths = sanitizeNumberArray(colWidths, DEFAULT_COL, 32, 2000);
+    while (colWidths.length < maxCols) colWidths.push(DEFAULT_COL);
+    colWidths.length = maxCols;
+    rowHeights = sanitizeNumberArray(rowHeights, DEFAULT_ROW, 18, 800);
+    while (rowHeights.length < data.length) rowHeights.push(DEFAULT_ROW);
+    rowHeights.length = data.length;
+    ensureStyleArrays();
+  }
+
+  loadLayout();
+
+  function rgbFromGoogle(colorObj) {
+    if (!colorObj || typeof colorObj !== "object") return "";
+    const has = (k) => typeof colorObj[k] === "number" && Number.isFinite(colorObj[k]);
+    if (!has("red") && !has("green") && !has("blue")) return "";
+    const r = Math.round((has("red") ? colorObj.red : 0) * 255);
+    const g = Math.round((has("green") ? colorObj.green : 0) * 255);
+    const b = Math.round((has("blue") ? colorObj.blue : 0) * 255);
+    if (has("alpha")) {
+      const a = Math.min(1, Math.max(0, colorObj.alpha));
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function luminanceFromRgbStr(rgb) {
+    const m =
+      /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(rgb || "");
+    if (!m) return null;
+    const rs = +m[1] / 255, gs = +m[2] / 255, bs = +m[3] / 255;
+    const lin = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    const R = lin(rs), G = lin(gs), B = lin(bs);
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  }
+
+  /** Avoid white-on-white: only apply Google fg when it contrasts with bg. */
+  function effectiveTextColor(fgRgb, bgRgb) {
+    if (!fgRgb) return "";
+    const Lf = luminanceFromRgbStr(fgRgb);
+    const Lb = luminanceFromRgbStr(bgRgb);
+    if (Lf === null || Lb === null) return fgRgb;
+    const contrast = (Math.max(Lf, Lb) + 0.05) / (Math.min(Lf, Lb) + 0.05);
+    if (contrast < 1.35) return "";
+    return fgRgb;
+  }
+
+  /**
+   * Light Google fills with no usable fg would inherit dark-theme sheet text (#e2e8f0)
+   * while inline background stays white → invisible. Force a dark default on light bgs.
+   */
+  function ensureReadableForeground(bgCss, fgCss) {
+    if (fgCss) return fgCss;
+    if (!bgCss) return "";
+    const Lb = luminanceFromRgbStr(bgCss);
+    if (Lb === null) return "";
+    if (Lb > 0.55) return "#0f172a";
+    return "";
+  }
+
+  function escapeHtml(text) {
+    return (text ?? "").toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function colTemplate() {
+    const gutterPx = 44;
+    /* Every track must be a valid <length>; a bare number invalidates the whole declaration. */
+    return [`${gutterPx}px`, ...colWidths.map((w) => `${w}px`)].join(" ");
+  }
+
+  function attachColResize(handle, colIndex) {
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = colWidths[colIndex];
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX;
+        colWidths[colIndex] = Math.max(48, startW + dx);
+        renderGrid();
+      };
+      const onUp = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        saveLayout();
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    });
+  }
+
+  function attachRowResize(handle, rowIndex) {
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startY = e.clientY;
+      const startH = rowHeights[rowIndex];
+      const onMove = (ev) => {
+        const dy = ev.clientY - startY;
+        rowHeights[rowIndex] = Math.max(22, startH + dy);
+        renderGrid();
+      };
+      const onUp = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        saveLayout();
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    });
+  }
+
+  async function saveSheet(manual) {
+    if (saveInFlight) {
+      pendingSave = true;
+      return;
+    }
+    saveInFlight = true;
+    if (manual) status.textContent = "Saving…";
+    else status.textContent = status.textContent || "Saving…";
+    try {
+      const res = await fetch(SAVE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": CSRF_TOKEN,
+        },
+        body: JSON.stringify({ range: RANGE, values: data }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        dirty = false;
+        const t = new Date().toLocaleTimeString();
+        status.textContent = `Saved ${t} → ${j.updatedRange || RANGE}`;
+      } else {
+        status.textContent = `Save error: ${j.error}`;
+      }
+    } catch (e) {
+      status.textContent = "Save error: " + e.message;
+    } finally {
+      saveInFlight = false;
+      if (pendingSave) {
+        pendingSave = false;
+        saveSheet(false);
+      }
+    }
+  }
+
+  function scheduleAutosave() {
+    if (!autosaveToggle.checked) return;
+    dirty = true;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    status.textContent = "Unsaved changes…";
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
+      saveSheet(false);
+    }, 1200);
+  }
+
+  function renderGrid() {
+    ensureDimensions();
+    const maxCols = data.reduce((m, r) => Math.max(m, r.length), 0);
+    const tpl = colTemplate();
+
+    let html = "";
+    /* header row: corner + column letters */
+    html += `<div class="sheet-row border-b border-slate-200" style="display:grid; grid-template-columns:${tpl};">`;
+    html += `<div class="relative bg-slate-50 border-r border-slate-200"></div>`;
+    for (let c = 0; c < maxCols; c++) {
+      html += `<div class="relative bg-slate-50 text-xs font-semibold text-slate-600 flex items-center justify-center border-r border-slate-200 select-none">${colLabel(c)}`;
+      html += `<span class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-purple-400/60" data-col-resize="${c}"></span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    data.forEach((row, r) => {
+      const h = rowHeights[r] || DEFAULT_ROW;
+      html += `<div class="sheet-row border-b border-slate-100" style="display:grid; grid-template-columns:${tpl}; min-height:${h}px;">`;
+      html += `<div class="relative bg-slate-50 text-xs text-slate-500 flex items-center justify-center border-r border-slate-200 select-none">${r + 1}`;
+      html += `<span class="absolute bottom-0 left-0 w-full h-1 cursor-row-resize hover:bg-purple-400/60" data-row-resize="${r}"></span>`;
+      html += `</div>`;
+      for (let c = 0; c < maxCols; c++) {
+        const cellStyle = (styles[r] && styles[r][c]) ? styles[r][c] : {};
+        const v = row[c] ?? "";
+        const bg = rgbFromGoogle(cellStyle.bg);
+        const fgRaw = rgbFromGoogle(cellStyle.text);
+        const fg = ensureReadableForeground(bg, effectiveTextColor(fgRaw, bg));
+        const alignMap = { LEFT: "left", CENTER: "center", RIGHT: "right" };
+        const align = alignMap[cellStyle.align] || "left";
+        const weight = cellStyle.bold ? "700" : "400";
+        const italic = cellStyle.italic ? "italic" : "normal";
+        const styleAttr = [
+          bg ? `background:${bg}` : "",
+          fg ? `color:${fg}` : "",
+          `text-align:${align}`,
+          `font-weight:${weight}`,
+          `font-style:${italic}`,
+        ].filter(Boolean).join(";");
+        const text = escapeHtml(v);
+        const href = cellStyle.hyperlink ? `data-link="${escapeHtml(cellStyle.hyperlink)}"` : "";
+        html += `<div class="border-r border-slate-100 p-0 min-h-0 flex"><input ${href} data-r="${r}" data-c="${c}" style="${styleAttr}" class="sheet-cell-input flex-1 min-w-0 w-full px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-inset focus:ring-purple-500" value="${text}" /></div>`;
+      }
+      html += `</div>`;
+    });
+
+    grid.innerHTML = html;
+
+    grid.querySelectorAll("input").forEach(inp => {
+      inp.addEventListener("input", e => {
+        const r = +e.target.dataset.r;
+        const c = +e.target.dataset.c;
+        if (!data[r]) data[r] = [];
+        data[r][c] = e.target.value;
+        scheduleAutosave();
+      });
+      inp.addEventListener("dblclick", e => {
+        const link = e.target.getAttribute("data-link");
+        if (link) window.open(link, "_blank", "noopener,noreferrer");
+      });
+    });
+
+    grid.querySelectorAll("[data-col-resize]").forEach(el => {
+      attachColResize(el, +el.getAttribute("data-col-resize"));
+    });
+    grid.querySelectorAll("[data-row-resize]").forEach(el => {
+      attachRowResize(el, +el.getAttribute("data-row-resize"));
+    });
+  }
+
+  document.getElementById("add-row-btn").addEventListener("click", () => {
+    const cols = data.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0) || MIN_COLS;
+    data.push(Array.from({length: cols}, () => ""));
+    styles.push(Array.from({length: cols}, () => ({})));
+    renderGrid();
+    scheduleAutosave();
+  });
+
+  document.getElementById("add-col-btn").addEventListener("click", () => {
+    data.forEach(r => r.push(""));
+    styles.forEach(r => r.push({}));
+    renderGrid();
+    scheduleAutosave();
+  });
+
+  document.getElementById("save-btn").addEventListener("click", async () => {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+    await saveSheet(true);
+  });
+
+  autosaveToggle.addEventListener("change", () => {
+    if (autosaveToggle.checked) scheduleAutosave();
+    else {
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+  });
+
+  window.addEventListener("beforeunload", (e) => {
+    if (dirty || autosaveTimer) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+
+  renderGrid();
+</script>
+{% endblock %}

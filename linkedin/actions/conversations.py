@@ -11,10 +11,14 @@ logger = logging.getLogger(__name__)
 
 def find_conversation_urn(api: PlaywrightLinkedinAPI, target_urn: str, mailbox_urn: str) -> str | None:
     """Find conversation URN for a target profile URN by scanning recent conversations."""
-    raw = fetch_conversations(api, mailbox_urn)
-    elements = raw.get("data", {}).get("messengerConversationsBySyncToken", {}).get("elements", [])
+    elements = fetch_conversations(api, mailbox_urn) or []
+    if not isinstance(elements, list):
+        logger.warning("Unexpected conversations payload type: %s", type(elements).__name__)
+        return None
 
     for conv in elements:
+        if not isinstance(conv, dict):
+            continue
         for p in conv.get("conversationParticipants", []):
             if p.get("hostIdentityUrn") == target_urn:
                 return conv.get("entityUrn")
@@ -87,12 +91,15 @@ def parse_message_element(msg: dict) -> dict | None:
     }
 
 
-def parse_messages(raw: dict) -> list[dict]:
-    """Parse raw messages response into a list of {sender, text, timestamp} dicts."""
-    elements = raw.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
+def parse_messages(elements: list[dict]) -> list[dict]:
+    """Parse message elements into a list of {sender, text, timestamp} dicts."""
+    if not isinstance(elements, list):
+        return []
 
     messages = []
     for msg in elements:
+        if not isinstance(msg, dict):
+            continue
         parsed = parse_message_element(msg)
         if not parsed:
             continue
@@ -128,8 +135,8 @@ def get_conversation(session, target_urn: str, mailbox_urn: str) -> list[dict] |
         logger.info("No conversation found for %s", target_urn)
         return None
 
-    raw = fetch_messages(api, conversation_urn)
-    return parse_messages(raw)
+    elements = fetch_messages(api, conversation_urn)
+    return parse_messages(elements)
 
 
 if __name__ == "__main__":

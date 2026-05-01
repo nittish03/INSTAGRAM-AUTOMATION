@@ -29,6 +29,11 @@ class Lead(models.Model):
 
     creation_date = models.DateTimeField(default=timezone.now)
     update_date = models.DateTimeField(auto_now=True)
+    sheet_exported_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set when this lead was appended to the configured Google Sheet (avoids duplicates).",
+    )
 
     history = HistoricalRecords(excluded_fields=["embedding", "profile_data"])
 

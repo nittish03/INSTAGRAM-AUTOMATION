@@ -35,6 +35,8 @@ def generate_search_keywords(
     llm_api_key, ai_model, llm_api_base = get_llm_config()
     if not llm_api_key:
         raise ValueError("LLM_API_KEY is not set in Site Configuration.")
+    if not ai_model:
+        raise ValueError("AI model is not set in Site Configuration.")
 
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
     template = env.get_template("search_keywords.j2")
@@ -46,7 +48,6 @@ def generate_search_keywords(
         exclude_keywords=exclude_keywords or [],
     )
 
-    ai_model = "gemini-3.1-pro-preview"  # Hard-coded override per user request
     if "gemini" in ai_model.lower():
         llm = ChatGoogleGenerativeAI(
             model=ai_model,

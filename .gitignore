@@ -10,8 +10,6 @@ venv/
 /.coverage
 /media/
 .cache/
-/db.sqlite3
-*.sqlite3
 tests/fixtures/pages/**/*.html
 leadpilot.log
 models/

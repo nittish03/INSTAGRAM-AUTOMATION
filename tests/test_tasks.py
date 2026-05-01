@@ -146,35 +146,33 @@ class TaskHardeningTest(TestCase):
             self.assertEqual(qualifiers[self.campaign.pk]._model, mock_model)
 
     def test_follow_up_dedup_guard(self):
-        # Verify follow_up doesn't create duplicate drafts
+        # Verify follow_up keeps a single pending draft until admin approval.
         from linkedin.tasks.follow_up import handle_follow_up
         from chat.models import ChatMessage
-        from django.contrib.contenttypes.models import ContentType
-        
+
         from linkedin.enums import ProfileState
         lead = Lead.objects.create(public_identifier="dedup_test")
-        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
-        
+        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+
         task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
             payload={"campaign_id": self.campaign.id, "public_id": "dedup_test"},
             scheduled_at=timezone.now()
         )
-        
+
         session = MagicMock()
         session.campaign = self.campaign
         session.linkedin_profile = self.profile
-        
-        # Mock the agent to suggest sending a message
+
         decision = MagicMock()
         decision.action = "send_message"
         decision.message = "Hello again"
-        
+
         with patch('linkedin.agents.follow_up.run_follow_up_agent', return_value=decision):
-            # 1. First run creates a draft
             handle_follow_up(task, session, {})
             self.assertEqual(ChatMessage.objects.filter(is_draft=True).count(), 1)
-            
-            # 2. Second run should NOT create another draft
+            self.assertEqual(ChatMessage.objects.filter(is_approved=True).count(), 0)
+
             handle_follow_up(task, session, {})
             self.assertEqual(ChatMessage.objects.filter(is_draft=True).count(), 1)
+            self.assertEqual(ChatMessage.objects.filter(is_approved=True).count(), 0)

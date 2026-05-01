@@ -1,8 +1,13 @@
 # linkedin/admin.py
+from types import SimpleNamespace
+
 from django.contrib import admin
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.http import HttpResponseRedirect, HttpResponse
+from django.urls import path, reverse
+from django.shortcuts import render, get_object_or_404
 
 from unfold.admin import ModelAdmin
 
@@ -15,7 +20,13 @@ admin.site.unregister(Group)
 
 @admin.register(SiteConfig)
 class SiteConfigAdmin(ModelAdmin):
-    list_display = ("ai_model", "llm_api_key_status", "llm_api_base")
+    list_display = (
+        "ai_model",
+        "llm_api_key_status",
+        "llm_api_base",
+        "google_sheet_sync_enabled",
+        "google_workspace_link",
+    )
     icon = "settings"
     
     def llm_api_key_status(self, obj):
@@ -25,14 +36,66 @@ class SiteConfigAdmin(ModelAdmin):
     def has_add_permission(self, request):
         return not SiteConfig.objects.exists()
 
+    fieldsets = (
+        (
+            _("LLM"),
+            {"fields": ("llm_api_key", "ai_model", "llm_api_base")},
+        ),
+        (
+            _("Google Sheet — auto export leads"),
+            {
+                "fields": (
+                    "google_sheet_sync_enabled",
+                    "google_sheet_id",
+                    "google_sheet_tab",
+                    "google_sheet_sync_user",
+                ),
+                "description": _(
+                    "Enable sync, paste the full Google Sheets link or the bare spreadsheet id, and ensure "
+                    "the chosen user (or a superuser) has connected Google under /admin/google/. "
+                    "New rows use columns A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."
+                ),
+            },
+        ),
+    )
+
+    def google_workspace_link(self, obj):
+        from google_integration.models import GoogleAccount
+        from google_integration.sheet_sync import resolve_google_sync_user
+
+        user = resolve_google_sync_user(obj)
+        if user:
+            acct = GoogleAccount.objects.filter(user=user).first()
+            if acct and acct.is_connected:
+                label = acct.google_email or user.email or user.get_username()
+                return format_html(
+                    '<div class="inline-flex items-center gap-2">'
+                    '<span class="inline-flex items-center text-emerald-600 dark:text-emerald-400 font-semibold text-xs" title="{}">'
+                    '<span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300" aria-hidden="true">✓</span>'
+                    "</span>"
+                    '<a href="{}" target="_blank" rel="noopener noreferrer" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1 px-2 rounded text-[10px] uppercase transition-colors">'
+                    "{}"
+                    "</a>"
+                    "</div>",
+                    label,
+                    "/admin/google/",
+                    _("Open Google Workspace"),
+                )
+        return format_html(
+            '<a href="/admin/google/" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
+            "{}"
+            "</a>",
+            _("Connect Google"),
+        )
+    google_workspace_link.short_description = "Google Workspace"
+
 @admin.register(Campaign)
 class CampaignAdmin(ModelAdmin):
     list_display = ("name", "is_freemium", "discovered_count", "connected_count", "failed_count", "import_leads_button")
     list_filter = ("is_freemium", "users")
     search_fields = ("name",)
     icon = "send"
-    actions_detail = ["import_leads_action"]
-    
+
     fieldsets = (
         (_("Campaign Configuration"), {
             "fields": (("name", "is_freemium"), ("booking_link", "action_fraction"))
@@ -41,6 +104,17 @@ class CampaignAdmin(ModelAdmin):
             "fields": ("product_docs", "campaign_objective")
         }),
     )
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "import-leads/<int:campaign_id>/",
+                self.admin_site.admin_view(self.import_leads_single_view),
+                name="linkedin_campaign_import_leads_single",
+            ),
+        ]
+        return custom_urls + urls
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -68,12 +142,10 @@ class CampaignAdmin(ModelAdmin):
     failed_count.short_description = _("Failed")
 
     def import_leads_button(self, obj):
-        from django.urls import reverse
-        from django.utils.html import format_html
         return format_html(
             '<a href="{}" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded text-[10px] uppercase transition-colors">'
             'Import Leads</a>',
-            reverse("admin:linkedin_campaign_changelist") + f"?action=import_leads_action&_selected_action={obj.pk}"
+            reverse("admin:linkedin_campaign_import_leads_single", args=[obj.pk]),
         )
     import_leads_button.short_description = "Quick Import"
 
@@ -84,13 +156,24 @@ class CampaignAdmin(ModelAdmin):
     def import_leads_action(self, request, queryset):
         from django import forms
         from django.core.validators import FileExtensionValidator
-        from django.shortcuts import render
         from linkedin.setup.seeds import parse_seed_csv, create_seed_leads
 
         class CSVImportForm(forms.Form):
             csv_file = forms.FileField(
-                label="Select CSV file",
-                validators=[FileExtensionValidator(allowed_extensions=['csv'])]
+                label=_("CSV file"),
+                validators=[FileExtensionValidator(allowed_extensions=["csv"])],
+                widget=forms.FileInput(
+                    attrs={
+                        "class": (
+                            "block w-full cursor-pointer text-sm text-font-default-light "
+                            "file:inline-flex file:items-center file:rounded-default "
+                            "file:border-0 file:bg-primary-600 file:px-4 file:py-2 "
+                            "file:text-sm file:font-medium file:text-white "
+                            "hover:file:bg-primary-600/90 "
+                            "dark:text-font-default-dark dark:file:bg-primary-600"
+                        ),
+                    }
+                ),
             )
 
         if 'apply' in request.POST:
@@ -115,16 +198,34 @@ class CampaignAdmin(ModelAdmin):
         else:
             form = CSVImportForm()
 
-        return render(
-            request,
-            "admin/csv_import.html",
-            {
-                'queryset': queryset,
-                'form': form,
-                'action': 'import_leads_action',
-                'title': 'Import Leads from CSV'
-            }
+        request.current_app = self.admin_site.name
+        subtitle = ""
+        if queryset.count() == 1:
+            one = queryset.first()
+            subtitle = _("Campaign: %(name)s") % {"name": one.name}
+        fake_cl = SimpleNamespace(
+            model_admin=self,
+            opts=self.opts,
+            full_result_count=0,
+            result_count=0,
         )
+        context = {
+            **self.admin_site.each_context(request),
+            "queryset": queryset,
+            "form": form,
+            "action": "import_leads_action",
+            "title": _("Import leads from CSV"),
+            "subtitle": subtitle,
+            "action_checkbox_name": ACTION_CHECKBOX_NAME,
+            "opts": self.opts,
+            "cl": fake_cl,
+        }
+        return render(request, "admin/csv_import.html", context)
+
+    def import_leads_single_view(self, request, campaign_id: int):
+        campaign = get_object_or_404(Campaign, pk=campaign_id)
+        queryset = Campaign.objects.filter(pk=campaign.pk)
+        return self.import_leads_action(request, queryset)
 
 
 

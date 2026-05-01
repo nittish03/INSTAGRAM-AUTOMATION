@@ -23,3 +23,8 @@ django-cors-headers
 questionary
 django-import-export
 django-simple-history
+psycopg[binary]
+python-dotenv
+google-auth
+google-auth-oauthlib
+google-api-python-client

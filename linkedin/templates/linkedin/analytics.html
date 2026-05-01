@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analytics · EshLead</title>
+  <script>
+    (() => {
+      const saved = localStorage.getItem("leadpilot_google_theme");
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const theme = saved || (prefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --lp-body: #f8fafc;
+      --lp-surface: #ffffff;
+      --lp-surface-2: #f8fafc;
+      --lp-border: #e2e8f0;
+      --lp-text: #0f172a;
+      --lp-muted: #64748b;
+      --lp-purple: #9333ea;
+      --lp-purple-hover: #7e22ce;
+      --lp-accent: #7c3aed;
+      --lp-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --lp-body: #020617;
+      --lp-surface: #0f172a;
+      --lp-surface-2: #111827;
+      --lp-border: #334155;
+      --lp-text: #e2e8f0;
+      --lp-muted: #94a3b8;
+      --lp-purple: #c4b5fd;
+      --lp-purple-hover: #ddd6fe;
+      --lp-accent: #a78bfa;
+      --lp-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--lp-body);
+      color: var(--lp-text);
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    .lp-header {
+      background: var(--lp-surface);
+      border-bottom: 1px solid var(--lp-border);
+      box-shadow: var(--lp-shadow);
+    }
+    .lp-header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem 1rem;
+    }
+    .lp-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 600;
+      color: var(--lp-text);
+      text-decoration: none;
+    }
+    .lp-brand:hover { color: var(--lp-purple-hover); }
+    .lp-logo {
+      display: inline-grid;
+      width: 2rem;
+      height: 2rem;
+      place-items: center;
+      border-radius: 0.5rem;
+      background: #9333ea;
+      color: #fff;
+      font-size: 0.875rem;
+    }
+    [data-theme="dark"] .lp-logo { background: #7c3aed; }
+    .lp-brand-text { font-size: 0.95rem; letter-spacing: -0.02em; }
+    .lp-sub { margin: 0.2rem 0 0; font-size: 0.7rem; color: var(--lp-muted); font-weight: 400; }
+    .lp-nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem 1rem;
+    }
+    .lp-nav a {
+      font-size: 0.8125rem;
+      color: var(--lp-muted);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .lp-nav a:hover { color: var(--lp-purple); }
+    .lp-theme-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--lp-muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 0.45rem;
+      border-radius: 0.5rem;
+    }
+    .lp-theme-btn:hover { color: var(--lp-purple); background: var(--lp-surface-2); }
+    .lp-theme-btn svg { width: 1.25rem; height: 1.25rem; }
+    .lp-theme-btn .theme-icon-sun { display: none; }
+    .lp-theme-btn .theme-icon-moon { display: flex; }
+    [data-theme="dark"] .lp-theme-btn .theme-icon-sun { display: flex; }
+    [data-theme="dark"] .lp-theme-btn .theme-icon-moon { display: none; }
+    .lp-wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+    .section-title {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lp-muted);
+      margin: 0 0 0.75rem;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+    }
+    .kpi {
+      background: var(--lp-surface);
+      border: 1px solid var(--lp-border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      box-shadow: var(--lp-shadow);
+    }
+    .kpi .num { font-size: 1.5rem; font-weight: 700; color: var(--lp-text); letter-spacing: -0.03em; }
+    .kpi .num.accent { color: #9333ea; }
+    [data-theme="dark"] .kpi .num.accent { color: var(--lp-accent); }
+    .kpi .label { font-size: 0.6875rem; color: var(--lp-muted); margin-top: 0.35rem; }
+    .kpi .sub { font-size: 0.625rem; color: var(--lp-muted); opacity: 0.85; margin-top: 0.25rem; }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    @media (min-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr 1fr; }
+      .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .card {
+      background: var(--lp-surface);
+      border: 1px solid var(--lp-border);
+      border-radius: 1rem;
+      padding: 1rem 1.1rem;
+      box-shadow: var(--lp-shadow);
+    }
+    .card h3 { margin: 0 0 0.25rem; font-size: 0.9375rem; font-weight: 600; color: var(--lp-text); }
+    .card .hint { margin: 0 0 0.75rem; font-size: 0.6875rem; color: var(--lp-muted); }
+    .chart-box { position: relative; height: 220px; width: 100%; }
+    .chart-box.tall { height: 240px; }
+    .chart-box.short { height: 200px; }
+    .card-cap {
+      padding: 0.85rem 1rem;
+      background: var(--lp-surface-2);
+      border-bottom: 1px solid var(--lp-border);
+    }
+    .card-cap h3 { margin: 0; font-size: 0.9375rem; color: var(--lp-text); }
+    .card-cap .hint { margin: 0.25rem 0 0; }
+    .card-flat { padding: 0; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    th, td { padding: 0.5rem 0.75rem; text-align: left; color: var(--lp-text); }
+    th {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--lp-muted);
+      background: var(--lp-surface-2);
+      border-bottom: 1px solid var(--lp-border);
+    }
+    td { border-bottom: 1px solid var(--lp-border); }
+    tr:hover td { background: var(--lp-surface-2); }
+    .numcell { text-align: right; font-variant-numeric: tabular-nums; }
+    .table-scroll { overflow: auto; max-height: 280px; }
+    .split { display: grid; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (min-width: 900px) { .split { grid-template-columns: 1fr 1fr; } }
+    .empty-cell { text-align: center; color: var(--lp-muted); padding: 1.5rem; }
+  </style>
+  {{ chart_data|json_script:"chart-data" }}
+</head>
+<body>
+  <header class="lp-header">
+    <div class="lp-header-inner">
+      <a href="/admin/" class="lp-brand">
+        <span class="lp-logo">L</span>
+        <span>
+          <span class="lp-brand-text">EshLead · Analytics</span>
+          <p class="lp-sub">Pipeline &amp; activity · {{ generated_at|date:"Y-m-d H:i" }} {{ generated_at|date:"T" }}</p>
+        </span>
+      </a>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem 1rem;">
+        <nav class="lp-nav">
+          <a href="/admin/">Admin</a>
+          <a href="{% url 'analytics_dashboard' %}">Refresh</a>
+          <a href="{% url 'admin:linkedin_actionlog_changelist' %}">Action logs</a>
+          <a href="{% url 'admin:linkedin_task_changelist' %}">Tasks</a>
+          <a href="/admin/google/">Google</a>
+        </nav>
+        <button type="button" class="lp-theme-btn" id="theme-toggle" aria-label="Toggle light or dark theme" title="Toggle theme">
+          <span class="theme-icon-moon" aria-hidden="true">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+          </span>
+          <span class="theme-icon-sun" aria-hidden="true">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          </span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="lp-wrap">
+    <p class="section-title">Overview</p>
+    <div class="kpi-grid">
+      {% with t=totals %}
+      <div class="kpi"><div class="num">{{ t.leads }}</div><div class="label">Leads</div><div class="sub">{{ t.leads_disqualified }} disqualified</div></div>
+      <div class="kpi"><div class="num">{{ t.deals }}</div><div class="label">Deals</div><div class="sub">{{ t.pipeline_leads }} unique in pipeline</div></div>
+      <div class="kpi"><div class="num accent">{{ invites_30d }}</div><div class="label">Invites (30d)</div><div class="sub">connect actions</div></div>
+      <div class="kpi"><div class="num accent">{{ followups_30d }}</div><div class="label">Follow-ups (30d)</div></div>
+      <div class="kpi"><div class="num">{{ t.action_logs }}</div><div class="label">Action logs</div></div>
+      <div class="kpi"><div class="num">{{ t.tasks }}</div><div class="label">Tasks</div><div class="sub">{{ t.tasks_pending }} pending</div></div>
+      <div class="kpi"><div class="num">{{ t.campaigns }}</div><div class="label">Campaigns</div></div>
+      <div class="kpi"><div class="num">{{ t.linkedin_profiles_active }}</div><div class="label">Active LI profiles</div><div class="sub">of {{ t.linkedin_profiles }} total</div></div>
+      <div class="kpi"><div class="num">{{ t.search_keywords_used }}</div><div class="label">Keywords used</div><div class="sub">of {{ t.search_keywords }}</div></div>
+      <div class="kpi"><div class="num">{{ t.messages }}</div><div class="label">Chat messages</div><div class="sub">{{ t.messages_drafts }} drafts</div></div>
+      {% endwith %}
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Invites &amp; follow-ups / day</h3>
+        <p class="hint">ActionLog · last 30 days</p>
+        <div class="chart-box"><canvas id="chartActions" aria-label="Actions chart"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Task outcomes / day</h3>
+        <p class="hint">Completed, failed, skipped · by ended_at</p>
+        <div class="chart-box"><canvas id="chartTasks" aria-label="Tasks chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <h3>Deals by state</h3>
+        <div class="chart-box short"><canvas id="chartDeals"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Tasks by status</h3>
+        <div class="chart-box short"><canvas id="chartTaskStatus"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Tasks by type</h3>
+        <div class="chart-box short"><canvas id="chartTaskTypes"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <h3>New leads / day</h3>
+      <p class="hint">Last 30 days</p>
+      <div class="chart-box tall"><canvas id="chartLeads"></canvas></div>
+    </div>
+
+    <div class="split">
+      <div class="card card-flat">
+        <div class="card-cap">
+          <h3>Top campaigns</h3>
+          <p class="hint">By deal count</p>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Campaign</th><th class="numcell">Deals</th></tr></thead>
+            <tbody>
+              {% for c in top_campaigns %}
+              <tr><td>{{ c.name }}</td><td class="numcell">{{ c.deal_count }}</td></tr>
+              {% empty %}
+              <tr><td colspan="2" class="empty-cell">No campaigns</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card card-flat">
+        <div class="card-cap">
+          <h3>Action log matrix</h3>
+          <p class="hint">All time · type × status</p>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Action</th><th>Status</th><th class="numcell">Count</th></tr></thead>
+            <tbody>
+              {% for row in action_all %}
+              <tr><td>{{ row.action_type }}</td><td>{{ row.status }}</td><td class="numcell">{{ row.c }}</td></tr>
+              {% empty %}
+              <tr><td colspan="3" class="empty-cell">No actions</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const el = document.getElementById("chart-data");
+      if (!el || typeof Chart === "undefined") return;
+      const payload = JSON.parse(el.textContent);
+      const labelShort = payload.labels30.map(function (d) { return d.slice(5); });
+
+      Chart.defaults.animation = false;
+      Chart.defaults.transitions.active.animation.duration = 0;
+      Chart.defaults.font.family = "ui-sans-serif, system-ui, sans-serif";
+
+      const charts = [];
+
+      function isDark() {
+        return document.documentElement.getAttribute("data-theme") === "dark";
+      }
+      function tickColor() {
+        return isDark() ? "#94a3b8" : "#475569";
+      }
+      function gridColor() {
+        return isDark() ? "rgba(148, 163, 184, 0.12)" : "rgba(148, 163, 184, 0.22)";
+      }
+      function legendColor() {
+        return isDark() ? "#94a3b8" : "#64748b";
+      }
+
+      function lineCommonOpts() {
+        const g = gridColor();
+        const t = tickColor();
+        const leg = legendColor();
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { position: "bottom", labels: { boxWidth: 10, padding: 8, font: { size: 11 }, color: leg } },
+          },
+          scales: {
+            x: {
+              grid: { color: g },
+              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10, font: { size: 10 }, color: t },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: g },
+              ticks: { precision: 0, font: { size: 10 }, color: t },
+            },
+          },
+        };
+      }
+
+      function syncChartsToTheme() {
+        const g = gridColor();
+        const t = tickColor();
+        const leg = legendColor();
+        charts.forEach(function (ch) {
+          const o = ch.options;
+          if (o.plugins && o.plugins.legend && o.plugins.legend.labels) {
+            o.plugins.legend.labels.color = leg;
+          }
+          if (o.scales) {
+            if (o.scales.x) {
+              if (o.scales.x.ticks) o.scales.x.ticks.color = t;
+              if (o.scales.x.grid) o.scales.x.grid.color = g;
+            }
+            if (o.scales.y) {
+              if (o.scales.y.ticks) o.scales.y.ticks.color = t;
+              if (o.scales.y.grid) o.scales.y.grid.color = g;
+            }
+          }
+          ch.update();
+        });
+      }
+
+      charts.push(
+        new Chart(document.getElementById("chartActions"), {
+          type: "line",
+          data: {
+            labels: labelShort,
+            datasets: [
+              { label: "Connect", data: payload.actionsConnect, borderColor: "#9333ea", backgroundColor: "rgba(147, 51, 234, 0.12)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
+              { label: "Follow-up", data: payload.actionsFollowUp, borderColor: "#6366f1", backgroundColor: "rgba(99, 102, 241, 0.1)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
+            ],
+          },
+          options: lineCommonOpts(),
+        })
+      );
+
+      const stackOpts = (function () {
+        const b = lineCommonOpts();
+        b.scales.x.stacked = true;
+        b.scales.y.stacked = true;
+        return b;
+      })();
+      charts.push(
+        new Chart(document.getElementById("chartTasks"), {
+          type: "bar",
+          data: {
+            labels: labelShort,
+            datasets: [
+              { label: "Done", data: payload.tasksCompleted, backgroundColor: "rgba(16, 185, 129, 0.78)" },
+              { label: "Failed", data: payload.tasksFailed, backgroundColor: "rgba(239, 68, 68, 0.72)" },
+              { label: "Skipped", data: payload.tasksSkipped, backgroundColor: "rgba(148, 163, 184, 0.55)" },
+            ],
+          },
+          options: stackOpts,
+        })
+      );
+
+      const palette = ["#9333ea", "#6366f1", "#14b8a6", "#ea580c", "#ca8a04", "#64748b", "#db2777", "#2563eb"];
+      const leg = legendColor();
+      const doughnutBase = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 }, color: leg } } },
+      };
+
+      charts.push(
+        new Chart(document.getElementById("chartDeals"), {
+          type: "doughnut",
+          data: { labels: payload.dealStates.labels, datasets: [{ data: payload.dealStates.values, backgroundColor: palette, borderWidth: 0 }] },
+          options: Object.assign({}, doughnutBase, { cutout: "58%" }),
+        })
+      );
+
+      charts.push(
+        new Chart(document.getElementById("chartTaskStatus"), {
+          type: "doughnut",
+          data: { labels: payload.taskStatus.labels, datasets: [{ data: payload.taskStatus.values, backgroundColor: palette, borderWidth: 0 }] },
+          options: Object.assign({}, doughnutBase, { cutout: "58%" }),
+        })
+      );
+
+      const g = gridColor();
+      const t = tickColor();
+      charts.push(
+        new Chart(document.getElementById("chartTaskTypes"), {
+          type: "bar",
+          data: { labels: payload.taskTypes.labels, datasets: [{ label: "Count", data: payload.taskTypes.values, backgroundColor: "#6366f1" }] },
+          options: {
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { beginAtZero: true, grid: { color: g }, ticks: { precision: 0, font: { size: 10 }, color: t } },
+              y: { grid: { display: false }, ticks: { font: { size: 10 }, color: t } },
+            },
+          },
+        })
+      );
+
+      charts.push(
+        new Chart(document.getElementById("chartLeads"), {
+          type: "line",
+          data: {
+            labels: labelShort,
+            datasets: [{ label: "Leads", data: payload.leadsCreated, borderColor: "#0d9488", backgroundColor: "rgba(13, 148, 136, 0.14)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 }],
+          },
+          options: lineCommonOpts(),
+        })
+      );
+
+      const themeBtn = document.getElementById("theme-toggle");
+      if (themeBtn) {
+        themeBtn.addEventListener("click", function () {
+          const cur = document.documentElement.getAttribute("data-theme") || "light";
+          const next = cur === "dark" ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", next);
+          localStorage.setItem("leadpilot_google_theme", next);
+          syncChartsToTheme();
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -16,6 +16,9 @@ import warnings
 # a harmless serialization warning on every structured-output call.
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
+from linkedin.env_bootstrap import load_project_dotenv
+
+load_project_dotenv()
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "linkedin.django_settings")
 
 

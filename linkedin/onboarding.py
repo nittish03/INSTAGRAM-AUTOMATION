@@ -42,7 +42,7 @@ class OnboardConfig:
     booking_link: str = ""
     seed_urls: str = ""
     llm_api_key: str = ""
-    ai_model: str = "gemini-1.5-pro"
+    ai_model: str = ""
     llm_api_base: str = ""
     newsletter: bool = True
     connect_daily_limit: int = DEFAULT_CONNECT_DAILY_LIMIT
@@ -117,7 +117,7 @@ SELF_HOSTED_QUESTIONS = [
     Question("booking_link", "Booking Link (optional)", required=False),
     Question("seed_urls", "Seed LinkedIn URLs (comma separated)", required=False),
     Question("llm_api_key", "LLM API Key (Gemini/OpenAI)"),
-    Question("ai_model", "Model Identifier", default="gemini-1.5-pro"),
+    Question("ai_model", "Model Identifier", default=""),
     Question("llm_api_base", "LLM API Base URL (optional)", required=False),
     Question("connect_daily_limit", "Daily Connection Limit", default=str(DEFAULT_CONNECT_DAILY_LIMIT)),
     Question("connect_weekly_limit", "Weekly Connection Limit", default=str(DEFAULT_CONNECT_WEEKLY_LIMIT)),
@@ -295,6 +295,7 @@ def apply(config: OnboardConfig) -> None:
                 _create_seed_leads(campaign, config.seed_urls)
 
     # 2. LinkedIn Account
+    created_profile = False
     if config.linkedin_email and not LinkedInProfile.objects.filter(linkedin_username=config.linkedin_email).exists():
         _create_account(
             campaign,
@@ -305,6 +306,37 @@ def apply(config: OnboardConfig) -> None:
             connect_weekly=config.connect_weekly_limit,
             follow_up_daily=config.follow_up_daily_limit,
         )
+        created_profile = True
+
+    # 2b. Ensure campaign membership is linked for existing accounts too.
+    if campaign:
+        linked = False
+        if config.linkedin_email:
+            existing_profile = LinkedInProfile.objects.filter(
+                linkedin_username=config.linkedin_email
+            ).select_related("user").first()
+            if existing_profile:
+                campaign.users.add(existing_profile.user)
+                linked = True
+                if not created_profile:
+                    logger.info(
+                        "Linked existing user %s to campaign %s",
+                        existing_profile.user.username,
+                        campaign.name,
+                    )
+
+        # Auto-heal common fresh-start scenario: one active profile, no campaign users.
+        if not linked and not campaign.users.exists():
+            active_profiles = list(
+                LinkedInProfile.objects.filter(active=True).select_related("user")
+            )
+            if len(active_profiles) == 1:
+                campaign.users.add(active_profiles[0].user)
+                logger.info(
+                    "Auto-linked sole active user %s to campaign %s",
+                    active_profiles[0].user.username,
+                    campaign.name,
+                )
 
 
     # 3. LLM Configuration
@@ -317,9 +349,9 @@ def apply(config: OnboardConfig) -> None:
         cfg.llm_api_base = config.llm_api_base
     cfg.save()
 
-    logger.info("Onboarding successful — LeadPilot is ready.")
+    logger.info("Onboarding successful — EshLead is ready.")
     print("\n" + "="*60)
-    print("🚀 SUCCESS: Onboarding complete. LeadPilot is ready.")
+    print("🚀 SUCCESS: Onboarding complete. EshLead is ready.")
     print("="*60)
     print("\n🛡️  SECURITY NOTE: Your Django user accounts have been created with")
     print("   UNUSABLE passwords for safety.")

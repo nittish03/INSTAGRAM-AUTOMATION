@@ -63,8 +63,7 @@ def handle_send_message(task, session, qualifiers=None):
         note=f"Message: {msg.content[:50]}..."
     )
     
-    # Schedule next follow up in 24 hours (default) since the AI already made a decision prior
     from crm.models.deal import Deal
     deal = Deal.objects.filter(lead__public_identifier=public_id, campaign_id=campaign_id).first()
-    enqueue_follow_up(campaign_id, public_id, delay_seconds=24 * 3600, deal=deal)
-    logger.info("Message dispatched successfully. Next follow-up delayed 24h.")
+    enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600, deal=deal)
+    logger.info("Message dispatched successfully. Next follow-up scheduled in ~4h.")

@@ -140,7 +140,7 @@ def find_candidate(session, qualifier: BayesianQualifier) -> dict | None:
 
     if existing:
         return {
-            "public_id": url_to_public_id(existing.lead.linkedin_url),
+            "public_identifier": url_to_public_id(existing.lead.linkedin_url),
             "name": f"{existing.lead.first_name} {existing.lead.last_name}",
         }
 
@@ -153,7 +153,7 @@ def find_candidate(session, qualifier: BayesianQualifier) -> dict | None:
         from crm.models import Lead
         lead = Lead.objects.get(public_identifier=public_id)
         return {
-            "public_id": public_id,
+            "public_identifier": public_id,
             "name": f"{lead.first_name} {lead.last_name}",
         }
 

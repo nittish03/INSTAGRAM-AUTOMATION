@@ -43,10 +43,13 @@ def deal_to_profile_dict(deal) -> dict:
     return base
 
 # ── Existing entity lookup ──
+
+
+def _existing_deal_or_lead(public_id: str, campaign):
     """Check for an existing Deal in campaign; if none, look up the Lead.
 
-    Returns (lead, existing_deal) — exactly one will be non-None,
-    or both None if no Lead exists at all.
+    Returns (lead, existing_deal) — existing_deal is set if a Deal already exists;
+    otherwise lead may be the Lead row or None if no Lead exists.
     """
     from crm.models import Deal, Lead
 

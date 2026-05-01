@@ -13,17 +13,20 @@ from simple_history.models import HistoricalRecords
 logger = logging.getLogger(__name__)
 
 def _get_cipher():
-    # [NEW-CRIT-02] Use dedicated environment variable for encryption
+    # [NEW-CRIT-02] Dedicated env var for encryption; dev fallback matches django_settings (non-production).
     from django.core.exceptions import ImproperlyConfigured
+
     raw_key = os.environ.get("LEADPILOT_ENCRYPTION_KEY", "").encode()
+    is_production = os.environ.get("ENV", "").lower() == "production"
     if not raw_key or len(raw_key) < 32:
-        if settings.DEBUG:
-            # Secure fallback for local dev: use SECRET_KEY derived key
+        if settings.DEBUG or not is_production:
             import hashlib
+
             key = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
             return Fernet(base64.urlsafe_b64encode(key))
-        from django.core.exceptions import ImproperlyConfigured
-        raise ImproperlyConfigured("LEADPILOT_ENCRYPTION_KEY must be set to a 32-byte string in production.")
+        raise ImproperlyConfigured(
+            "LEADPILOT_ENCRYPTION_KEY must be set (UTF-8 string at least 32 bytes) when ENV=production."
+        )
     
     key = base64.urlsafe_b64encode(raw_key[:32])
     return Fernet(key)
@@ -56,6 +59,31 @@ class SiteConfig(models.Model):
     ai_model = models.CharField(max_length=200, blank=True, default="")
     llm_api_base = models.CharField(max_length=500, blank=True, default="")
 
+    google_sheet_sync_enabled = models.BooleanField(
+        default=False,
+        help_text="Append new/enriched leads as rows to the Google Sheet below (uses Google Sheets API).",
+    )
+    google_sheet_id = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Paste the full Google Sheets browser URL or the bare spreadsheet id (saved as id only).",
+    )
+    google_sheet_tab = models.CharField(
+        max_length=100,
+        blank=True,
+        default="Sheet1",
+        help_text="Tab name (e.g. Sheet1). Rows append to columns A–G: Name, Company, Position, LinkedIn, Connected, Status, Action.",
+    )
+    google_sheet_sync_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="Whose Google OAuth tokens to use. Leave empty to use the first superuser with Google connected.",
+    )
+
     class Meta:
         app_label = "linkedin"
         verbose_name = "Site Configuration"
@@ -75,6 +103,9 @@ class SiteConfig(models.Model):
             self.llm_api_key = decrypt_value(self.llm_api_key)
 
     def save(self, *args, **kwargs):
+        from google_integration.spreadsheet_id import normalize_spreadsheet_id
+
+        self.google_sheet_id = normalize_spreadsheet_id(self.google_sheet_id)
         plain_key = self.llm_api_key
         if self.llm_api_key and not self.llm_api_key.startswith('gAAAA'):
             self.llm_api_key = encrypt_value(self.llm_api_key)

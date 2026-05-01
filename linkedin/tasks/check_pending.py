@@ -65,7 +65,7 @@ def handle_check_pending(task, session, qualifiers):
     if new_state == ProfileState.CONNECTED:
         enqueue_follow_up(campaign_id, public_id, deal=deal)
     elif new_state == ProfileState.PENDING:
-        new_backoff = min(backoff_hours * 2, 168)
+        new_backoff = min(backoff_hours * 2, 6)
         with transaction.atomic():
             if deal:
                 deal.backoff_hours = new_backoff

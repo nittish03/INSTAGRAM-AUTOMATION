@@ -31,6 +31,8 @@ from linkedin.tasks.send_message import handle_send_message
 
 logger = logging.getLogger(__name__)
 
+# When ``daemon_idle_sleep_cap_seconds`` is 0, poll the DB at most this often (not sub-second).
+_IDLE_POLL_WHEN_CAP_ZERO_SECONDS = 15.0
 
 _HANDLERS = {
     Task.TaskType.CONNECT: handle_connect,
@@ -209,7 +211,9 @@ def run_daemon(session):
         len(campaigns),
     )
 
-
+    # Throttle INFO while polling for a far-future ``scheduled_at`` (cap slicing).
+    _idle_info_interval_s = 300.0
+    last_idle_info_at = -_idle_info_interval_s
 
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
@@ -228,9 +232,47 @@ def run_daemon(session):
                 logger.info("Queue empty — nothing to do")
                 return
             if wait > 0:
+                cap_raw = cfg.get("daemon_idle_sleep_cap_seconds")
+                if cap_raw is None:
+                    sleep_s = wait
+                else:
+                    cap = float(cap_raw)
+                    # cap==0: poll in modest slices (no multi-hour block sleep, no sub-second log/DB spam).
+                    per_iteration = cap if cap > 0 else _IDLE_POLL_WHEN_CAP_ZERO_SECONDS
+                    sleep_s = min(wait, per_iteration)
                 h, m = int(wait // 3600), int(wait % 3600 // 60)
-                logger.info("Next task in %dh%02dm — sleeping", h, m)
-                time.sleep(wait)
+                hs, ms = int(sleep_s // 3600), int(sleep_s % 3600 // 60)
+                cap_display = cap_raw if cap_raw is not None else "full"
+                if sleep_s + 1e-6 >= wait:
+                    logger.info(
+                        "Next task in %dh%02dm — sleeping %dh%02dm (idle cap=%s)",
+                        h,
+                        m,
+                        hs,
+                        ms,
+                        cap_display,
+                    )
+                else:
+                    now_m = time.monotonic()
+                    if now_m - last_idle_info_at >= _idle_info_interval_s:
+                        last_idle_info_at = now_m
+                        logger.info(
+                            "Next task in %dh%02dm — polling until due (idle cap=%s, ~%.0fs slices)",
+                            h,
+                            m,
+                            cap_display,
+                            sleep_s,
+                        )
+                    else:
+                        logger.debug(
+                            "Next task in %dh%02dm — idle poll sleep %dh%02dm (idle cap=%s)",
+                            h,
+                            m,
+                            hs,
+                            ms,
+                            cap_display,
+                        )
+                time.sleep(sleep_s)
             continue
 
         campaign = Campaign.objects.filter(pk=task.payload.get("campaign_id")).first()
