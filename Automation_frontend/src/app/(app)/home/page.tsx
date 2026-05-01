@@ -6,7 +6,12 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { DashboardStats, GoogleStatus } from "@/lib/types";
+
+const STATS_KEY = "home.stats";
+const GOOGLE_KEY = "home.google";
+const REFRESHED_KEY = "home.refreshedAt";
 
 type ShortcutCard = {
   href: string;
@@ -30,11 +35,16 @@ const shortcuts: ShortcutCard[] = [
 ];
 
 export default function HomePage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [google, setGoogle] = useState<GoogleStatus | null>(null);
+  const cachedStats = pageCache.get<DashboardStats>(STATS_KEY);
+  const cachedGoogle = pageCache.get<GoogleStatus>(GOOGLE_KEY);
+  const cachedRefreshed = pageCache.get<string>(REFRESHED_KEY);
+  const [stats, setStats] = useState<DashboardStats | null>(cachedStats ?? null);
+  const [google, setGoogle] = useState<GoogleStatus | null>(cachedGoogle ?? null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(!cachedStats);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(
+    cachedRefreshed ? new Date(cachedRefreshed) : null,
+  );
 
   async function refresh() {
     setLoading(true);
@@ -43,7 +53,11 @@ export default function HomePage() {
       const [d, g] = await Promise.all([api.dashboard(), api.googleStatus()]);
       setStats(d.stats);
       setGoogle(g.google);
-      setRefreshedAt(new Date());
+      const now = new Date();
+      setRefreshedAt(now);
+      pageCache.set(STATS_KEY, d.stats);
+      pageCache.set(GOOGLE_KEY, g.google);
+      pageCache.set(REFRESHED_KEY, now.toISOString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load home");
     } finally {
@@ -52,7 +66,28 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    void refresh();
+    let mounted = true;
+    (async () => {
+      try {
+        const [d, g] = await Promise.all([api.dashboard(), api.googleStatus()]);
+        if (!mounted) return;
+        setStats(d.stats);
+        setGoogle(g.google);
+        const now = new Date();
+        setRefreshedAt(now);
+        pageCache.set(STATS_KEY, d.stats);
+        pageCache.set(GOOGLE_KEY, g.google);
+        pageCache.set(REFRESHED_KEY, now.toISOString());
+      } catch (e) {
+        if (!mounted) return;
+        setError(e instanceof Error ? e.message : "Failed to load home");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (

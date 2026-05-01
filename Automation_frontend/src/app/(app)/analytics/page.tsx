@@ -6,16 +6,23 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { AnalyticsData } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 30, 60];
+const dataKey = (d: number) => `analytics.data.${d}`;
+const refreshedKey = (d: number) => `analytics.refreshedAt.${d}`;
 
 export default function AnalyticsPage() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
   const [days, setDays] = useState(14);
+  const cachedData = pageCache.get<AnalyticsData>(dataKey(days));
+  const cachedRefreshed = pageCache.get<string>(refreshedKey(days));
+  const [data, setData] = useState<AnalyticsData | null>(cachedData ?? null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(!cachedData);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(
+    cachedRefreshed ? new Date(cachedRefreshed) : null,
+  );
 
   async function refresh(d: number) {
     setLoading(true);
@@ -23,7 +30,10 @@ export default function AnalyticsPage() {
     try {
       const res = await api.analytics(d);
       setData(res);
-      setRefreshedAt(new Date());
+      const now = new Date();
+      setRefreshedAt(now);
+      pageCache.set(dataKey(d), res);
+      pageCache.set(refreshedKey(d), now.toISOString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load analytics");
     } finally {
@@ -32,7 +42,36 @@ export default function AnalyticsPage() {
   }
 
   useEffect(() => {
-    void refresh(days);
+    let mounted = true;
+    const cached = pageCache.get<AnalyticsData>(dataKey(days));
+    if (cached) {
+      setData(cached);
+      const r = pageCache.get<string>(refreshedKey(days));
+      setRefreshedAt(r ? new Date(r) : null);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    setError("");
+    (async () => {
+      try {
+        const res = await api.analytics(days);
+        if (!mounted) return;
+        setData(res);
+        const now = new Date();
+        setRefreshedAt(now);
+        pageCache.set(dataKey(days), res);
+        pageCache.set(refreshedKey(days), now.toISOString());
+      } catch (e) {
+        if (!mounted) return;
+        setError(e instanceof Error ? e.message : "Failed to load analytics");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, [days]);
 
   const dailyMax =

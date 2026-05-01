@@ -3,8 +3,13 @@
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import { Skeleton } from "@/components/skeleton";
 import type { DashboardStats } from "@/lib/types";
+
+const STATS_KEY = "dashboard.stats";
+const GOOGLE_KEY = "dashboard.google";
+const REFRESHED_KEY = "dashboard.refreshedAt";
 
 const emptyStats: DashboardStats = {
   totalLeads: 0,
@@ -21,14 +26,18 @@ const emptyStats: DashboardStats = {
 };
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats>(emptyStats);
-  const [google, setGoogle] = useState<{ connected: boolean; email: string }>({
-    connected: false,
-    email: "",
-  });
+  const cachedStats = pageCache.get<DashboardStats>(STATS_KEY);
+  const cachedGoogle = pageCache.get<{ connected: boolean; email: string }>(GOOGLE_KEY);
+  const cachedRefreshed = pageCache.get<string>(REFRESHED_KEY);
+  const [stats, setStats] = useState<DashboardStats>(cachedStats ?? emptyStats);
+  const [google, setGoogle] = useState<{ connected: boolean; email: string }>(
+    cachedGoogle ?? { connected: false, email: "" },
+  );
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(!cachedStats);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(
+    cachedRefreshed ? new Date(cachedRefreshed) : null,
+  );
 
   async function refresh() {
     setLoading(true);
@@ -37,7 +46,11 @@ export default function DashboardPage() {
       const data = await api.dashboard();
       setStats(data.stats);
       setGoogle(data.google);
-      setRefreshedAt(new Date());
+      const now = new Date();
+      setRefreshedAt(now);
+      pageCache.set(STATS_KEY, data.stats);
+      pageCache.set(GOOGLE_KEY, data.google);
+      pageCache.set(REFRESHED_KEY, now.toISOString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
@@ -46,7 +59,28 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    void refresh();
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await api.dashboard();
+        if (!mounted) return;
+        setStats(data.stats);
+        setGoogle(data.google);
+        const now = new Date();
+        setRefreshedAt(now);
+        pageCache.set(STATS_KEY, data.stats);
+        pageCache.set(GOOGLE_KEY, data.google);
+        pageCache.set(REFRESHED_KEY, now.toISOString());
+      } catch (e) {
+        if (!mounted) return;
+        setError(e instanceof Error ? e.message : "Failed to load dashboard");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (

@@ -1,54 +1,96 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { ActionLog } from "@/lib/types";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+
+const CACHE_KEY = "action-logs.paged";
+const PAGE_SIZE = 100;
+
+type CachedActionLogs = {
+  items: ActionLog[];
+  page: number;
+  hasMore: boolean;
+};
 
 export default function ActionLogsPage() {
-  const [items, setItems] = useState<ActionLog[]>([]);
+  const [q, setQ] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
-  const [total, setTotal] = useState(0);
+  const debouncedQ = useDebouncedValue(q.trim(), 300);
+  const queryKey = `${CACHE_KEY}:${debouncedQ}:${type}:${status}`;
+  const cached = pageCache.get<CachedActionLogs>(queryKey);
+  const [allItems, setAllItems] = useState<ActionLog[]>(cached?.items ?? []);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(cached?.page ?? 0);
+  const [hasMore, setHasMore] = useState(cached?.hasMore ?? true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const params = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set("page", String(page));
-    p.set("pageSize", String(pageSize));
-    if (type) p.set("type", type);
-    if (status) p.set("status", status);
-    return p;
-  }, [type, status, page, pageSize]);
+  async function loadPage(targetPage: number, replace = false, key = queryKey) {
+    if (loadingMore || (!replace && !hasMore && key === queryKey)) return;
+    setLoadingMore(true);
+    try {
+      const p = new URLSearchParams();
+      p.set("page", String(targetPage));
+      p.set("pageSize", String(PAGE_SIZE));
+      if (debouncedQ) p.set("q", debouncedQ);
+      if (type) p.set("type", type);
+      if (status) p.set("status", status);
+      const data = await api.actionLogs(p);
+      const nextItems = replace ? data.items : [...allItems, ...data.items];
+      const nextHasMore = nextItems.length < data.pagination.total;
+      setAllItems(nextItems);
+      setCurrentPage(targetPage);
+      setHasMore(nextHasMore);
+      pageCache.set<CachedActionLogs>(key, {
+        items: nextItems,
+        page: targetPage,
+        hasMore: nextHasMore,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load action logs");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
+    const cacheHit = pageCache.get<CachedActionLogs>(queryKey);
+    if (cacheHit) {
+      setAllItems(cacheHit.items);
+      setCurrentPage(cacheHit.page);
+      setHasMore(cacheHit.hasMore);
+      setLoading(false);
+    } else {
+      setAllItems([]);
+      setCurrentPage(0);
+      setHasMore(true);
       setLoading(true);
-      try {
-        const data = await api.actionLogs(params);
-        if (!mounted) return;
-        setItems(data.items);
-        setTotal(data.pagination.total);
-      } catch (e) {
-        if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load action logs");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [params]);
+    }
+    void loadPage(1, true, queryKey);
+  }, [queryKey]);
 
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const filtered = useMemo(() => allItems, [allItems]);
+  const totalLoaded = allItems.length;
+
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+    const thresholdPx = 120;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom <= thresholdPx) {
+      void loadPage(currentPage + 1);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -57,13 +99,16 @@ export default function ActionLogsPage() {
         description="Connect / follow-up history with status, target, and operator details."
         actions={
           <>
+            <input
+              className="input max-w-[240px]"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search target, profile, campaign, or note"
+            />
             <select
               className="input max-w-[160px]"
               value={type}
-              onChange={(e) => {
-                setType(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setType(e.target.value)}
             >
               <option value="">All types</option>
               <option value="connect">connect</option>
@@ -72,10 +117,7 @@ export default function ActionLogsPage() {
             <select
               className="input max-w-[160px]"
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setStatus(e.target.value)}
             >
               <option value="">All statuses</option>
               <option value="success">success</option>
@@ -88,11 +130,16 @@ export default function ActionLogsPage() {
 
       {loading ? (
         <TableSkeleton rows={8} cols={6} />
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState title="No action logs found" description="Once the bot connects or follows up with leads, entries appear here." />
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="h-[calc(100vh-15rem)] min-h-88 overflow-auto"
+          >
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th">When</th>
@@ -105,7 +152,7 @@ export default function ActionLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((a) => (
+              {filtered.map((a) => (
                 <tr key={a.id}>
                   <td className="td whitespace-nowrap">{new Date(a.createdAt).toLocaleString()}</td>
                   <td className="td">{a.actionType}</td>
@@ -130,31 +177,17 @@ export default function ActionLogsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+              <div className="border-t border-slate-800 px-4 py-3 text-center text-xs text-slate-400">
+                {loadingMore
+                  ? "Loading more action logs..."
+                  : hasMore
+                    ? "Scroll down to load more"
+                    : `All loaded (${totalLoaded})`}
+              </div>
+            </div>
         </section>
       )}
-
-      <div className="flex items-center justify-between text-sm text-slate-400">
-        <span>
-          Page {page} of {pageCount} - {total} total
-        </span>
-        <div className="flex gap-2">
-          <button
-            className="btn-secondary disabled:opacity-50"
-            disabled={page <= 1 || loading}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Previous
-          </button>
-          <button
-            className="btn-secondary disabled:opacity-50"
-            disabled={page >= pageCount || loading}
-            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-          >
-            Next
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -6,20 +6,25 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { LinkedInProfileItem } from "@/lib/types";
 
+const CACHE_KEY = "linkedin-profiles.list";
+
 export default function LinkedinProfilesPage() {
-  const [items, setItems] = useState<LinkedInProfileItem[]>([]);
+  const cached = pageCache.get<LinkedInProfileItem[]>(CACHE_KEY);
+  const [items, setItems] = useState<LinkedInProfileItem[]>(cached ?? []);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
   const [pendingId, setPendingId] = useState<number | null>(null);
 
-  async function load() {
-    setLoading(true);
+  async function load(showSkeleton = false) {
+    if (showSkeleton) setLoading(true);
     setError("");
     try {
       const data = await api.linkedinProfiles();
       setItems(data.items);
+      pageCache.set(CACHE_KEY, data.items);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load profiles");
     } finally {
@@ -34,6 +39,7 @@ export default function LinkedinProfilesPage() {
         const data = await api.linkedinProfiles();
         if (!mounted) return;
         setItems(data.items);
+        pageCache.set(CACHE_KEY, data.items);
       } catch (e) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load profiles");
@@ -50,6 +56,7 @@ export default function LinkedinProfilesPage() {
     setPendingId(id);
     try {
       await api.toggleLinkedinProfile(id);
+      pageCache.clear(CACHE_KEY);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Toggle failed");
@@ -75,7 +82,8 @@ export default function LinkedinProfilesPage() {
         />
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div className="h-[calc(100vh-15rem)] min-h-88 overflow-auto">
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th">Operator</th>
@@ -133,7 +141,8 @@ export default function LinkedinProfilesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+            </div>
         </section>
       )}
     </div>

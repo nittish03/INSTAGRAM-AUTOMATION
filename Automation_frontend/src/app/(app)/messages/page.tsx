@@ -3,17 +3,23 @@
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import { TableSkeleton } from "@/components/skeleton";
 import type { DraftMessage, MessagingDiagnostics } from "@/lib/types";
 
+const DRAFTS_KEY = "messages.drafts";
+const DIAG_KEY = "messages.diagnostics";
+
 export default function MessagesPage() {
-  const [items, setItems] = useState<DraftMessage[]>([]);
+  const cachedDrafts = pageCache.get<DraftMessage[]>(DRAFTS_KEY);
+  const cachedDiag = pageCache.get<MessagingDiagnostics>(DIAG_KEY);
+  const [items, setItems] = useState<DraftMessage[]>(cachedDrafts ?? []);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [diag, setDiag] = useState<MessagingDiagnostics | null>(null);
+  const [initialLoading, setInitialLoading] = useState(!cachedDrafts);
+  const [diag, setDiag] = useState<MessagingDiagnostics | null>(cachedDiag ?? null);
   const [healing, setHealing] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingContent, setEditingContent] = useState("");
@@ -26,6 +32,8 @@ export default function MessagesPage() {
       setItems(drafts.items);
       setSelected({});
       setDiag(d.diagnostics);
+      pageCache.set(DRAFTS_KEY, drafts.items);
+      pageCache.set(DIAG_KEY, d.diagnostics);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load drafts");
     } finally {
@@ -42,6 +50,8 @@ export default function MessagesPage() {
         setItems(drafts.items);
         setDiag(d.diagnostics);
         setSelected({});
+        pageCache.set(DRAFTS_KEY, drafts.items);
+        pageCache.set(DIAG_KEY, d.diagnostics);
       } catch (e) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load drafts");
@@ -96,9 +106,11 @@ export default function MessagesPage() {
     setError("");
     try {
       const r = await api.updateDraft(id, content);
-      setItems((cur) =>
-        cur.map((m) => (m.id === id ? { ...m, content: r.item.content } : m)),
-      );
+      setItems((cur) => {
+        const next = cur.map((m) => (m.id === id ? { ...m, content: r.item.content } : m));
+        pageCache.set(DRAFTS_KEY, next);
+        return next;
+      });
       setEditingId(null);
       setEditingContent("");
       setInfo("Draft updated.");
@@ -116,7 +128,11 @@ export default function MessagesPage() {
     setInfo("");
     try {
       await api.deleteDraft(id);
-      setItems((cur) => cur.filter((m) => m.id !== id));
+      setItems((cur) => {
+        const next = cur.filter((m) => m.id !== id);
+        pageCache.set(DRAFTS_KEY, next);
+        return next;
+      });
       setSelected((s) => {
         const next = { ...s };
         delete next[id];
@@ -222,7 +238,8 @@ export default function MessagesPage() {
         </section>
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div className="h-[calc(100vh-15rem)] min-h-88 overflow-auto">
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th w-10">#</th>
@@ -309,7 +326,8 @@ export default function MessagesPage() {
                 );
               })}
             </tbody>
-          </table>
+              </table>
+            </div>
         </section>
       )}
     </div>

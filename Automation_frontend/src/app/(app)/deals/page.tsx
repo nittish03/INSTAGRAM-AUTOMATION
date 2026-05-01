@@ -1,58 +1,127 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import { TableSkeleton } from "@/components/skeleton";
 import type { Deal } from "@/lib/types";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+
+const CACHE_KEY = "deals.paged";
+const PAGE_SIZE = 100;
+
+type CachedDeals = {
+  items: Deal[];
+  page: number;
+  hasMore: boolean;
+};
 
 export default function DealsPage() {
-  const [items, setItems] = useState<Deal[]>([]);
+  const [q, setQ] = useState("");
   const [state, setState] = useState("");
+  const debouncedQ = useDebouncedValue(q.trim(), 300);
+  const queryKey = `${CACHE_KEY}:${debouncedQ}:${state}`;
+  const cached = pageCache.get<CachedDeals>(queryKey);
+  const [allItems, setAllItems] = useState<Deal[]>(cached?.items ?? []);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(cached?.page ?? 0);
+  const [hasMore, setHasMore] = useState(cached?.hasMore ?? true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const params = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set("page", "1");
-    p.set("pageSize", "100");
-    if (state) p.set("state", state);
-    return p;
-  }, [state]);
+  async function loadPage(targetPage: number, replace = false, key = queryKey) {
+    if (loadingMore || (!replace && !hasMore && key === queryKey)) return;
+    setLoadingMore(true);
+    try {
+      const p = new URLSearchParams();
+      p.set("page", String(targetPage));
+      p.set("pageSize", String(PAGE_SIZE));
+      if (debouncedQ) p.set("q", debouncedQ);
+      if (state) p.set("state", state);
+      const data = await api.deals(p);
+      const nextItems = replace ? data.items : [...allItems, ...data.items];
+      const nextHasMore = nextItems.length < data.pagination.total;
+      setAllItems(nextItems);
+      setPage(targetPage);
+      setHasMore(nextHasMore);
+      pageCache.set<CachedDeals>(key, {
+        items: nextItems,
+        page: targetPage,
+        hasMore: nextHasMore,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load deals");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
-    (async () => {
+    const cacheHit = pageCache.get<CachedDeals>(queryKey);
+    if (cacheHit) {
+      setAllItems(cacheHit.items);
+      setPage(cacheHit.page);
+      setHasMore(cacheHit.hasMore);
+      setLoading(false);
+    } else {
+      setAllItems([]);
+      setPage(0);
+      setHasMore(true);
       setLoading(true);
-      try {
-        const data = await api.deals(params);
-        setItems(data.items);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load deals");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [params]);
+    }
+    void loadPage(1, true, queryKey);
+  }, [queryKey]);
+
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+    const thresholdPx = 120;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom <= thresholdPx) {
+      void loadPage(page + 1);
+    }
+  }
+
+  const items = useMemo(
+    () => allItems.filter((d) => !state || d.state === state),
+    [allItems, state],
+  );
 
   return (
     <div className="space-y-4">
       <section className="card p-5">
         <h2 className="text-2xl font-semibold">Deals</h2>
-        <select className="input mt-4 max-w-xs" value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">All states</option>
-          <option value="Qualified">Qualified</option>
-          <option value="Pending">Pending</option>
-          <option value="Connected">Connected</option>
-          <option value="Completed">Completed</option>
-          <option value="Failed">Failed</option>
-        </select>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <input
+            className="input"
+            placeholder="Search by lead, campaign, or reason"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
+            <option value="">All states</option>
+            <option value="Qualified">Qualified</option>
+            <option value="Pending">Pending</option>
+            <option value="Connected">Connected</option>
+            <option value="Completed">Completed</option>
+            <option value="Failed">Failed</option>
+          </select>
+        </div>
       </section>
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}
       {loading ? (
         <TableSkeleton rows={8} cols={6} />
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="h-[calc(100vh-15rem)] min-h-88 overflow-auto"
+          >
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th">Lead</th>
@@ -75,7 +144,15 @@ export default function DealsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+              <div className="border-t border-slate-800 px-4 py-3 text-center text-xs text-slate-400">
+                {loadingMore
+                  ? "Loading more deals..."
+                  : hasMore
+                    ? "Scroll down to load more"
+                    : "All deals loaded"}
+              </div>
+            </div>
         </section>
       )}
     </div>

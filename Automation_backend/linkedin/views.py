@@ -375,12 +375,23 @@ def api_leads(request):
 @login_required
 @require_GET
 def api_deals(request):
+    from django.db.models import Q
+
     page = _parse_int(request.GET.get("page"), 1, 1, 100000)
     page_size = _parse_int(request.GET.get("pageSize"), 25, 1, 200)
+    search = (request.GET.get("q") or "").strip()
     state = (request.GET.get("state") or "").strip()
     campaign_id = request.GET.get("campaignId")
 
     qs = Deal.objects.select_related("lead", "campaign").order_by("-update_date")
+    if search:
+        qs = qs.filter(
+            Q(lead__first_name__icontains=search)
+            | Q(lead__last_name__icontains=search)
+            | Q(lead__public_identifier__icontains=search)
+            | Q(campaign__name__icontains=search)
+            | Q(reason__icontains=search)
+        )
     if state:
         qs = qs.filter(state=state)
     if campaign_id:
@@ -415,11 +426,23 @@ def api_deals(request):
 @login_required
 @require_GET
 def api_tasks(request):
+    from django.db.models import Q
+
     page = _parse_int(request.GET.get("page"), 1, 1, 100000)
     page_size = _parse_int(request.GET.get("pageSize"), 25, 1, 200)
+    search = (request.GET.get("q") or "").strip()
     status = (request.GET.get("status") or "").strip()
 
     qs = Task.objects.select_related("deal", "deal__lead").order_by("-created_at")
+    if search:
+        qs = qs.filter(
+            Q(task_type__icontains=search)
+            | Q(status__icontains=search)
+            | Q(error__icontains=search)
+            | Q(deal__lead__first_name__icontains=search)
+            | Q(deal__lead__last_name__icontains=search)
+            | Q(deal__lead__public_identifier__icontains=search)
+        )
     if status:
         qs = qs.filter(status=status)
 
@@ -478,14 +501,26 @@ def api_message_drafts(request):
 @login_required
 @require_GET
 def api_action_logs(request):
+    from django.db.models import Q
+
     page = _parse_int(request.GET.get("page"), 1, 1, 100000)
     page_size = _parse_int(request.GET.get("pageSize"), 25, 1, 200)
+    search = (request.GET.get("q") or "").strip()
     action_type = (request.GET.get("type") or "").strip()
     status = (request.GET.get("status") or "").strip()
     profile_id = request.GET.get("profileId")
     campaign_id = request.GET.get("campaignId")
 
     qs = ActionLog.objects.select_related("linkedin_profile", "linkedin_profile__user", "campaign").order_by("-created_at")
+    if search:
+        qs = qs.filter(
+            Q(target_name__icontains=search)
+            | Q(target_public_id__icontains=search)
+            | Q(note__icontains=search)
+            | Q(campaign__name__icontains=search)
+            | Q(linkedin_profile__linkedin_username__icontains=search)
+            | Q(linkedin_profile__user__username__icontains=search)
+        )
     if action_type:
         qs = qs.filter(action_type=action_type)
     if status:
@@ -561,13 +596,17 @@ def api_linkedin_profile_toggle(request, profile_id: int):
 @require_GET
 def api_search_keywords(request):
     from linkedin.models import SearchKeyword
+    from django.db.models import Q
 
     page = _parse_int(request.GET.get("page"), 1, 1, 100000)
     page_size = _parse_int(request.GET.get("pageSize"), 50, 1, 500)
+    search = (request.GET.get("q") or "").strip()
     campaign_id = request.GET.get("campaignId")
     used = request.GET.get("used")
 
     qs = SearchKeyword.objects.select_related("campaign").order_by("-id")
+    if search:
+        qs = qs.filter(Q(keyword__icontains=search) | Q(campaign__name__icontains=search))
     if campaign_id:
         qs = qs.filter(campaign_id=campaign_id)
     if used in {"true", "false"}:

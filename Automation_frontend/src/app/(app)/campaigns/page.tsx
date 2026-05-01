@@ -3,8 +3,12 @@
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import { TableSkeleton } from "@/components/skeleton";
 import type { Campaign, LinkedInProfileItem } from "@/lib/types";
+
+const CAMPAIGNS_KEY = "campaigns.list";
+const PROFILES_KEY = "linkedin-profiles.list";
 
 type FormState = {
   name: string;
@@ -25,17 +29,19 @@ const blankForm: FormState = {
 };
 
 export default function CampaignsPage() {
-  const [items, setItems] = useState<Campaign[]>([]);
-  const [profiles, setProfiles] = useState<LinkedInProfileItem[]>([]);
+  const cachedCampaigns = pageCache.get<Campaign[]>(CAMPAIGNS_KEY);
+  const cachedProfiles = pageCache.get<LinkedInProfileItem[]>(PROFILES_KEY);
+  const [items, setItems] = useState<Campaign[]>(cachedCampaigns ?? []);
+  const [profiles, setProfiles] = useState<LinkedInProfileItem[]>(cachedProfiles ?? []);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedCampaigns);
   const [creating, setCreating] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<FormState>(blankForm);
 
-  async function loadAll() {
-    setLoading(true);
+  async function loadAll(showSkeleton = false) {
+    if (showSkeleton) setLoading(true);
     try {
       const [campaignsRes, profilesRes] = await Promise.all([
         api.campaigns(),
@@ -43,6 +49,8 @@ export default function CampaignsPage() {
       ]);
       setItems(campaignsRes.items);
       setProfiles(profilesRes.items);
+      pageCache.set(CAMPAIGNS_KEY, campaignsRes.items);
+      pageCache.set(PROFILES_KEY, profilesRes.items);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load campaigns");
     } finally {
@@ -98,6 +106,7 @@ export default function CampaignsPage() {
       setInfo("Campaign created successfully.");
       setShowModal(false);
       setForm(blankForm);
+      pageCache.clear(CAMPAIGNS_KEY);
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create campaign");
@@ -136,7 +145,8 @@ export default function CampaignsPage() {
         </section>
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div className="h-[calc(100vh-15rem)] min-h-88 overflow-auto">
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th">Name</th>
@@ -185,7 +195,8 @@ export default function CampaignsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+            </div>
         </section>
       )}
 

@@ -25,7 +25,7 @@ type CacheEntry = {
   expiresAt: number;
 };
 
-const CACHE_TTL_MS = 60_000; // 60s default page-data cache
+const CACHE_TTL_MS = 5 * 60_000; // 5 minute default GET cache
 const responseCache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<unknown>>();
 
@@ -124,11 +124,7 @@ export const api = {
   logout: () => request<Record<string, never>>("/api/auth/logout", { method: "POST" }),
   me: () => request<{ user: User }>("/api/auth/me"),
   dashboard: () =>
-    request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>(
-      "/api/dashboard",
-      undefined,
-      { bypassCache: true },
-    ),
+    request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>("/api/dashboard"),
   campaigns: () => request<{ items: Campaign[] }>("/api/campaigns"),
   createCampaign: (payload: {
     name: string;
@@ -194,10 +190,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(patch),
     }),
-  analytics: (days = 14) =>
-    request<AnalyticsData>(`/api/analytics?days=${days}`, undefined, { bypassCache: true }),
-  googleStatus: () =>
-    request<{ google: GoogleStatus }>("/api/google/status", undefined, { bypassCache: true }),
+  analytics: (days = 14) => request<AnalyticsData>(`/api/analytics?days=${days}`),
+  googleStatus: () => request<{ google: GoogleStatus }>("/api/google/status"),
   googleSheets: () => request<{ items: GoogleSheetItem[] }>("/api/google/sheets"),
   invalidateCache: () => clearApiCache(),
 };

@@ -6,29 +6,36 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton, TableSkeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { GoogleSheetItem, GoogleStatus } from "@/lib/types";
 
+const STATUS_KEY = "google.status";
+const SHEETS_KEY = "google.sheets";
+
 export default function GooglePage() {
-  const [status, setStatus] = useState<GoogleStatus | null>(null);
-  const [sheets, setSheets] = useState<GoogleSheetItem[]>([]);
+  const cachedStatus = pageCache.get<GoogleStatus>(STATUS_KEY);
+  const cachedSheets = pageCache.get<GoogleSheetItem[]>(SHEETS_KEY);
+  const [status, setStatus] = useState<GoogleStatus | null>(cachedStatus ?? null);
+  const [sheets, setSheets] = useState<GoogleSheetItem[]>(cachedSheets ?? []);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedStatus);
   const [sheetsLoading, setSheetsLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      setLoading(true);
       try {
         const s = await api.googleStatus();
         if (!mounted) return;
         setStatus(s.google);
+        pageCache.set(STATUS_KEY, s.google);
         if (s.google.connected) {
-          setSheetsLoading(true);
+          if (!cachedSheets) setSheetsLoading(true);
           try {
             const list = await api.googleSheets();
             if (!mounted) return;
             setSheets(list.items);
+            pageCache.set(SHEETS_KEY, list.items);
           } finally {
             if (mounted) setSheetsLoading(false);
           }
@@ -43,7 +50,7 @@ export default function GooglePage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [cachedSheets]);
 
   return (
     <div className="space-y-4">
@@ -106,7 +113,8 @@ export default function GooglePage() {
           <EmptyState title="No spreadsheets found" description="Create a sheet in Google to see it here." />
         ) : (
           <div className="card overflow-hidden">
-            <table className="w-full">
+            <div className="h-[calc(100vh-15rem)] min-h-88 overflow-auto">
+              <table className="w-full">
               <thead>
                 <tr>
                   <th className="th">Name</th>
@@ -143,7 +151,8 @@ export default function GooglePage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         )}
       </section>

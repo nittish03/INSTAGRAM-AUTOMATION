@@ -1,36 +1,47 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { Campaign, SearchKeywordItem } from "@/lib/types";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+
+const KEYWORDS_KEY = "search-keywords.paged";
+const CAMPAIGNS_KEY = "campaigns.list";
+const PAGE_SIZE = 100;
+
+type CachedKeywords = {
+  items: SearchKeywordItem[];
+  page: number;
+  hasMore: boolean;
+};
 
 export default function SearchKeywordsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [items, setItems] = useState<SearchKeywordItem[]>([]);
+  const [q, setQ] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
   const [usedFilter, setUsedFilter] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
-  const [total, setTotal] = useState(0);
+  const debouncedQ = useDebouncedValue(q.trim(), 300);
+  const queryKey = `${KEYWORDS_KEY}:${debouncedQ}:${campaignFilter}:${usedFilter}`;
+  const cachedKeywords = pageCache.get<CachedKeywords>(queryKey);
+  const cachedCampaigns = pageCache.get<Campaign[]>(CAMPAIGNS_KEY);
+  const [campaigns, setCampaigns] = useState<Campaign[]>(cachedCampaigns ?? []);
+  const [allItems, setAllItems] = useState<SearchKeywordItem[]>(cachedKeywords?.items ?? []);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedKeywords);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(cachedKeywords?.page ?? 0);
+  const [hasMore, setHasMore] = useState(cachedKeywords?.hasMore ?? true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const [newKeyword, setNewKeyword] = useState("");
-  const [newCampaignId, setNewCampaignId] = useState<number | "">("");
+  const [newCampaignId, setNewCampaignId] = useState<number | "">(
+    cachedCampaigns?.[0]?.id ?? "",
+  );
   const [creating, setCreating] = useState(false);
-
-  const params = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set("page", String(page));
-    p.set("pageSize", String(pageSize));
-    if (campaignFilter) p.set("campaignId", campaignFilter);
-    if (usedFilter) p.set("used", usedFilter);
-    return p;
-  }, [campaignFilter, usedFilter, page, pageSize]);
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +50,8 @@ export default function SearchKeywordsPage() {
         const c = await api.campaigns();
         if (!mounted) return;
         setCampaigns(c.items);
-        if (c.items[0]) setNewCampaignId(c.items[0].id);
+        pageCache.set(CAMPAIGNS_KEY, c.items);
+        if (!cachedCampaigns?.length && c.items[0]) setNewCampaignId(c.items[0].id);
       } catch (e) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load campaigns");
@@ -48,41 +60,53 @@ export default function SearchKeywordsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [cachedCampaigns]);
 
-  async function load() {
-    setLoading(true);
+  async function loadPage(targetPage: number, replace = false, showSkeleton = false, key = queryKey) {
+    if (loadingMore || (!replace && !hasMore && key === queryKey)) return;
+    if (showSkeleton) setLoading(true);
+    setLoadingMore(true);
     try {
-      const data = await api.searchKeywords(params);
-      setItems(data.items);
-      setTotal(data.pagination.total);
+      const p = new URLSearchParams();
+      p.set("page", String(targetPage));
+      p.set("pageSize", String(PAGE_SIZE));
+      if (debouncedQ) p.set("q", debouncedQ);
+      if (campaignFilter) p.set("campaignId", campaignFilter);
+      if (usedFilter) p.set("used", usedFilter);
+      const data = await api.searchKeywords(p);
+      const nextItems = replace ? data.items : [...allItems, ...data.items];
+      const nextHasMore = nextItems.length < data.pagination.total;
+      setAllItems(nextItems);
+      setCurrentPage(targetPage);
+      setHasMore(nextHasMore);
+      pageCache.set<CachedKeywords>(key, {
+        items: nextItems,
+        page: targetPage,
+        hasMore: nextHasMore,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load keywords");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
+    const cacheHit = pageCache.get<CachedKeywords>(queryKey);
+    if (cacheHit) {
+      setAllItems(cacheHit.items);
+      setCurrentPage(cacheHit.page);
+      setHasMore(cacheHit.hasMore);
+      setLoading(false);
+    } else {
+      setAllItems([]);
+      setCurrentPage(0);
+      setHasMore(true);
       setLoading(true);
-      try {
-        const data = await api.searchKeywords(params);
-        if (!mounted) return;
-        setItems(data.items);
-        setTotal(data.pagination.total);
-      } catch (e) {
-        if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load keywords");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [params]);
+    }
+    void loadPage(1, true, false, queryKey);
+  }, [queryKey]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -92,7 +116,8 @@ export default function SearchKeywordsPage() {
     try {
       await api.createSearchKeyword(Number(newCampaignId), newKeyword.trim());
       setNewKeyword("");
-      await load();
+      pageCache.clear(queryKey);
+      await loadPage(1, true, true, queryKey);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
     } finally {
@@ -104,19 +129,37 @@ export default function SearchKeywordsPage() {
     if (!confirm("Delete this keyword?")) return;
     try {
       await api.deleteSearchKeyword(id);
-      await load();
+      pageCache.clear(queryKey);
+      await loadPage(1, true, true, queryKey);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     }
   }
 
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const filtered = useMemo(() => allItems, [allItems]);
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+    const thresholdPx = 120;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom <= thresholdPx) {
+      void loadPage(currentPage + 1);
+    }
+  }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Search Keywords"
         description="Per-campaign keyword pool used by the bot for prospect discovery."
+        actions={
+          <input
+            className="input max-w-[260px]"
+            placeholder="Search keyword or campaign"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        }
       />
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}
 
@@ -153,10 +196,7 @@ export default function SearchKeywordsPage() {
         <select
           className="input max-w-[220px]"
           value={campaignFilter}
-          onChange={(e) => {
-            setCampaignFilter(e.target.value);
-            setPage(1);
-          }}
+          onChange={(e) => setCampaignFilter(e.target.value)}
         >
           <option value="">All campaigns</option>
           {campaigns.map((c) => (
@@ -168,10 +208,7 @@ export default function SearchKeywordsPage() {
         <select
           className="input max-w-[160px]"
           value={usedFilter}
-          onChange={(e) => {
-            setUsedFilter(e.target.value);
-            setPage(1);
-          }}
+          onChange={(e) => setUsedFilter(e.target.value)}
         >
           <option value="">All</option>
           <option value="false">Unused</option>
@@ -181,11 +218,16 @@ export default function SearchKeywordsPage() {
 
       {loading ? (
         <TableSkeleton rows={6} cols={4} />
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState title="No keywords found" description="Add keywords above to seed the bot." />
       ) : (
         <section className="card overflow-hidden">
-          <table className="w-full">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="h-[calc(100vh-15rem)] min-h-88 overflow-auto"
+          >
+            <table className="w-full">
             <thead>
               <tr>
                 <th className="th">Keyword</th>
@@ -196,7 +238,7 @@ export default function SearchKeywordsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((k) => (
+              {filtered.map((k) => (
                 <tr key={k.id}>
                   <td className="td">{k.keyword}</td>
                   <td className="td">{k.campaign.name}</td>
@@ -220,31 +262,17 @@ export default function SearchKeywordsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+              <div className="border-t border-slate-800 px-4 py-3 text-center text-xs text-slate-400">
+                {loadingMore
+                  ? "Loading more keywords..."
+                  : hasMore
+                    ? "Scroll down to load more"
+                    : `All loaded (${filtered.length})`}
+              </div>
+            </div>
         </section>
       )}
-
-      <div className="flex items-center justify-between text-sm text-slate-400">
-        <span>
-          Page {page} of {pageCount} - {total} total
-        </span>
-        <div className="flex gap-2">
-          <button
-            className="btn-secondary disabled:opacity-50"
-            disabled={page <= 1 || loading}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Previous
-          </button>
-          <button
-            className="btn-secondary disabled:opacity-50"
-            disabled={page >= pageCount || loading}
-            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-          >
-            Next
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

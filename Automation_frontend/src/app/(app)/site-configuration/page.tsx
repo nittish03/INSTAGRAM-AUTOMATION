@@ -5,9 +5,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
+import { pageCache } from "@/lib/page-cache";
 import type { SiteConfig } from "@/lib/types";
 
 type FormState = SiteConfig & { llmApiKey?: string };
+
+const CONFIG_KEY = "site-configuration.config";
+const PROVIDERS_KEY = "site-configuration.providers";
 
 const blank: FormState = {
   llmProvider: "openai",
@@ -24,10 +28,14 @@ const blank: FormState = {
 };
 
 export default function SiteConfigurationPage() {
-  const [form, setForm] = useState<FormState>(blank);
-  const [initialForm, setInitialForm] = useState<FormState>(blank);
-  const [providers, setProviders] = useState<{ value: string; label: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedConfig = pageCache.get<FormState>(CONFIG_KEY);
+  const cachedProviders = pageCache.get<{ value: string; label: string }[]>(PROVIDERS_KEY);
+  const [form, setForm] = useState<FormState>(cachedConfig ?? blank);
+  const [initialForm, setInitialForm] = useState<FormState>(cachedConfig ?? blank);
+  const [providers, setProviders] = useState<{ value: string; label: string }[]>(
+    cachedProviders ?? [],
+  );
+  const [loading, setLoading] = useState(!cachedConfig);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -35,7 +43,6 @@ export default function SiteConfigurationPage() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      setLoading(true);
       try {
         const res = await api.siteConfig();
         if (!mounted) return;
@@ -43,6 +50,8 @@ export default function SiteConfigurationPage() {
         setForm(loaded);
         setInitialForm(loaded);
         setProviders(res.providerChoices);
+        pageCache.set(CONFIG_KEY, loaded);
+        pageCache.set(PROVIDERS_KEY, res.providerChoices);
       } catch (e) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -92,6 +101,7 @@ export default function SiteConfigurationPage() {
       setForm((f) => {
         const next = { ...f, llmApiKey: "", hasLlmApiKey: f.hasLlmApiKey || !!f.llmApiKey };
         setInitialForm(next);
+        pageCache.set(CONFIG_KEY, next);
         return next;
       });
     } catch (e) {
