@@ -12,4 +12,5 @@ venv/
 .cache/
 tests/fixtures/pages/**/*.html
 leadpilot.log
-models/
+# Only ignore a top-level runtime models cache, not in-app `models/` packages
+/models/
