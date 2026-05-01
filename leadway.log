@@ -1,0 +1,431 @@
+INFO 2026-04-28 12:28:00,657 onboarding 63727 8419799296 Created campaign: My Outreach
+INFO 2026-04-28 12:28:02,390 onboarding 63727 8419799296 Created LinkedIn profile for eshukoli.mba@gmail.com (handle=eshukoli_mba)
+INFO 2026-04-28 12:28:03,429 onboarding 63727 8419799296 Onboarding successful — Leadway is ready.
+INFO 2026-04-28 12:29:00,066 autoreload 67148 8419799296 Watching for file changes with StatReloader
+WARNING 2026-04-28 12:29:10,285 log 67148 6171127808 Not Found: /
+WARNING 2026-04-28 12:29:10,286 log 67148 6171127808 "GET / HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:10,404 log 67148 6171127808 Not Found: /favicon.ico
+WARNING 2026-04-28 12:29:10,404 log 67148 6171127808 "GET /favicon.ico HTTP/1.1" 404 179
+INFO 2026-04-28 12:29:20,143 log 67148 6171127808 "GET /admin HTTP/1.1" 301 0
+INFO 2026-04-28 12:29:20,173 log 67148 6171127808 "GET /admin/ HTTP/1.1" 302 0
+INFO 2026-04-28 12:29:20,194 log 67148 6171127808 "GET /admin/login/?next=/admin/ HTTP/1.1" 200 11880
+WARNING 2026-04-28 12:29:20,221 log 67148 6171127808 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 12:29:20,222 log 67148 6204780544 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 12:29:20,222 log 67148 6171127808 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,222 log 67148 6187954176 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 12:29:20,223 log 67148 6221606912 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 12:29:20,227 log 67148 6255259648 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 12:29:20,225 log 67148 6171127808 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 12:29:20,225 log 67148 6204780544 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,227 log 67148 6187954176 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,225 log 67148 6238433280 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 12:29:20,227 log 67148 6171127808 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,227 log 67148 6221606912 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,228 log 67148 6204780544 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 12:29:20,229 log 67148 6255259648 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,229 log 67148 6238433280 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,230 log 67148 6204780544 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,235 log 67148 6204780544 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 12:29:20,236 log 67148 6238433280 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 12:29:20,236 log 67148 6221606912 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 12:29:20,237 log 67148 6255259648 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 12:29:20,238 log 67148 6204780544 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,238 log 67148 6171127808 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 12:29:20,239 log 67148 6255259648 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,240 log 67148 6171127808 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,240 log 67148 6238433280 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:20,239 log 67148 6221606912 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+INFO 2026-04-28 12:29:24,586 log 67148 6171127808 "POST /admin/login/?next=/admin/ HTTP/1.1" 200 12720
+WARNING 2026-04-28 12:29:24,623 log 67148 6171127808 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 12:29:24,624 log 67148 6255259648 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 12:29:24,625 log 67148 6204780544 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 12:29:24,623 log 67148 6221606912 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 12:29:24,626 log 67148 6171127808 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,628 log 67148 6171127808 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 12:29:24,624 log 67148 6238433280 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 12:29:24,627 log 67148 6221606912 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,625 log 67148 6187954176 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 12:29:24,629 log 67148 6204780544 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,629 log 67148 6171127808 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,628 log 67148 6255259648 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,629 log 67148 6238433280 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+INFO 2026-04-28 12:29:24,630 basehttp 67148 6238433280 - Broken pipe from ('127.0.0.1', 64717)
+WARNING 2026-04-28 12:29:24,632 log 67148 6255259648 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 12:29:24,633 log 67148 6171127808 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 12:29:24,633 log 67148 6221606912 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 12:29:24,634 log 67148 6204780544 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 12:29:24,629 log 67148 6187954176 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,637 log 67148 6204780544 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,635 log 67148 6255259648 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,635 log 67148 6171127808 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,635 log 67148 6221606912 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,635 log 67148 6272086016 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 12:29:24,638 log 67148 6187954176 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 12:29:24,639 log 67148 6272086016 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:24,639 log 67148 6187954176 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+INFO 2026-04-28 12:29:42,367 log 67148 6187954176 "POST /admin/login/?next=/admin/ HTTP/1.1" 302 0
+INFO 2026-04-28 12:29:45,174 log 67148 6187954176 "GET /admin/ HTTP/1.1" 200 42929
+WARNING 2026-04-28 12:29:45,208 log 67148 6187954176 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 12:29:45,209 log 67148 6272086016 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 12:29:45,209 log 67148 6204780544 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 12:29:45,211 log 67148 6171127808 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 12:29:45,212 log 67148 6187954176 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,211 log 67148 6255259648 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 12:29:45,211 log 67148 6272086016 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,211 log 67148 6204780544 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,210 log 67148 6221606912 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 12:29:45,212 log 67148 6171127808 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,212 log 67148 6221606912 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,212 log 67148 6255259648 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,217 log 67148 6187954176 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 12:29:45,217 log 67148 6272086016 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 12:29:45,217 log 67148 6187954176 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,217 log 67148 6272086016 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,223 log 67148 6272086016 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 12:29:45,224 log 67148 6255259648 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 12:29:45,225 log 67148 6221606912 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 12:29:45,224 log 67148 6187954176 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 12:29:45,225 log 67148 6171127808 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 12:29:45,226 log 67148 6272086016 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,226 log 67148 6221606912 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,226 log 67148 6187954176 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,226 log 67148 6255259648 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:45,227 log 67148 6171127808 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+INFO 2026-04-28 12:29:51,139 log 67148 6171127808 "GET /admin/ HTTP/1.1" 200 42929
+WARNING 2026-04-28 12:29:51,173 log 67148 6171127808 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 12:29:51,174 log 67148 6187954176 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 12:29:51,174 log 67148 6221606912 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 12:29:51,175 log 67148 6171127808 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,175 log 67148 6221606912 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,175 log 67148 6187954176 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,179 log 67148 6221606912 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 12:29:51,180 log 67148 6187954176 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 12:29:51,181 log 67148 6221606912 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,181 log 67148 6187954176 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,180 log 67148 6171127808 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 12:29:51,182 log 67148 6171127808 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,184 log 67148 6171127808 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 12:29:51,184 log 67148 6187954176 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 12:29:51,184 log 67148 6171127808 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,184 log 67148 6187954176 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,187 log 67148 6187954176 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 12:29:51,188 log 67148 6221606912 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 12:29:51,187 log 67148 6171127808 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 12:29:51,188 log 67148 6187954176 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,188 log 67148 6171127808 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,188 log 67148 6221606912 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,190 log 67148 6171127808 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 12:29:51,190 log 67148 6221606912 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 12:29:51,191 log 67148 6171127808 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,191 log 67148 6221606912 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 12:29:51,197 log 67148 6221606912 Not Found: /favicon.ico
+WARNING 2026-04-28 12:29:51,197 log 67148 6221606912 "GET /favicon.ico HTTP/1.1" 404 179
+INFO 2026-04-28 12:30:04,584 rundaemon 67759 8419799296 Leadway dev
+INFO 2026-04-28 12:30:19,485 login 67759 8419799296 [36mFresh login sequence starting[0m for eshukoli.mba@gmail.com
+INFO 2026-04-28 12:31:28,539 login 67759 8419799296 [1m[32mLogin successful – session saved[0m
+INFO 2026-04-28 12:31:28,540 login 67759 8419799296 [1m[32mBrowser ready[0m
+INFO 2026-04-28 12:31:30,749 self_profile 67759 8419799296 Self-profile discovered: https://www.linkedin.com/in/eshller/
+INFO 2026-04-28 12:31:31,049 gdpr 67759 8419799296 Non-GDPR country (in): auto-enabled newsletter for eshukoli.mba@gmail.com
+INFO 2026-04-28 12:31:32,760 newsletter 67759 8419799296 Newsletter: successfully added eshukoli.mba@gmail.com
+INFO 2026-04-28 12:31:53,290 daemon 67759 8419799296 Task queue healed: 1 pending tasks
+INFO 2026-04-28 12:31:53,293 daemon 67759 8419799296 [1m[32mDaemon started[0m — 1 campaigns, task queue worker
+INFO 2026-04-28 12:32:36,521 diagnostics 67759 8419799296 Failure diagnostics saved → /tmp/leadway-diagnostics/2026-04-28_123235_ChatGoogleGenerativeAIError
+ERROR 2026-04-28 12:32:36,841 daemon 67759 8419799296 Task connect [failed] scheduled=2026-04-28 12:31:52.392003+00:00 failed
+Traceback (most recent call last):
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 3071, in _generate
+    response: GenerateContentResponse = self.client.models.generate_content(
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        **request,
+        ^^^^^^^^^^
+    )
+    ^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/models.py", line 6276, in generate_content
+    response = self._generate_content(
+        model=model, contents=contents, config=parsed_config
+    )
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/models.py", line 4730, in _generate_content
+    response = self._api_client.request(
+        'post', path, request_dict, http_options
+    )
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1537, in request
+    response = self._request(http_request, http_options, stream=False)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1330, in _request
+    return retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ~~~~~~~~~~~~~~~~~^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/_base.py", line 443, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/_base.py", line 395, in __get_result
+    raise self._exception
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1309, in _request_once
+    errors.APIError.raise_for_response(response)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/errors.py", line 155, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/google/genai/errors.py", line 184, in raise_error
+    raise ClientError(status_code, response_json, response)
+google.genai.errors.ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-pro\nPlease retry in 24.470797773s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_input_token_count', 'quotaId': 'GenerateContentInputTokensPerModelPerDay-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_input_token_count', 'quotaId': 'GenerateContentInputTokensPerModelPerMinute-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '24s'}]}}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/daemon.py", line 293, in run_daemon
+    handler(task, session, qualifiers)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/tasks/connect.py", line 98, in handle_connect
+    candidate = strategy.find_candidate(session)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/tasks/connect.py", line 63, in <lambda>
+    find_candidate=lambda s: find_candidate(s, qualifier),
+                             ~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/pipeline/pools.py", line 150, in find_candidate
+    public_id = next(qualify, None)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/pipeline/pools.py", line 110, in qualify_source
+    if next(search, None) is None:
+       ~~~~^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/pipeline/pools.py", line 88, in search_source
+    keyword = run_search(session)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/pipeline/search.py", line 29, in run_search
+    fresh = generate_search_keywords(
+        product_docs=campaign.product_docs,
+        campaign_objective=campaign.campaign_objective,
+        exclude_keywords=used if used else None,
+    )
+  File "/Users/eshller/Documents/Code/Eshway_Automation/linkedin/pipeline/search_keywords.py", line 67, in generate_search_keywords
+    result = structured_llm.invoke(prompt)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 3199, in invoke
+    input_ = context.run(step.invoke, input_, config, **kwargs)
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 5739, in invoke
+    return self.bound.invoke(
+           ~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+        self._merge_configs(config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **{**self.kwargs, **kwargs},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 2559, in invoke
+    return super().invoke(input, config, stop=stop, **kwargs)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 471, in invoke
+    self.generate_prompt(
+    ~~~~~~~~~~~~~~~~~~~~^
+        [self._convert_input(input)],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ).generations[0][0],
+    ^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1749, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1556, in generate
+    self._generate_with_cache(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        m,
+        ^^
+    ...<2 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    )
+    ^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1896, in _generate_with_cache
+    result = self._generate(
+        messages, stop=stop, run_manager=run_manager, **kwargs
+    )
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 3075, in _generate
+    _handle_client_error(e, request)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/Users/eshller/Documents/Code/Eshway_Automation/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 166, in _handle_client_error
+    raise ChatGoogleGenerativeAIError(msg) from e
+langchain_google_genai.chat_models.ChatGoogleGenerativeAIError: Error calling model 'gemini-3.1-pro-preview' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-pro\nPlease retry in 24.470797773s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_input_token_count', 'quotaId': 'GenerateContentInputTokensPerModelPerDay-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_input_token_count', 'quotaId': 'GenerateContentInputTokensPerModelPerMinute-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.1-pro'}}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '24s'}]}}
+INFO 2026-04-28 12:32:37,142 daemon 67759 8419799296 Queue empty — nothing to do
+INFO 2026-04-28 12:32:37,383 session 67759 8419799296 Browser closed gracefully (eshukoli.mba@gmail.com)
+INFO 2026-04-28 12:32:37,383 session 67759 8419799296 Account session closed → eshukoli.mba@gmail.com
+INFO 2026-04-28 13:03:43,585 autoreload 92315 8419799296 Watching for file changes with StatReloader
+INFO 2026-04-28 13:03:52,200 log 92315 6202028032 "GET /admin/ HTTP/1.1" 200 42929
+WARNING 2026-04-28 13:03:52,237 log 92315 6235680768 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 13:03:52,237 log 92315 6269333504 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 13:03:52,239 log 92315 6286159872 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 13:03:52,237 log 92315 6202028032 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 13:03:52,239 log 92315 6235680768 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,237 log 92315 6218854400 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 13:03:52,238 log 92315 6252507136 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 13:03:52,239 log 92315 6218854400 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,239 log 92315 6286159872 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,239 log 92315 6202028032 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,239 log 92315 6269333504 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,240 log 92315 6252507136 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,248 log 92315 6235680768 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 13:03:52,249 log 92315 6269333504 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 13:03:52,249 log 92315 6235680768 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,249 log 92315 6269333504 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,253 log 92315 6269333504 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 13:03:52,254 log 92315 6252507136 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 13:03:52,253 log 92315 6235680768 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 13:03:52,254 log 92315 6218854400 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 13:03:52,255 log 92315 6202028032 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 13:03:52,255 log 92315 6252507136 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,256 log 92315 6269333504 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,256 log 92315 6202028032 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,255 log 92315 6235680768 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:52,255 log 92315 6218854400 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:54,193 log 92315 6202028032 Not Found: /
+WARNING 2026-04-28 13:03:54,193 log 92315 6202028032 "GET / HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:55,116 log 92315 6202028032 Not Found: /
+WARNING 2026-04-28 13:03:55,117 log 92315 6202028032 "GET / HTTP/1.1" 404 179
+INFO 2026-04-28 13:03:59,842 log 92315 6202028032 "GET /admin/ HTTP/1.1" 200 42929
+WARNING 2026-04-28 13:03:59,885 log 92315 6202028032 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 13:03:59,886 log 92315 6269333504 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 13:03:59,887 log 92315 6286159872 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 13:03:59,885 log 92315 6218854400 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 13:03:59,888 log 92315 6286159872 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,888 log 92315 6269333504 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,886 log 92315 6235680768 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 13:03:59,888 log 92315 6202028032 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,887 log 92315 6252507136 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 13:03:59,888 log 92315 6218854400 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,888 log 92315 6235680768 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,888 log 92315 6252507136 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,891 log 92315 6269333504 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 13:03:59,892 log 92315 6202028032 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 13:03:59,892 log 92315 6202028032 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,892 log 92315 6269333504 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,901 log 92315 6269333504 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 13:03:59,901 log 92315 6202028032 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 13:03:59,902 log 92315 6252507136 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 13:03:59,902 log 92315 6235680768 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 13:03:59,903 log 92315 6252507136 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,903 log 92315 6269333504 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,903 log 92315 6202028032 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,902 log 92315 6218854400 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 13:03:59,904 log 92315 6218854400 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 13:03:59,903 log 92315 6235680768 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+INFO 2026-04-28 16:56:07,516 autoreload 89629 8419799296 Watching for file changes with StatReloader
+WARNING 2026-04-28 16:56:16,256 base 89629 6132641792 Session data corrupted
+INFO 2026-04-28 16:56:16,268 log 89629 6132641792 "GET /admin/ HTTP/1.1" 302 0
+WARNING 2026-04-28 16:56:17,824 base 89629 6132641792 Session data corrupted
+INFO 2026-04-28 16:56:17,847 log 89629 6132641792 "GET /admin/login/?next=/admin/ HTTP/1.1" 200 11880
+WARNING 2026-04-28 16:56:17,929 log 89629 6132641792 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-28 16:56:17,930 log 89629 6149468160 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-28 16:56:17,930 log 89629 6166294528 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-28 16:56:17,931 log 89629 6183120896 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-28 16:56:17,932 log 89629 6132641792 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,931 log 89629 6199947264 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-28 16:56:17,932 log 89629 6216773632 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-28 16:56:17,932 log 89629 6149468160 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,932 log 89629 6166294528 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,932 log 89629 6183120896 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,932 log 89629 6199947264 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,933 log 89629 6216773632 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,938 log 89629 6132641792 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-28 16:56:17,939 log 89629 6149468160 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-28 16:56:17,939 log 89629 6132641792 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,939 log 89629 6149468160 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,943 log 89629 6149468160 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-28 16:56:17,944 log 89629 6216773632 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-28 16:56:17,946 log 89629 6199947264 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-28 16:56:17,945 log 89629 6132641792 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-28 16:56:17,945 log 89629 6183120896 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-28 16:56:17,946 log 89629 6149468160 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,946 log 89629 6199947264 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,946 log 89629 6216773632 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,947 log 89629 6183120896 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-28 16:56:17,946 log 89629 6132641792 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:52,373 base 89629 6233600000 Session data corrupted
+INFO 2026-04-29 06:13:54,446 log 89629 6233600000 "POST /admin/login/?next=/admin/ HTTP/1.1" 302 0
+INFO 2026-04-29 06:13:57,111 log 89629 6233600000 "GET /admin/ HTTP/1.1" 200 42929
+WARNING 2026-04-29 06:13:57,163 log 89629 6233600000 Not Found: /static/unfold/fonts/inter/styles.css
+WARNING 2026-04-29 06:13:57,163 log 89629 6250426368 Not Found: /static/unfold/fonts/material-symbols/styles.css
+WARNING 2026-04-29 06:13:57,164 log 89629 6267252736 Not Found: /static/unfold/css/styles.css
+WARNING 2026-04-29 06:13:57,165 log 89629 6250426368 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,165 log 89629 6267252736 "GET /static/unfold/css/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,165 log 89629 6233600000 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,172 log 89629 6267252736 Not Found: /static/unfold/css/simplebar/simplebar.css
+WARNING 2026-04-29 06:13:57,172 log 89629 6233600000 Not Found: /static/unfold/js/htmx/htmx.js
+WARNING 2026-04-29 06:13:57,173 log 89629 6250426368 Not Found: /static/unfold/js/chart/chart.js
+WARNING 2026-04-29 06:13:57,173 log 89629 6267252736 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,174 log 89629 6233600000 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,174 log 89629 6250426368 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,181 log 89629 6250426368 Not Found: /static/unfold/js/app.js
+WARNING 2026-04-29 06:13:57,181 log 89629 6233600000 Not Found: /static/unfold/js/simplebar/simplebar.js
+WARNING 2026-04-29 06:13:57,182 log 89629 6250426368 "GET /static/unfold/js/app.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,182 log 89629 6233600000 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,185 log 89629 6233600000 Not Found: /static/unfold/js/alpine/alpine.anchor.js
+WARNING 2026-04-29 06:13:57,185 log 89629 6267252736 Not Found: /static/unfold/js/alpine/alpine.sort.js
+WARNING 2026-04-29 06:13:57,186 log 89629 6250426368 Not Found: /static/unfold/js/alpine/alpine.persist.js
+WARNING 2026-04-29 06:13:57,187 log 89629 6233600000 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,187 log 89629 6250426368 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,187 log 89629 6267252736 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,190 log 89629 6250426368 Not Found: /static/unfold/js/alpine/alpine.resize.js
+WARNING 2026-04-29 06:13:57,191 log 89629 6267252736 Not Found: /static/unfold/js/alpine/alpine.js
+WARNING 2026-04-29 06:13:57,191 log 89629 6267252736 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 404 179
+WARNING 2026-04-29 06:13:57,192 log 89629 6250426368 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 404 179
+INFO 2026-04-29 06:14:17,682 autoreload 63241 8419799296 Watching for file changes with StatReloader
+INFO 2026-04-29 06:14:22,251 basehttp 63241 6158774272 - Broken pipe from ('127.0.0.1', 56454)
+INFO 2026-04-29 06:14:23,809 basehttp 63241 6175600640 - Broken pipe from ('127.0.0.1', 56455)
+INFO 2026-04-29 06:14:24,552 log 63241 6192427008 "GET /admin/ HTTP/1.1" 200 42929
+INFO 2026-04-29 06:14:24,592 log 63241 6192427008 "GET /static/unfold/fonts/inter/styles.css HTTP/1.1" 200 608
+INFO 2026-04-29 06:14:24,593 log 63241 6175600640 "GET /static/unfold/css/simplebar/simplebar.css HTTP/1.1" 200 4647
+INFO 2026-04-29 06:14:24,594 log 63241 6209253376 "GET /static/unfold/fonts/material-symbols/styles.css HTTP/1.1" 200 164
+INFO 2026-04-29 06:14:24,595 log 63241 6226079744 "GET /static/unfold/js/htmx/htmx.js HTTP/1.1" 200 50918
+INFO 2026-04-29 06:14:24,596 log 63241 6175600640 "GET /static/unfold/js/app.js HTTP/1.1" 200 30131
+INFO 2026-04-29 06:14:24,596 log 63241 6192427008 "GET /static/unfold/js/simplebar/simplebar.js HTTP/1.1" 200 27176
+INFO 2026-04-29 06:14:24,596 log 63241 6242906112 "GET /static/unfold/js/chart/chart.js HTTP/1.1" 200 200633
+INFO 2026-04-29 06:14:24,597 log 63241 6158774272 "GET /static/unfold/css/styles.css HTTP/1.1" 200 330254
+INFO 2026-04-29 06:14:24,601 log 63241 6158774272 "GET /static/unfold/js/alpine/alpine.anchor.js HTTP/1.1" 200 15524
+INFO 2026-04-29 06:14:24,606 log 63241 6158774272 "GET /static/unfold/js/alpine/alpine.persist.js HTTP/1.1" 200 837
+INFO 2026-04-29 06:14:24,606 log 63241 6242906112 "GET /static/unfold/js/alpine/alpine.sort.js HTTP/1.1" 200 38101
+INFO 2026-04-29 06:14:24,610 log 63241 6242906112 "GET /static/unfold/js/alpine/alpine.resize.js HTTP/1.1" 200 703
+INFO 2026-04-29 06:14:24,611 log 63241 6158774272 "GET /static/unfold/js/alpine/alpine.js HTTP/1.1" 200 44758
+INFO 2026-04-29 06:14:24,640 log 63241 6175600640 "GET /static/unfold/fonts/inter/Inter-Medium.woff2 HTTP/1.1" 200 114348
+INFO 2026-04-29 06:14:24,641 log 63241 6242906112 "GET /static/unfold/fonts/inter/Inter-SemiBold.woff2 HTTP/1.1" 200 114812
+INFO 2026-04-29 06:14:24,641 log 63241 6192427008 "GET /static/unfold/fonts/inter/Inter-Regular.woff2 HTTP/1.1" 200 111268
+INFO 2026-04-29 06:14:24,642 log 63241 6158774272 "GET /static/unfold/fonts/material-symbols/Material-Symbols-Outlined.woff2 HTTP/1.1" 200 291696
+INFO 2026-04-29 06:14:36,913 basehttp 63241 6158774272 - Broken pipe from ('127.0.0.1', 56483)
+INFO 2026-04-29 06:14:39,754 log 63241 6242906112 "GET /admin/analytics/ HTTP/1.1" 200 19926
+INFO 2026-04-29 06:14:44,253 log 63241 6242906112 "GET /admin/ HTTP/1.1" 200 42929
+INFO 2026-04-29 06:14:53,401 log 63241 6242906112 "GET /admin/password_change/ HTTP/1.1" 200 36963
+INFO 2026-04-29 06:14:59,983 basehttp 63241 6242906112 - Broken pipe from ('127.0.0.1', 56489)
+INFO 2026-04-29 06:15:00,895 log 63241 6192427008 "GET /admin/linkedin/campaign/ HTTP/1.1" 200 57456
+INFO 2026-04-29 06:15:00,896 basehttp 63241 6192427008 - Broken pipe from ('127.0.0.1', 56470)
+INFO 2026-04-29 06:15:03,343 log 63241 6175600640 "GET /admin/linkedin/siteconfig/ HTTP/1.1" 200 48662
+INFO 2026-04-29 06:15:03,392 log 63241 6209253376 "GET /static/admin/js/jquery.init.js HTTP/1.1" 200 347
+INFO 2026-04-29 06:15:03,392 log 63241 6158774272 "GET /static/admin/js/core.js HTTP/1.1" 200 6208
+INFO 2026-04-29 06:15:03,393 log 63241 6242906112 "GET /static/admin/js/admin/RelatedObjectLookups.js HTTP/1.1" 200 9241
+INFO 2026-04-29 06:15:03,393 log 63241 6259732480 "GET /static/admin/js/actions.js HTTP/1.1" 200 7977
+INFO 2026-04-29 06:15:03,394 log 63241 6226079744 "GET /static/admin/js/vendor/jquery/jquery.js HTTP/1.1" 200 285314
+INFO 2026-04-29 06:15:03,399 log 63241 6209253376 "GET /static/admin/js/urlify.js HTTP/1.1" 200 7887
+INFO 2026-04-29 06:15:03,400 log 63241 6158774272 "GET /static/admin/js/prepopulate.js HTTP/1.1" 200 1531
+INFO 2026-04-29 06:15:03,400 log 63241 6242906112 "GET /static/admin/js/vendor/xregexp/xregexp.js HTTP/1.1" 200 325171
+INFO 2026-04-29 06:15:04,696 log 63241 6175600640 "GET /admin/jsi18n/ HTTP/1.1" 200 5754
+INFO 2026-04-29 06:15:04,735 log 63241 6175600640 "GET /static/unfold/fonts/inter/Inter-Bold.woff2 HTTP/1.1" 200 114840
+INFO 2026-04-29 06:15:30,389 log 63241 6175600640 "GET /admin/google/ HTTP/1.1" 200 14268
+INFO 2026-04-29 06:15:36,002 log 63241 6175600640 "GET /admin/linkedin/siteconfig/ HTTP/1.1" 200 48662
+INFO 2026-04-29 06:15:40,917 log 63241 6175600640 "GET /admin/linkedin/actionlog/ HTTP/1.1" 200 42186
+INFO 2026-04-29 06:15:42,287 log 63241 6175600640 "GET /admin/jsi18n/ HTTP/1.1" 200 5754
+INFO 2026-04-29 06:15:47,018 log 63241 6175600640 "GET /admin/ HTTP/1.1" 200 42929
+INFO 2026-04-29 06:16:25,984 log 63241 6175600640 "GET /admin/analytics/ HTTP/1.1" 200 19926
+INFO 2026-04-29 06:16:36,497 log 63241 6175600640 "GET /admin/ HTTP/1.1" 200 42929
+INFO 2026-04-29 06:16:43,276 log 63241 6175600640 "GET /admin/chat/chatmessage/ HTTP/1.1" 200 49243
+INFO 2026-04-29 06:16:44,685 log 63241 6175600640 "GET /admin/jsi18n/ HTTP/1.1" 200 5754
+INFO 2026-04-29 06:16:59,090 rundaemon 65128 8419799296 Leadway dev
+INFO 2026-04-29 06:17:12,005 daemon 65128 8419799296 Task queue healed: 1 pending tasks
+INFO 2026-04-29 06:17:12,005 daemon 65128 8419799296 [1m[32mDaemon started[0m — 1 campaigns, task queue worker
+INFO 2026-04-29 06:17:44,512 rundaemon 65128 8419799296 Termination signal received. Closing session...
+INFO 2026-04-29 06:17:44,512 session 65128 8419799296 Account session closed → eshukoli.mba@gmail.com
+INFO 2026-04-29 06:17:44,512 session 65128 8419799296 Account session closed → eshukoli.mba@gmail.com

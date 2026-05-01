@@ -42,8 +42,11 @@ class OnboardConfig:
     booking_link: str = ""
     seed_urls: str = ""
     llm_api_key: str = ""
+    llm_provider: str = "openai"
     ai_model: str = ""
     llm_api_base: str = ""
+    azure_deployment: str = ""
+    azure_api_version: str = "2024-10-21"
     newsletter: bool = True
     connect_daily_limit: int = DEFAULT_CONNECT_DAILY_LIMIT
     connect_weekly_limit: int = DEFAULT_CONNECT_WEEKLY_LIMIT
@@ -69,7 +72,14 @@ _ACCOUNT_KEYS = {
     "linkedin_email", "linkedin_password", "newsletter",
     "connect_daily_limit", "connect_weekly_limit", "follow_up_daily_limit",
 }
-_LLM_KEYS = {"llm_api_key", "ai_model", "llm_api_base"}
+_LLM_KEYS = {
+    "llm_api_key",
+    "llm_provider",
+    "ai_model",
+    "llm_api_base",
+    "azure_deployment",
+    "azure_api_version",
+}
 _ALL_KEYS = _CAMPAIGN_KEYS | _ACCOUNT_KEYS | _LLM_KEYS
 
 
@@ -86,11 +96,8 @@ def missing_keys() -> set[str]:
         keys |= _ACCOUNT_KEYS
 
     cfg = SiteConfig.load()
-    if not cfg:
-        keys |= _LLM_KEYS
-    else:
-        if not cfg.llm_api_key: keys.add("llm_api_key")
-        if not cfg.ai_model: keys.add("ai_model")
+    if not cfg.llm_api_key: keys.add("llm_api_key")
+    if not cfg.ai_model: keys.add("ai_model")
 
     return keys
 
@@ -117,8 +124,11 @@ SELF_HOSTED_QUESTIONS = [
     Question("booking_link", "Booking Link (optional)", required=False),
     Question("seed_urls", "Seed LinkedIn URLs (comma separated)", required=False),
     Question("llm_api_key", "LLM API Key (Gemini/OpenAI)"),
+    Question("llm_provider", "LLM Provider (openai/azure/gemini)", default="openai"),
     Question("ai_model", "Model Identifier", default=""),
     Question("llm_api_base", "LLM API Base URL (optional)", required=False),
+    Question("azure_deployment", "Azure Deployment Name (optional)", required=False),
+    Question("azure_api_version", "Azure API Version (optional)", default="2024-10-21", required=False),
     Question("connect_daily_limit", "Daily Connection Limit", default=str(DEFAULT_CONNECT_DAILY_LIMIT)),
     Question("connect_weekly_limit", "Weekly Connection Limit", default=str(DEFAULT_CONNECT_WEEKLY_LIMIT)),
     Question("follow_up_daily_limit", "Daily Follow-up Limit", default=str(DEFAULT_FOLLOW_UP_DAILY_LIMIT)),
@@ -343,10 +353,16 @@ def apply(config: OnboardConfig) -> None:
     cfg = SiteConfig.load()
     if config.llm_api_key:
         cfg.llm_api_key = config.llm_api_key
+    if config.llm_provider:
+        cfg.llm_provider = config.llm_provider
     if config.ai_model:
         cfg.ai_model = config.ai_model
     if config.llm_api_base:
         cfg.llm_api_base = config.llm_api_base
+    if config.azure_deployment:
+        cfg.azure_deployment = config.azure_deployment
+    if config.azure_api_version:
+        cfg.azure_api_version = config.azure_api_version
     cfg.save()
 
     logger.info("Onboarding successful — EshLead is ready.")

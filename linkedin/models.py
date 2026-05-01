@@ -41,7 +41,11 @@ def decrypt_value(value: str) -> str:
     try:
         cipher = _get_cipher()
         return cipher.decrypt(value.encode()).decode()
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "decrypt_value failed (%s); returning raw value for compatibility",
+            exc.__class__.__name__,
+        )
         return value # Fallback for old plaintext data during transition
 
 
@@ -55,9 +59,22 @@ _RATE_LIMIT_FIELDS = {
 class SiteConfig(models.Model):
     """Singleton model for global site configuration (LLM keys, etc.)."""
 
+    LLM_PROVIDER_CHOICES = (
+        ("openai", "OpenAI Compatible"),
+        ("azure", "Azure OpenAI / Foundry"),
+        ("gemini", "Google Gemini"),
+    )
+
     llm_api_key = models.CharField(max_length=500, blank=True, default="")
+    llm_provider = models.CharField(
+        max_length=20,
+        choices=LLM_PROVIDER_CHOICES,
+        default="openai",
+    )
     ai_model = models.CharField(max_length=200, blank=True, default="")
     llm_api_base = models.CharField(max_length=500, blank=True, default="")
+    azure_deployment = models.CharField(max_length=200, blank=True, default="")
+    azure_api_version = models.CharField(max_length=50, blank=True, default="2024-10-21")
 
     google_sheet_sync_enabled = models.BooleanField(
         default=False,

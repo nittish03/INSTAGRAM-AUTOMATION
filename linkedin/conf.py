@@ -81,3 +81,9 @@ def get_llm_config():
     return cfg.llm_api_key, cfg.ai_model, cfg.llm_api_base or None
 
 
+def get_llm_site_config():
+    """Return the singleton SiteConfig object for LLM/provider setup."""
+    from linkedin.models import SiteConfig
+    return SiteConfig.load()
+
+
