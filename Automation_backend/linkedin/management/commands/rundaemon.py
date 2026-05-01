@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Run the EshLead daemon (onboard, validate, start task queue)."
+    help = "Run the Leadway daemon (onboard, validate, start task queue)."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -65,7 +65,7 @@ class Command(BaseCommand):
 
     def _print_version(self):
         sha = os.environ.get("GIT_SHA", "dev")
-        logger.info("EshLead %s", sha[:8])
+        logger.info("Leadway %s", sha[:8])
 
     def _configure_logging(self):
         logging.getLogger().handlers.clear()

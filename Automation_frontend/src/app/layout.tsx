@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EshLead Frontend",
-  description: "Next.js frontend for EshLead backend",
+  title: "Leadway Frontend",
+  description: "Next.js frontend for Leadway backend",
 };
 
 export default function RootLayout({

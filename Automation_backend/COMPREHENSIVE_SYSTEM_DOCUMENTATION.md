@@ -1,4 +1,4 @@
-# EshLead Comprehensive System Documentation
+# Leadway Comprehensive System Documentation
 
 This document explains the entire web app in depth: what it does, why it exists, how it works, and how its workflows move data across the system.
 
@@ -6,7 +6,7 @@ This document explains the entire web app in depth: what it does, why it exists,
 
 ## 1) Product Purpose and Why This Exists
 
-EshLead is a Django-based LinkedIn outreach automation platform with human-in-the-loop controls.
+Leadway is a Django-based LinkedIn outreach automation platform with human-in-the-loop controls.
 
 The system is designed to:
 - Discover and qualify LinkedIn prospects at scale.
@@ -844,7 +844,7 @@ Fix implemented (`google_integration/templates/google_integration/sheet_view.htm
 - Manual **Save changes** flushes pending debounce immediately.
 
 Behavioral impact:
-- Operators can resize columns/rows for readability without leaving EshLead.
+- Operators can resize columns/rows for readability without leaving Leadway.
 - Edits auto-sync back to Google Sheets when auto-save is enabled.
 - Column/row sizing is a local UI preference (not written back to Google column widths).
 

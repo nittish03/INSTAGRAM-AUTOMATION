@@ -365,9 +365,9 @@ def apply(config: OnboardConfig) -> None:
         cfg.azure_api_version = config.azure_api_version
     cfg.save()
 
-    logger.info("Onboarding successful — EshLead is ready.")
+    logger.info("Onboarding successful — Leadway is ready.")
     print("\n" + "="*60)
-    print("🚀 SUCCESS: Onboarding complete. EshLead is ready.")
+    print("🚀 SUCCESS: Onboarding complete. Leadway is ready.")
     print("="*60)
     print("\n🛡️  SECURITY NOTE: Your Django user accounts have been created with")
     print("   UNUSABLE passwords for safety.")

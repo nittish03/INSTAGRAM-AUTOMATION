@@ -4,7 +4,7 @@
 On first run, checks the logged-in user's country code (from the Voyager
 API ``location.countryCode`` field) against a set of ISO-2 country codes
 for jurisdictions with opt-in email marketing laws.  Non-GDPR accounts
-get ``subscribe_newsletter`` auto-enabled so they join the EshLead
+get ``subscribe_newsletter`` auto-enabled so they join the Leadway
 newsletter; GDPR-protected accounts keep their existing config.
 """
 from __future__ import annotations

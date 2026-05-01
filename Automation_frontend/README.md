@@ -1,4 +1,4 @@
-# EshLead Next.js Frontend
+# Leadway Next.js Frontend
 
 This is a full frontend rebuilt in Next.js + Tailwind and connected to the Django backend.
 

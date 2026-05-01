@@ -15,25 +15,24 @@ export default function AnalyticsPage() {
   const [days, setDays] = useState(14);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+
+  async function refresh(d: number) {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.analytics(d);
+      setData(res);
+      setRefreshedAt(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load analytics");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await api.analytics(days);
-        if (!mounted) return;
-        setData(res);
-      } catch (e) {
-        if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load analytics");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    void refresh(days);
   }, [days]);
 
   const dailyMax =
@@ -45,17 +44,31 @@ export default function AnalyticsPage() {
         title="Analytics"
         description="Outreach activity, deal states, and task queue health."
         actions={
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="input max-w-[160px]"
-          >
-            {RANGE_OPTIONS.map((d) => (
-              <option key={d} value={d}>
-                Last {d} days
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="input max-w-[160px]"
+            >
+              {RANGE_OPTIONS.map((d) => (
+                <option key={d} value={d}>
+                  Last {d} days
+                </option>
+              ))}
+            </select>
+            {refreshedAt ? (
+              <span className="self-center text-xs text-slate-400">
+                Updated {refreshedAt.toLocaleTimeString()}
+              </span>
+            ) : null}
+            <button
+              className="btn-secondary"
+              onClick={() => void refresh(days)}
+              disabled={loading}
+            >
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </>
         }
       />
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}

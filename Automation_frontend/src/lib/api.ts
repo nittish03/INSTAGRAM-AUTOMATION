@@ -123,7 +123,12 @@ export const api = {
     }),
   logout: () => request<Record<string, never>>("/api/auth/logout", { method: "POST" }),
   me: () => request<{ user: User }>("/api/auth/me"),
-  dashboard: () => request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>("/api/dashboard"),
+  dashboard: () =>
+    request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>(
+      "/api/dashboard",
+      undefined,
+      { bypassCache: true },
+    ),
   campaigns: () => request<{ items: Campaign[] }>("/api/campaigns"),
   createCampaign: (payload: {
     name: string;
@@ -145,6 +150,15 @@ export const api = {
     request<{ approved: number }>("/api/messages/drafts/approve", {
       method: "POST",
       body: JSON.stringify({ ids }),
+    }),
+  updateDraft: (id: number, content: string) =>
+    request<{ item: { id: number; content: string; createdAt: string; campaignId: number | null } }>(
+      `/api/messages/drafts/${id}`,
+      { method: "PATCH", body: JSON.stringify({ content }) },
+    ),
+  deleteDraft: (id: number) =>
+    request<{ deleted: boolean; id: number }>(`/api/messages/drafts/${id}`, {
+      method: "DELETE",
     }),
   messagingDiagnostics: () =>
     request<{ diagnostics: MessagingDiagnostics }>("/api/messaging/diagnostics", undefined, { bypassCache: true }),
@@ -181,8 +195,9 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   analytics: (days = 14) =>
-    request<AnalyticsData>(`/api/analytics?days=${days}`),
-  googleStatus: () => request<{ google: GoogleStatus }>("/api/google/status"),
+    request<AnalyticsData>(`/api/analytics?days=${days}`, undefined, { bypassCache: true }),
+  googleStatus: () =>
+    request<{ google: GoogleStatus }>("/api/google/status", undefined, { bypassCache: true }),
   googleSheets: () => request<{ items: GoogleSheetItem[] }>("/api/google/sheets"),
   invalidateCache: () => clearApiCache(),
 };

@@ -1,6 +1,6 @@
 # linkedin/django_settings.py
 """
-Minimal Django settings for EshLead - Premium Unfold UI (Fixed).
+Minimal Django settings for Leadway - Premium Unfold UI (Fixed).
 """
 import os
 import sys
@@ -154,8 +154,8 @@ USE_TZ = True
 X_FRAME_OPTIONS = "SAMEORIGIN"
 
 UNFOLD = {
-    "SITE_TITLE": "EshLead",
-    "SITE_HEADER": "EshLead Admin",
+    "SITE_TITLE": "Leadway",
+    "SITE_HEADER": "Leadway Admin",
     "SITE_URL": "/",
     "DASHBOARD_CALLBACK": "linkedin.views.dashboard_callback",
     "SIDEBAR": {

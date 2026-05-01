@@ -1,6 +1,6 @@
-# EshLead: B2B LinkedIn Outreach System
+# Leadway: B2B LinkedIn Outreach System
 
-EshLead is a system for automated LinkedIn outreach, integrating lead discovery, qualification, and messaging into a unified CRM pipeline.
+Leadway is a system for automated LinkedIn outreach, integrating lead discovery, qualification, and messaging into a unified CRM pipeline.
 
 ## System Components
 

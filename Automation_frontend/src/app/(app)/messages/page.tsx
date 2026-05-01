@@ -15,6 +15,10 @@ export default function MessagesPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [diag, setDiag] = useState<MessagingDiagnostics | null>(null);
   const [healing, setHealing] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -67,6 +71,63 @@ export default function MessagesPage() {
       setError(e instanceof Error ? e.message : "Approval failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function startEdit(d: DraftMessage) {
+    setEditingId(d.id);
+    setEditingContent(d.content);
+    setError("");
+    setInfo("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingContent("");
+  }
+
+  async function saveEdit(id: number) {
+    const content = editingContent.trim();
+    if (!content) {
+      setError("Draft content cannot be empty.");
+      return;
+    }
+    setSavingId(id);
+    setError("");
+    try {
+      const r = await api.updateDraft(id, content);
+      setItems((cur) =>
+        cur.map((m) => (m.id === id ? { ...m, content: r.item.content } : m)),
+      );
+      setEditingId(null);
+      setEditingContent("");
+      setInfo("Draft updated.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save draft");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteDraft(id: number) {
+    if (!confirm("Delete this draft? This cannot be undone.")) return;
+    setDeletingId(id);
+    setError("");
+    setInfo("");
+    try {
+      await api.deleteDraft(id);
+      setItems((cur) => cur.filter((m) => m.id !== id));
+      setSelected((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+      if (editingId === id) cancelEdit();
+      setInfo("Draft deleted.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete draft");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -169,27 +230,84 @@ export default function MessagesPage() {
                 <th className="th">Campaign</th>
                 <th className="th">Message</th>
                 <th className="th">Created</th>
+                <th className="th w-44">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((m) => (
-                <tr key={m.id}>
-                  <td className="td">
-                    <input
-                      type="checkbox"
-                      checked={!!selected[m.id]}
-                      onChange={(e) => setSelected((s) => ({ ...s, [m.id]: e.target.checked }))}
-                    />
-                  </td>
-                  <td className="td">
-                    <div>{m.leadName || "-"}</div>
-                    <div className="text-xs text-slate-500">{m.leadPublicIdentifier}</div>
-                  </td>
-                  <td className="td">{m.campaign || "-"}</td>
-                  <td className="td">{m.content}</td>
-                  <td className="td">{new Date(m.createdAt).toLocaleString()}</td>
-                </tr>
-              ))}
+              {items.map((m) => {
+                const isEditing = editingId === m.id;
+                const isSaving = savingId === m.id;
+                const isDeleting = deletingId === m.id;
+                return (
+                  <tr key={m.id}>
+                    <td className="td align-top">
+                      <input
+                        type="checkbox"
+                        checked={!!selected[m.id]}
+                        disabled={isEditing}
+                        onChange={(e) =>
+                          setSelected((s) => ({ ...s, [m.id]: e.target.checked }))
+                        }
+                      />
+                    </td>
+                    <td className="td align-top">
+                      <div>{m.leadName || "-"}</div>
+                      <div className="text-xs text-slate-500">{m.leadPublicIdentifier}</div>
+                    </td>
+                    <td className="td align-top">{m.campaign || "-"}</td>
+                    <td className="td align-top">
+                      {isEditing ? (
+                        <textarea
+                          className="input min-h-[100px] w-full"
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="whitespace-pre-wrap">{m.content}</span>
+                      )}
+                    </td>
+                    <td className="td align-top">{new Date(m.createdAt).toLocaleString()}</td>
+                    <td className="td align-top">
+                      {isEditing ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="btn-primary"
+                            disabled={isSaving}
+                            onClick={() => saveEdit(m.id)}
+                          >
+                            {isSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            disabled={isSaving}
+                            onClick={cancelEdit}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="btn-secondary"
+                            onClick={() => startEdit(m)}
+                            disabled={isDeleting}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn-secondary text-rose-300 hover:text-rose-200"
+                            onClick={() => deleteDraft(m.id)}
+                            disabled={isDeleting}
+                          >
+                            {isDeleting ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </section>

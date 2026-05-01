@@ -19,7 +19,7 @@ from linkedin.models import ActionLog, Campaign, LinkedInProfile, Task
 
 def dashboard_callback(request, context):
     """
-    Enhanced EshLead Dashboard Callback.
+    Enhanced Leadway Dashboard Callback.
     Returns structured data for the Unfold Dashboard.
     """
     from django.db.models import Count, Q
@@ -84,7 +84,7 @@ def dashboard_callback(request, context):
         pass
 
     context.update({
-        "greeting": "EshLead Console",
+        "greeting": "Leadway Console",
         "tagline": "Autonomous B2B Lead Generation Active",
         "google_status": google_status,
         "google_email": google_email,
@@ -1024,3 +1024,45 @@ def api_message_drafts_approve(request):
             approved += 1
 
     return JsonResponse({"ok": True, "approved": approved})
+
+
+@login_required
+@require_http_methods(["PATCH", "DELETE"])
+def api_message_draft_detail(request, draft_id: int):
+    """Edit or delete a single unapproved draft."""
+    import json
+
+    try:
+        draft = ChatMessage.objects.get(pk=draft_id, is_draft=True, is_approved=False)
+    except ChatMessage.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Draft not found or already approved"}, status=404)
+
+    if request.method == "DELETE":
+        draft.delete()
+        return JsonResponse({"ok": True, "deleted": True, "id": draft_id})
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    content = (payload.get("content") or "").strip()
+    if not content:
+        return JsonResponse({"ok": False, "error": "content is required"}, status=400)
+    if len(content) > 8000:
+        return JsonResponse({"ok": False, "error": "content too long (max 8000 chars)"}, status=400)
+
+    draft.content = content
+    draft.save(update_fields=["content"])
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "item": {
+                "id": draft.id,
+                "content": draft.content,
+                "createdAt": draft.creation_date.isoformat(),
+                "campaignId": draft.campaign_id,
+            },
+        }
+    )

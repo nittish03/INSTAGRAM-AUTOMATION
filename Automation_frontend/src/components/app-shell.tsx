@@ -104,8 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="mx-auto flex max-w-[1600px] gap-4 p-4">
         <aside className="card sticky top-4 h-[calc(100vh-2rem)] w-64 p-4">
           <div className="mb-6">
-            <h1 className="text-xl font-bold text-violet-300">EshLead Frontend</h1>
-            <p className="mt-1 text-xs text-slate-400">Next.js + Tailwind control panel</p>
+            <h1 className="text-xl font-bold text-violet-300">Leadway</h1>
           </div>
           <nav className="space-y-5">
             {navSections.map((section) => (

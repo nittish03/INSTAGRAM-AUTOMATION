@@ -34,33 +34,46 @@ export default function HomePage() {
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+
+  async function refresh() {
+    setLoading(true);
+    setError("");
+    try {
+      const [d, g] = await Promise.all([api.dashboard(), api.googleStatus()]);
+      setStats(d.stats);
+      setGoogle(g.google);
+      setRefreshedAt(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load home");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setLoading(true);
-      try {
-        const [d, g] = await Promise.all([api.dashboard(), api.googleStatus()]);
-        if (!mounted) return;
-        setStats(d.stats);
-        setGoogle(g.google);
-      } catch (e) {
-        if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load home");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    void refresh();
   }, []);
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Welcome to EshLead"
+        title="Welcome to Leadway"
         description="Quick access to every workspace and live snapshot of your outreach engine."
+        actions={
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            {refreshedAt ? (
+              <span>Updated {refreshedAt.toLocaleTimeString()}</span>
+            ) : null}
+            <button
+              className="btn-secondary"
+              onClick={() => void refresh()}
+              disabled={loading}
+            >
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+        }
       />
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}
 

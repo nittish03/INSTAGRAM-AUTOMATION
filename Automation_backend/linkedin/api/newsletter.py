@@ -16,7 +16,7 @@ BREVO_FORM_URL = (
 
 def subscribe_to_newsletter(email: str, linkedin: str | None = None) -> bool:
     """
-    Subscribe email to EshLead newsletter via Brevo form.
+    Subscribe email to Leadway newsletter via Brevo form.
     Returns True if successful or already subscribed.
     """
     data = {
@@ -62,7 +62,7 @@ def subscribe_to_newsletter(email: str, linkedin: str | None = None) -> bool:
 
 
 def ensure_newsletter_subscription(session: AccountSession, linkedin_url: str | None = None):
-    """Subscribe the account to the EshLead newsletter if enabled."""
+    """Subscribe the account to the Leadway newsletter if enabled."""
     lp = session.linkedin_profile
 
     if not lp.subscribe_newsletter:
@@ -74,5 +74,5 @@ def ensure_newsletter_subscription(session: AccountSession, linkedin_url: str | 
         logger.warning("No valid email for newsletter: %s", session)
         return
 
-    logger.debug("Subscribing %s to EshLead newsletter...", email)
+    logger.debug("Subscribing %s to Leadway newsletter...", email)
     subscribe_to_newsletter(email, linkedin=linkedin_url)

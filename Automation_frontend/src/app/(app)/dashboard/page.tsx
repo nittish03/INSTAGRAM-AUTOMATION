@@ -28,29 +28,46 @@ export default function DashboardPage() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+
+  async function refresh() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api.dashboard();
+      setStats(data.stats);
+      setGoogle(data.google);
+      setRefreshedAt(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load dashboard");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const data = await api.dashboard();
-        setStats(data.stats);
-        setGoogle(data.google);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load dashboard");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void refresh();
   }, []);
 
   return (
     <div className="space-y-4">
-      <section className="card p-5">
-        <h2 className="text-2xl font-semibold">Control Center</h2>
-        <p className="mt-1 text-sm text-slate-400">
-          Monitor the full outreach pipeline and approve outbound drafts.
-        </p>
+      <section className="card flex flex-wrap items-start justify-between gap-3 p-5">
+        <div>
+          <h2 className="text-2xl font-semibold">Control Center</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Monitor the full outreach pipeline and approve outbound drafts.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-slate-400">
+          {refreshedAt ? <span>Updated {refreshedAt.toLocaleTimeString()}</span> : null}
+          <button
+            className="btn-secondary"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
       </section>
 
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}

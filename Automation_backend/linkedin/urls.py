@@ -19,6 +19,7 @@ urlpatterns = [
     path("api/tasks/", views.api_tasks, name="api_tasks"),
     path("api/messages/drafts/", views.api_message_drafts, name="api_message_drafts"),
     path("api/messages/drafts/approve/", views.api_message_drafts_approve, name="api_message_drafts_approve"),
+    path("api/messages/drafts/<int:draft_id>/", views.api_message_draft_detail, name="api_message_draft_detail"),
     path("api/messaging/diagnostics/", views.api_messaging_diagnostics, name="api_messaging_diagnostics"),
     path("api/messaging/heal/", views.api_messaging_heal, name="api_messaging_heal"),
     path("api/action-logs/", views.api_action_logs, name="api_action_logs"),

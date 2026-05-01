@@ -33,7 +33,7 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-screen place-items-center px-4">
       <form onSubmit={onSubmit} className="card w-full max-w-md p-6">
-        <h1 className="text-2xl font-semibold">Sign in to EshLead</h1>
+        <h1 className="text-2xl font-semibold">Sign in to Leadway</h1>
         <p className="mt-1 text-sm text-slate-400">
           Use your Django admin credentials.
         </p>
