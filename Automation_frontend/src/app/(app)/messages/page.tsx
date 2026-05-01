@@ -25,6 +25,7 @@ export default function MessagesPage() {
   const [editingContent, setEditingContent] = useState("");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   async function load() {
     try {
@@ -67,6 +68,7 @@ export default function MessagesPage() {
   const ids = Object.entries(selected)
     .filter(([, v]) => v)
     .map(([k]) => Number(k));
+  const allSelected = items.length > 0 && items.every((m) => !!selected[m.id]);
 
   async function approve() {
     if (!ids.length) return;
@@ -82,6 +84,16 @@ export default function MessagesPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelected({});
+      return;
+    }
+    const next: Record<number, boolean> = {};
+    for (const m of items) next[m.id] = true;
+    setSelected(next);
   }
 
   function startEdit(d: DraftMessage) {
@@ -147,6 +159,30 @@ export default function MessagesPage() {
     }
   }
 
+  async function deleteSelectedDrafts() {
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected draft(s)? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    setError("");
+    setInfo("");
+    try {
+      await Promise.all(ids.map((id) => api.deleteDraft(id)));
+      setItems((cur) => {
+        const idSet = new Set(ids);
+        const next = cur.filter((m) => !idSet.has(m.id));
+        pageCache.set(DRAFTS_KEY, next);
+        return next;
+      });
+      if (editingId && ids.includes(editingId)) cancelEdit();
+      setSelected({});
+      setInfo(`Deleted ${ids.length} draft(s).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete selected drafts");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   async function healFollowups() {
     setHealing(true);
     setError("");
@@ -179,6 +215,20 @@ export default function MessagesPage() {
         <div className="mt-4 flex flex-wrap gap-2">
           <button disabled={!ids.length || loading} className="btn-primary" onClick={approve}>
             {loading ? "Approving..." : `Approve Selected (${ids.length})`}
+          </button>
+          <button
+            disabled={initialLoading || items.length === 0 || loading || bulkDeleting}
+            className="btn-secondary"
+            onClick={toggleSelectAll}
+          >
+            {allSelected ? "Clear Selection" : "Select All"}
+          </button>
+          <button
+            disabled={!ids.length || loading || bulkDeleting}
+            className="btn-secondary text-rose-300 hover:text-rose-200"
+            onClick={deleteSelectedDrafts}
+          >
+            {bulkDeleting ? "Deleting..." : `Delete Selected (${ids.length})`}
           </button>
           <button disabled={healing} className="btn-secondary" onClick={healFollowups}>
             {healing ? "Queuing..." : "Re-queue follow-ups for connected leads"}

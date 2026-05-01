@@ -16,6 +16,7 @@ type FormState = {
   actionFraction: string;
   bookingLink: string;
   objective: string;
+  productDocs: string;
   userIds: number[];
 };
 
@@ -25,8 +26,26 @@ const blankForm: FormState = {
   actionFraction: "0.2",
   bookingLink: "",
   objective: "",
+  productDocs: "",
   userIds: [],
 };
+
+type ModalMode =
+  | { type: "closed" }
+  | { type: "create" }
+  | { type: "edit"; id: number };
+
+function campaignToForm(c: Campaign): FormState {
+  return {
+    name: c.name,
+    isFreemium: c.isFreemium,
+    actionFraction: String(c.actionFraction),
+    bookingLink: c.bookingLink || "",
+    objective: c.objective || "",
+    productDocs: c.productDocs || "",
+    userIds: c.users.map((u) => u.id),
+  };
+}
 
 export default function CampaignsPage() {
   const cachedCampaigns = pageCache.get<Campaign[]>(CAMPAIGNS_KEY);
@@ -36,8 +55,8 @@ export default function CampaignsPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(!cachedCampaigns);
-  const [creating, setCreating] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<ModalMode>({ type: "closed" });
   const [form, setForm] = useState<FormState>(blankForm);
 
   async function loadAll(showSkeleton = false) {
@@ -62,16 +81,23 @@ export default function CampaignsPage() {
     void loadAll();
   }, []);
 
-  function openModal() {
+  function openCreate() {
     setForm(blankForm);
     setError("");
     setInfo("");
-    setShowModal(true);
+    setMode({ type: "create" });
+  }
+
+  function openEdit(c: Campaign) {
+    setForm(campaignToForm(c));
+    setError("");
+    setInfo("");
+    setMode({ type: "edit", id: c.id });
   }
 
   function closeModal() {
-    if (creating) return;
-    setShowModal(false);
+    if (submitting) return;
+    setMode({ type: "closed" });
   }
 
   function toggleUser(userId: number) {
@@ -82,7 +108,7 @@ export default function CampaignsPage() {
     );
   }
 
-  async function createCampaign() {
+  async function submitCampaign() {
     if (!form.name.trim()) {
       setError("Campaign name is required.");
       return;
@@ -91,29 +117,47 @@ export default function CampaignsPage() {
       setError("Select at least one account to link this campaign to.");
       return;
     }
-    setCreating(true);
+    setSubmitting(true);
     setError("");
     setInfo("");
     try {
-      await api.createCampaign({
+      const payload = {
         name: form.name.trim(),
         isFreemium: form.isFreemium,
         actionFraction: Number(form.actionFraction || 0.2),
         bookingLink: form.bookingLink.trim(),
         objective: form.objective.trim(),
+        productDocs: form.productDocs.trim(),
         userIds: form.userIds,
-      });
-      setInfo("Campaign created successfully.");
-      setShowModal(false);
+      };
+
+      if (mode.type === "edit") {
+        await api.updateCampaign(mode.id, payload);
+        setInfo("Campaign updated successfully.");
+      } else {
+        await api.createCampaign(payload);
+        setInfo("Campaign created successfully.");
+      }
+
+      setMode({ type: "closed" });
       setForm(blankForm);
       pageCache.clear(CAMPAIGNS_KEY);
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create campaign");
+      setError(
+        e instanceof Error
+          ? e.message
+          : mode.type === "edit"
+            ? "Failed to update campaign"
+            : "Failed to create campaign",
+      );
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   }
+
+  const isEdit = mode.type === "edit";
+  const isOpen = mode.type !== "closed";
 
   return (
     <div className="space-y-4">
@@ -121,23 +165,24 @@ export default function CampaignsPage() {
         <div>
           <h2 className="text-2xl font-semibold">Campaigns</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Each campaign runs against the LinkedIn accounts it is linked to.
+            Each campaign runs against the LinkedIn accounts it is linked to. The
+            ICP / product description on a campaign decides who the bot reaches out to.
           </p>
         </div>
         <button
           aria-label="Add campaign"
           className="btn-primary flex h-10 w-10 items-center justify-center px-0! text-2xl"
-          onClick={openModal}
+          onClick={openCreate}
         >
           +
         </button>
       </section>
 
-      {error && !showModal ? <p className="text-sm text-rose-400">{error}</p> : null}
+      {error && !isOpen ? <p className="text-sm text-rose-400">{error}</p> : null}
       {info ? <p className="text-sm text-emerald-400">{info}</p> : null}
 
       {loading ? (
-        <TableSkeleton rows={6} cols={5} />
+        <TableSkeleton rows={6} cols={6} />
       ) : items.length === 0 ? (
         <section className="card p-8 text-center text-sm text-slate-400">
           No campaigns yet. Click the <strong>+</strong> button above to create one and link
@@ -147,74 +192,98 @@ export default function CampaignsPage() {
         <section className="card overflow-hidden">
           <div className="h-[calc(100vh-15rem)] min-h-88 overflow-auto">
             <table className="w-full">
-            <thead>
-              <tr>
-                <th className="th">Name</th>
-                <th className="th">Type</th>
-                <th className="th">Action Fraction</th>
-                <th className="th">Booking Link</th>
-                <th className="th">Linked accounts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((c) => (
-                <tr key={c.id}>
-                  <td className="td">{c.name}</td>
-                  <td className="td">{c.isFreemium ? "Freemium" : "Regular"}</td>
-                  <td className="td">{c.actionFraction}</td>
-                  <td className="td">
-                    {c.bookingLink ? (
-                      <a
-                        href={c.bookingLink}
-                        target="_blank"
-                        className="text-violet-300 hover:underline"
-                        rel="noreferrer"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="td">
-                    {c.users.length === 0 ? (
-                      <span className="text-rose-300">no account linked</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {c.users.map((u) => (
-                          <span
-                            key={u.id}
-                            className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-200"
-                          >
-                            {u.username}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
+              <thead>
+                <tr>
+                  <th className="th">Name</th>
+                  <th className="th">Type</th>
+                  <th className="th">Action Fraction</th>
+                  <th className="th">ICP / Product</th>
+                  <th className="th">Booking Link</th>
+                  <th className="th">Linked accounts</th>
+                  <th className="th w-24">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-              </table>
-            </div>
+              </thead>
+              <tbody>
+                {items.map((c) => {
+                  const icpPreview = (c.productDocs || "").trim();
+                  return (
+                    <tr key={c.id}>
+                      <td className="td">{c.name}</td>
+                      <td className="td">{c.isFreemium ? "Freemium" : "Regular"}</td>
+                      <td className="td">{c.actionFraction}</td>
+                      <td className="td max-w-xs">
+                        {icpPreview ? (
+                          <span
+                            className="block truncate text-slate-300"
+                            title={icpPreview}
+                          >
+                            {icpPreview}
+                          </span>
+                        ) : (
+                          <span className="text-amber-300">not set</span>
+                        )}
+                      </td>
+                      <td className="td">
+                        {c.bookingLink ? (
+                          <a
+                            href={c.bookingLink}
+                            target="_blank"
+                            className="text-violet-300 hover:underline"
+                            rel="noreferrer"
+                          >
+                            Open
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="td">
+                        {c.users.length === 0 ? (
+                          <span className="text-rose-300">no account linked</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {c.users.map((u) => (
+                              <span
+                                key={u.id}
+                                className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-200"
+                              >
+                                {u.username}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="td">
+                        <button className="btn-secondary" onClick={() => openEdit(c)}>
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
-      {showModal ? (
+      {isOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
           onClick={closeModal}
         >
           <div
-            className="card w-full max-w-2xl space-y-4 p-6"
+            className="card max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Add new campaign</h3>
+              <h3 className="text-lg font-semibold">
+                {isEdit ? "Edit campaign" : "Add new campaign"}
+              </h3>
               <button
                 className="text-slate-400 hover:text-slate-200"
                 onClick={closeModal}
-                disabled={creating}
+                disabled={submitting}
                 aria-label="Close"
               >
                 ✕
@@ -288,6 +357,24 @@ export default function CampaignsPage() {
                   onChange={(e) => setForm((f) => ({ ...f, objective: e.target.value }))}
                 />
               </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm text-slate-300">
+                  ICP / product description
+                </label>
+                <textarea
+                  className="input min-h-[160px] w-full"
+                  placeholder="Describe who you sell to, what you offer, and the kind of leads this campaign should target. The bot uses this to qualify and message prospects."
+                  value={form.productDocs}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, productDocs: e.target.value }))
+                  }
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  This replaces the one-time onboarding ICP. Update it any time and
+                  this campaign&apos;s outreach adapts to it.
+                </p>
+              </div>
             </div>
 
             <div>
@@ -334,16 +421,22 @@ export default function CampaignsPage() {
               <button
                 className="btn-secondary"
                 onClick={closeModal}
-                disabled={creating}
+                disabled={submitting}
               >
                 Cancel
               </button>
               <button
                 className="btn-primary"
-                onClick={createCampaign}
-                disabled={creating || !form.name.trim() || form.userIds.length === 0}
+                onClick={submitCampaign}
+                disabled={submitting || !form.name.trim() || form.userIds.length === 0}
               >
-                {creating ? "Creating..." : "Create campaign"}
+                {submitting
+                  ? isEdit
+                    ? "Saving..."
+                    : "Creating..."
+                  : isEdit
+                    ? "Save changes"
+                    : "Create campaign"}
               </button>
             </div>
           </div>

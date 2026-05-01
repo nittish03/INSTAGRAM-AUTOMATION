@@ -132,10 +132,27 @@ export const api = {
     actionFraction?: number;
     bookingLink?: string;
     objective?: string;
+    productDocs?: string;
     userIds?: number[];
   }) =>
     request<{ item: Campaign }>("/api/campaigns", {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateCampaign: (
+    id: number,
+    payload: Partial<{
+      name: string;
+      isFreemium: boolean;
+      actionFraction: number;
+      bookingLink: string;
+      objective: string;
+      productDocs: string;
+      userIds: number[];
+    }>,
+  ) =>
+    request<{ item: Campaign }>(`/api/campaigns/${id}`, {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
   leads: (params: URLSearchParams) => request<{ items: Lead[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/leads?${params.toString()}`),

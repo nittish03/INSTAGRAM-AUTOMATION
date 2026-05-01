@@ -29,6 +29,7 @@ export type Campaign = {
   actionFraction: number;
   bookingLink: string;
   objective: string;
+  productDocs: string;
   users: { id: number; username: string }[];
 };
 

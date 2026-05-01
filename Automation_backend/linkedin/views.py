@@ -266,6 +266,7 @@ def _campaign_payload(campaign: Campaign) -> dict:
         "actionFraction": campaign.action_fraction,
         "bookingLink": campaign.booking_link,
         "objective": campaign.campaign_objective,
+        "productDocs": campaign.product_docs,
         "users": [{"id": u.id, "username": u.username} for u in campaign.users.all()],
     }
 
@@ -316,6 +317,7 @@ def api_campaigns(request):
             action_fraction=action_fraction,
             booking_link=(payload.get("bookingLink") or "").strip(),
             campaign_objective=(payload.get("objective") or "").strip(),
+            product_docs=(payload.get("productDocs") or "").strip(),
         )
         for u in users_qs:
             campaign.users.add(u)
@@ -325,6 +327,91 @@ def api_campaigns(request):
     qs = Campaign.objects.all().prefetch_related("users").order_by("name")
     data = [_campaign_payload(c) for c in qs]
     return JsonResponse({"ok": True, "items": data})
+
+
+@login_required
+@require_http_methods(["PATCH"])
+def api_campaign_detail(request, campaign_id: int):
+    """Edit an existing campaign — including ICP/product description."""
+    import json as _json
+    from django.contrib.auth.models import User
+
+    try:
+        campaign = Campaign.objects.prefetch_related("users").get(pk=campaign_id)
+    except Campaign.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Campaign not found"}, status=404)
+
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    update_fields: list[str] = []
+
+    if "name" in payload:
+        new_name = (payload.get("name") or "").strip()
+        if not new_name:
+            return JsonResponse({"ok": False, "error": "name cannot be empty"}, status=400)
+        if (
+            Campaign.objects.filter(name__iexact=new_name)
+            .exclude(pk=campaign.pk)
+            .exists()
+        ):
+            return JsonResponse(
+                {"ok": False, "error": "Campaign with this name already exists"},
+                status=400,
+            )
+        campaign.name = new_name
+        update_fields.append("name")
+
+    if "isFreemium" in payload:
+        campaign.is_freemium = bool(payload.get("isFreemium"))
+        update_fields.append("is_freemium")
+
+    if "actionFraction" in payload:
+        try:
+            action_fraction = float(payload.get("actionFraction"))
+        except (TypeError, ValueError):
+            return JsonResponse({"ok": False, "error": "actionFraction must be a number"}, status=400)
+        if action_fraction <= 0 or action_fraction > 1:
+            return JsonResponse({"ok": False, "error": "actionFraction must be in (0, 1]"}, status=400)
+        campaign.action_fraction = action_fraction
+        update_fields.append("action_fraction")
+
+    if "bookingLink" in payload:
+        campaign.booking_link = (payload.get("bookingLink") or "").strip()
+        update_fields.append("booking_link")
+
+    if "objective" in payload:
+        campaign.campaign_objective = (payload.get("objective") or "").strip()
+        update_fields.append("campaign_objective")
+
+    if "productDocs" in payload:
+        campaign.product_docs = (payload.get("productDocs") or "").strip()
+        update_fields.append("product_docs")
+
+    if update_fields:
+        campaign.save(update_fields=update_fields)
+
+    if "userIds" in payload:
+        user_ids_raw = payload.get("userIds") or []
+        if not isinstance(user_ids_raw, list):
+            return JsonResponse({"ok": False, "error": "userIds must be an array"}, status=400)
+        try:
+            user_ids = [int(uid) for uid in user_ids_raw]
+        except (TypeError, ValueError):
+            return JsonResponse({"ok": False, "error": "userIds must be integers"}, status=400)
+
+        if user_ids:
+            users_qs = User.objects.filter(pk__in=user_ids)
+            if users_qs.count() != len(set(user_ids)):
+                return JsonResponse({"ok": False, "error": "One or more userIds were not found"}, status=400)
+            campaign.users.set(users_qs)
+        else:
+            campaign.users.clear()
+
+    campaign.refresh_from_db()
+    return JsonResponse({"ok": True, "item": _campaign_payload(campaign)})
 
 
 @login_required
