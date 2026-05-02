@@ -43,6 +43,7 @@ export default function SearchKeywordsPage() {
   );
   const [creating, setCreating] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -93,6 +94,7 @@ export default function SearchKeywordsPage() {
   }
 
   useEffect(() => {
+    let cancelled = false;
     const cacheHit = pageCache.get<CachedKeywords>(queryKey);
     if (cacheHit) {
       setAllItems(cacheHit.items);
@@ -105,8 +107,47 @@ export default function SearchKeywordsPage() {
       setHasMore(true);
       setLoading(true);
     }
-    void loadPage(1, true, false, queryKey);
-  }, [queryKey]);
+
+    const loadInitialPage = async () => {
+      setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        p.set("page", "1");
+        p.set("pageSize", String(PAGE_SIZE));
+        if (debouncedQ) p.set("q", debouncedQ);
+        if (campaignFilter) p.set("campaignId", campaignFilter);
+        if (usedFilter) p.set("used", usedFilter);
+        const data = await api.searchKeywords(p);
+        if (cancelled) return;
+        const nextItems = data.items;
+        const nextHasMore = nextItems.length < data.pagination.total;
+        setAllItems(nextItems);
+        setCurrentPage(1);
+        setHasMore(nextHasMore);
+        pageCache.set<CachedKeywords>(queryKey, {
+          items: nextItems,
+          page: 1,
+          hasMore: nextHasMore,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load keywords");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadInitialPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignFilter, debouncedQ, queryKey, usedFilter]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();

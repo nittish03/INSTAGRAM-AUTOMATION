@@ -14,7 +14,9 @@ const navSections = [
     items: [
       { href: "/home", label: "Home", icon: "🏠" },
       { href: "/dashboard", label: "Control Center", icon: "🎛️" },
+      { href: "/workbench", label: "Workbench", icon: "🧭" },
       { href: "/analytics", label: "Analytics", icon: "📊" },
+      { href: "/campaign-health", label: "Campaign Health", icon: "❤️" },
     ],
   },
   {
@@ -33,6 +35,10 @@ const navSections = [
     items: [
       { href: "/leads", label: "Leads", icon: "🧑‍💼" },
       { href: "/deals", label: "Deals", icon: "🤝" },
+      { href: "/follow-up-suggestions", label: "Follow-up Suggestions", icon: "🧠" },
+      { href: "/export-center", label: "Export Center", icon: "📤" },
+      { href: "/recovery", label: "Recovery", icon: "🛠️" },
+      { href: "/safety", label: "Safety", icon: "🛡️" },
     ],
   },
   {
@@ -80,17 +86,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div className="p-4">
-        <div className="mx-auto flex max-w-[1600px] gap-4">
-          <aside className="card h-[calc(100vh-2rem)] w-64 p-4">
-            <Skeleton className="mb-6 h-6 w-40" />
-            <div className="space-y-2">
+      <div className="min-h-screen p-4">
+        <div className="mx-auto flex max-w-[1600px] items-start gap-4">
+          <aside className="card flex h-[calc(100vh-2rem)] w-64 shrink-0 flex-col overflow-hidden p-4">
+            <Skeleton className="mb-6 h-6 w-40 shrink-0" />
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
               {Array.from({ length: 12 }).map((_, i) => (
-                <Skeleton key={i} className="h-9 w-full" />
+                <Skeleton key={i} className="h-9 w-full shrink-0" />
               ))}
             </div>
           </aside>
-          <main className="flex-1 space-y-4">
+          <main className="min-w-0 flex-1 space-y-4">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-64 w-full" />
           </main>
@@ -101,12 +107,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <div className="mx-auto flex max-w-[1600px] gap-4 p-4">
-        <aside className="card sticky top-4 h-[calc(100vh-2rem)] w-64 p-4">
-          <div className="mb-6">
+      <div className="mx-auto flex max-w-[1600px] items-start gap-4 p-4">
+        <aside className="card sticky top-4 flex h-[calc(100vh-2rem)] w-64 shrink-0 flex-col overflow-hidden p-4">
+          <div className="shrink-0 pt-0.5">
             <h1 className="text-xl font-bold text-violet-300">Leadway</h1>
           </div>
-          <nav className="space-y-5">
+          <nav className="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain pr-1 [-webkit-overflow-scrolling:touch]">
             {navSections.map((section) => (
               <div key={section.title}>
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -123,8 +129,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                           active ? "bg-violet-600/25 text-violet-200" : "text-slate-300 hover:bg-slate-800"
                         }`}
                       >
-                        <span className="flex items-center gap-2">
-                          <span className="inline-flex h-4 w-4 items-center justify-center text-xs">
+                        <span className="flex items-center gap-2.5">
+                          <span className="inline-flex size-[1.125rem] shrink-0 items-center justify-center text-[0.875rem] leading-none">
                             {item.icon}
                           </span>
                           <span>{item.label}</span>
@@ -137,7 +143,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
 
-          <div className="mt-8 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+          <div className="mt-4 shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
             <div className="text-xs text-slate-400">Signed in as</div>
             <div className="truncate text-sm font-medium text-slate-200">
               {user?.firstName || user?.username}

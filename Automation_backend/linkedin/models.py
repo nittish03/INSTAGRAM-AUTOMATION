@@ -100,6 +100,30 @@ class SiteConfig(models.Model):
         related_name="+",
         help_text="Whose Google OAuth tokens to use. Leave empty to use the first superuser with Google connected.",
     )
+    safe_mode_enabled = models.BooleanField(
+        default=True,
+        help_text="If enabled, bulk and risky operator actions are guarded by stricter limits.",
+    )
+    global_pause_outreach = models.BooleanField(
+        default=False,
+        help_text="Hard pause for queueing new outreach actions from operator workflows.",
+    )
+    max_bulk_approve = models.PositiveIntegerField(
+        default=25,
+        help_text="Maximum draft approvals allowed per bulk operator action.",
+    )
+    max_bulk_export = models.PositiveIntegerField(
+        default=50,
+        help_text="Maximum lead exports allowed per bulk operator action.",
+    )
+    sheet_export_min_confidence_api = models.FloatField(
+        default=0.85,
+        help_text="Minimum connection-detection confidence to export when verified via LinkedIn API 1st degree (no invite required).",
+    )
+    sheet_export_min_confidence_after_invite = models.FloatField(
+        default=0.55,
+        help_text="Minimum confidence for export after an invite_sent event (UI/Message heuristic or API re-check).",
+    )
 
     class Meta:
         app_label = "linkedin"
@@ -355,6 +379,63 @@ class ActionLog(models.Model):
 
     def __str__(self):
         return f"{self.action_type} by {self.linkedin_profile} at {self.created_at}"
+
+
+class SystemRawLog(models.Model):
+    """Debug / internal diagnostics only. Never used for exports, analytics, or reporting."""
+
+    class Level(models.TextChoices):
+        DEBUG = "debug"
+        INFO = "info"
+        WARNING = "warning"
+        ERROR = "error"
+
+    level = models.CharField(max_length=10, choices=Level.choices, default=Level.INFO)
+    category = models.CharField(max_length=64, db_index=True)
+    message = models.TextField()
+    payload = models.JSONField(default=dict, blank=True)
+    lead = models.ForeignKey("crm.Lead", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    campaign = models.ForeignKey(Campaign, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    task = models.ForeignKey("linkedin.Task", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "linkedin"
+        indexes = [
+            models.Index(fields=["category", "created_at"], name="lnk_sysrawlog_cat_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.category} [{self.level}] {self.created_at}"
+
+
+class OutreachEvent(models.Model):
+    """Explicit outreach actions and outcomes. Drives export eligibility — not inferred from Deal state alone."""
+
+    class EventType(models.TextChoices):
+        INVITE_SENT = "invite_sent"
+        INVITE_FAILED = "invite_failed"
+        CONNECTION_DETECTED = "connection_detected"
+
+    event_type = models.CharField(max_length=32, choices=EventType.choices, db_index=True)
+    lead = models.ForeignKey("crm.Lead", null=True, blank=True, on_delete=models.CASCADE, related_name="outreach_events")
+    deal = models.ForeignKey("crm.Deal", null=True, blank=True, on_delete=models.SET_NULL, related_name="outreach_events")
+    campaign = models.ForeignKey(Campaign, null=True, blank=True, on_delete=models.SET_NULL, related_name="outreach_events")
+    public_identifier = models.CharField(max_length=200, blank=True, default="", db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "linkedin"
+        indexes = [
+            models.Index(
+                fields=["lead", "event_type", "created_at"],
+                name="lnk_outreach_lead_evt_cr",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} {self.public_identifier or self.lead_id} @ {self.created_at}"
 
 
 class TaskQuerySet(models.QuerySet):

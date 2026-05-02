@@ -41,6 +41,7 @@ export default function AnalyticsPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let mounted = true;
     const cached = pageCache.get<AnalyticsData>(dataKey(days));
@@ -73,6 +74,7 @@ export default function AnalyticsPage() {
       mounted = false;
     };
   }, [days]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const dailyMax =
     data?.daily.reduce((m, d) => Math.max(m, d.connect + d.followUp), 0) || 1;

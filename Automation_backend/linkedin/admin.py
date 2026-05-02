@@ -12,7 +12,16 @@ from django.shortcuts import render, get_object_or_404
 
 from unfold.admin import ModelAdmin
 
-from linkedin.models import ActionLog, Campaign, LinkedInProfile, SearchKeyword, SiteConfig, Task
+from linkedin.models import (
+    ActionLog,
+    Campaign,
+    LinkedInProfile,
+    OutreachEvent,
+    SearchKeyword,
+    SiteConfig,
+    SystemRawLog,
+    Task,
+)
 from chat.models import ChatMessage
 from django.contrib.auth.models import User, Group
 
@@ -60,11 +69,14 @@ class SiteConfigAdmin(ModelAdmin):
                     "google_sheet_id",
                     "google_sheet_tab",
                     "google_sheet_sync_user",
+                    "sheet_export_min_confidence_api",
+                    "sheet_export_min_confidence_after_invite",
                 ),
                 "description": _(
                     "Enable sync, paste the full Google Sheets link or the bare spreadsheet id, and ensure "
                     "the chosen user (or a superuser) has connected Google under /admin/google/. "
-                    "New rows use columns A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."
+                    "Rows are appended only for **verified** outcomes (explicit outreach events + confidence thresholds). "
+                    "Columns A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."
                 ),
             },
         ),
@@ -488,3 +500,38 @@ class ChatMessageAdmin(ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("owner")
+
+
+@admin.register(SystemRawLog)
+class SystemRawLogAdmin(ModelAdmin):
+    list_display = ("created_at", "level", "category", "short_message", "lead_id", "campaign_id")
+    list_filter = ("level", "category")
+    search_fields = ("message", "category")
+    readonly_fields = ("level", "category", "message", "payload", "lead", "campaign", "task", "created_at")
+    ordering = ("-created_at",)
+
+    def short_message(self, obj):
+        return (obj.message or "")[:120]
+
+    short_message.short_description = "Message"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OutreachEvent)
+class OutreachEventAdmin(ModelAdmin):
+    list_display = ("created_at", "event_type", "public_identifier", "lead_id", "campaign_id")
+    list_filter = ("event_type",)
+    search_fields = ("public_identifier",)
+    readonly_fields = ("event_type", "lead", "deal", "campaign", "public_identifier", "metadata", "created_at")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

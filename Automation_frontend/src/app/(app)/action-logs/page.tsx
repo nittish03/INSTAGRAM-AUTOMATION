@@ -63,7 +63,9 @@ export default function ActionLogsPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    let cancelled = false;
     const cacheHit = pageCache.get<CachedActionLogs>(queryKey);
     if (cacheHit) {
       setAllItems(cacheHit.items);
@@ -76,8 +78,47 @@ export default function ActionLogsPage() {
       setHasMore(true);
       setLoading(true);
     }
-    void loadPage(1, true, queryKey);
-  }, [queryKey]);
+
+    const loadInitialPage = async () => {
+      setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        p.set("page", "1");
+        p.set("pageSize", String(PAGE_SIZE));
+        if (debouncedQ) p.set("q", debouncedQ);
+        if (type) p.set("type", type);
+        if (status) p.set("status", status);
+        const data = await api.actionLogs(p);
+        if (cancelled) return;
+        const nextItems = data.items;
+        const nextHasMore = nextItems.length < data.pagination.total;
+        setAllItems(nextItems);
+        setCurrentPage(1);
+        setHasMore(nextHasMore);
+        pageCache.set<CachedActionLogs>(queryKey, {
+          items: nextItems,
+          page: 1,
+          hasMore: nextHasMore,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load action logs");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadInitialPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQ, queryKey, status, type]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const filtered = useMemo(() => allItems, [allItems]);
   const totalLoaded = allItems.length;

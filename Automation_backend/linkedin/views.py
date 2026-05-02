@@ -16,6 +16,20 @@ from crm.models.deal import Deal
 from crm.models.lead import Lead
 from linkedin.enums import ProfileState
 from linkedin.models import ActionLog, Campaign, LinkedInProfile, Task
+from linkedin.services.product_workbench import (
+    campaign_health,
+    export_preview,
+    export_selected,
+    followup_suggestions,
+    get_safe_mode_settings,
+    lead_quality_insights,
+    lead_timeline,
+    queue_followups_for_leads,
+    recovery_items,
+    retry_task,
+    set_safe_mode_settings,
+    workbench_summary,
+)
 
 def dashboard_callback(request, context):
     """
@@ -1189,6 +1203,185 @@ def api_message_draft_detail(request, draft_id: int):
                 "content": draft.content,
                 "createdAt": draft.creation_date.isoformat(),
                 "campaignId": draft.campaign_id,
+            },
+        }
+    )
+
+
+@login_required
+@require_GET
+def api_workbench(request):
+    return JsonResponse({"ok": True, **workbench_summary()})
+
+
+@login_required
+@require_GET
+def api_lead_insights(request, lead_id: int):
+    try:
+        lead = Lead.objects.get(pk=lead_id)
+    except Lead.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Lead not found"}, status=404)
+    return JsonResponse({"ok": True, "insights": lead_quality_insights(lead)})
+
+
+@login_required
+@require_GET
+def api_lead_timeline(request, lead_id: int):
+    try:
+        lead = Lead.objects.get(pk=lead_id)
+    except Lead.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Lead not found"}, status=404)
+    limit = _parse_int(request.GET.get("limit"), 50, 1, 300)
+    return JsonResponse({"ok": True, "items": lead_timeline(lead, limit=limit)})
+
+
+@login_required
+@require_GET
+def api_campaign_health(request):
+    return JsonResponse({"ok": True, "items": campaign_health()})
+
+
+@login_required
+@require_GET
+def api_recovery(request):
+    limit = _parse_int(request.GET.get("limit"), 200, 1, 500)
+    return JsonResponse({"ok": True, "items": recovery_items(limit=limit)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_task_retry(request, task_id: int):
+    try:
+        task = Task.objects.get(pk=task_id)
+    except Task.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Task not found"}, status=404)
+    safe = get_safe_mode_settings()
+    if safe.global_pause_outreach:
+        return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
+    new_task = retry_task(task)
+    return JsonResponse({"ok": True, "item": {"taskId": new_task.id, "status": new_task.status}})
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_tasks_bulk_retry(request):
+    import json
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list):
+        return JsonResponse({"ok": False, "error": "ids must be a list"}, status=400)
+    safe = get_safe_mode_settings()
+    if safe.global_pause_outreach:
+        return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
+    if safe.enabled and len(ids) > safe.max_bulk_approve:
+        return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_approve})"}, status=400)
+    created = 0
+    for task in Task.objects.filter(pk__in=ids):
+        retry_task(task)
+        created += 1
+    return JsonResponse({"ok": True, "retried": created})
+
+
+@login_required
+@require_GET
+def api_export_preview(request):
+    limit = _parse_int(request.GET.get("limit"), 250, 1, 500)
+    preview = export_preview(limit=limit)
+    return JsonResponse({"ok": True, **preview})
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_export_selected(request):
+    import json
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    lead_ids = payload.get("leadIds") or []
+    if not isinstance(lead_ids, list):
+        return JsonResponse({"ok": False, "error": "leadIds must be a list"}, status=400)
+    try:
+        parsed_ids = [int(x) for x in lead_ids]
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "leadIds must contain integers"}, status=400)
+    safe = get_safe_mode_settings()
+    if safe.enabled and len(parsed_ids) > safe.max_bulk_export:
+        return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_export})"}, status=400)
+    results = export_selected(parsed_ids)
+    return JsonResponse({"ok": True, **results})
+
+
+@login_required
+@require_GET
+def api_followup_suggestions(request):
+    limit = _parse_int(request.GET.get("limit"), 200, 1, 500)
+    return JsonResponse({"ok": True, "items": followup_suggestions(limit=limit)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_followups_queue(request):
+    import json
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    lead_ids = payload.get("leadIds") or []
+    if not isinstance(lead_ids, list):
+        return JsonResponse({"ok": False, "error": "leadIds must be a list"}, status=400)
+    try:
+        parsed_ids = [int(x) for x in lead_ids]
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "leadIds must contain integers"}, status=400)
+    safe = get_safe_mode_settings()
+    if safe.global_pause_outreach:
+        return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
+    if safe.enabled and len(parsed_ids) > safe.max_bulk_approve:
+        return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_approve})"}, status=400)
+    return JsonResponse({"ok": True, **queue_followups_for_leads(parsed_ids)})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def api_safe_mode(request):
+    if request.method == "POST" and not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+    if request.method == "GET":
+        safe = get_safe_mode_settings()
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "enabled": safe.enabled,
+                    "globalPauseOutreach": safe.global_pause_outreach,
+                    "maxBulkApprove": safe.max_bulk_approve,
+                    "maxBulkExport": safe.max_bulk_export,
+                },
+            }
+        )
+
+    import json
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    safe = set_safe_mode_settings(payload)
+    return JsonResponse(
+        {
+            "ok": True,
+            "settings": {
+                "enabled": safe.enabled,
+                "globalPauseOutreach": safe.global_pause_outreach,
+                "maxBulkApprove": safe.max_bulk_approve,
+                "maxBulkExport": safe.max_bulk_export,
             },
         }
     )

@@ -169,3 +169,91 @@ export type MessagingDiagnostics = {
   lastFailedFollowup: { taskId: number; endedAt: string | null; error: string } | null;
   leadsWithoutDraft: { leadId: number; publicIdentifier: string; fullName: string; campaign: string }[];
 };
+
+export type WorkbenchSummary = {
+  stats: {
+    connectedDeals: number;
+    draftsAwaitingApproval: number;
+    failedTasks: number;
+    pendingTasks: number;
+    stalePendingDeals: number;
+    connectedWithoutExport: number;
+    connectedAwaitingVerification: number;
+    connectedWithoutFollowup: number;
+    actions24h: number;
+  };
+  inbox: { key: string; count: number; priority: "high" | "medium" | "low" }[];
+};
+
+export type LeadInsights = {
+  leadId: number;
+  qualityScore: number;
+  reasons: string[];
+  conflicts: string[];
+  nextAction: string;
+  dealState: string;
+};
+
+export type TimelineEvent = {
+  kind: "deal" | "task" | "action" | "message" | "export" | "outreach_event";
+  at: string;
+  title: string;
+  detail: string;
+  campaign: string;
+};
+
+export type CampaignHealthItem = {
+  campaignId: number;
+  campaignName: string;
+  totalDeals: number;
+  connected: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  draftsAwaitingApproval: number;
+  taskFailures: number;
+  followupsLogged: number;
+  acceptanceRate: number;
+  conversionRate: number;
+  healthScore: number;
+};
+
+export type RecoveryItem = {
+  taskId: number;
+  taskType: string;
+  status: string;
+  error: string;
+  dealId: number | null;
+  leadPublicIdentifier: string;
+  campaignId: number | null;
+  scheduledAt: string;
+  endedAt: string | null;
+};
+
+export type ExportPreviewItem = {
+  leadId: number;
+  fullName: string;
+  publicIdentifier: string;
+  campaign: string;
+  connectedAt: string;
+  sheetExportedAt: string | null;
+  reason?: string;
+};
+
+export type FollowupSuggestion = {
+  leadId: number;
+  dealId: number;
+  campaignId: number;
+  campaign: string;
+  fullName: string;
+  publicIdentifier: string;
+  action: string;
+  rationale: string;
+};
+
+export type SafeModeSettings = {
+  enabled: boolean;
+  globalPauseOutreach: boolean;
+  maxBulkApprove: number;
+  maxBulkExport: number;
+};

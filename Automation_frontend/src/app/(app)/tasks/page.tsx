@@ -29,6 +29,7 @@ export default function TasksPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(cached?.page ?? 0);
   const [hasMore, setHasMore] = useState(cached?.hasMore ?? true);
+  const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   async function loadPage(targetPage: number, replace = false, key = queryKey) {
@@ -59,7 +60,9 @@ export default function TasksPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    let cancelled = false;
     const cacheHit = pageCache.get<CachedTasks>(queryKey);
     if (cacheHit) {
       setAllItems(cacheHit.items);
@@ -72,8 +75,46 @@ export default function TasksPage() {
       setHasMore(true);
       setLoading(true);
     }
-    void loadPage(1, true, queryKey);
-  }, [queryKey]);
+
+    const loadInitialPage = async () => {
+      setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        p.set("page", "1");
+        p.set("pageSize", String(PAGE_SIZE));
+        if (debouncedQ) p.set("q", debouncedQ);
+        if (status) p.set("status", status);
+        const data = await api.tasks(p);
+        if (cancelled) return;
+        const nextItems = data.items;
+        const nextHasMore = nextItems.length < data.pagination.total;
+        setAllItems(nextItems);
+        setPage(1);
+        setHasMore(nextHasMore);
+        pageCache.set<CachedTasks>(queryKey, {
+          items: nextItems,
+          page: 1,
+          hasMore: nextHasMore,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load tasks");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadInitialPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQ, queryKey, status]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function onScroll() {
     const el = scrollRef.current;
@@ -89,6 +130,19 @@ export default function TasksPage() {
     () => allItems.filter((t) => !status || t.status === status),
     [allItems, status],
   );
+
+  async function retry(taskId: number) {
+    setBusyTaskId(taskId);
+    setError("");
+    try {
+      await api.retryTask(taskId);
+      void loadPage(1, true, queryKey);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Retry failed");
+    } finally {
+      setBusyTaskId(null);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -130,6 +184,7 @@ export default function TasksPage() {
                 <th className="th">Scheduled</th>
                 <th className="th">Deal</th>
                 <th className="th">Error</th>
+                <th className="th">Recovery</th>
               </tr>
             </thead>
             <tbody>
@@ -141,6 +196,15 @@ export default function TasksPage() {
                   <td className="td">{new Date(t.scheduledAt).toLocaleString()}</td>
                   <td className="td">{t.dealId ?? "-"}</td>
                   <td className="td">{t.error ? t.error.slice(0, 80) : "-"}</td>
+                  <td className="td">
+                    {(t.status === "failed" || t.status === "skipped") ? (
+                      <button className="btn-secondary" onClick={() => void retry(t.id)} disabled={busyTaskId === t.id}>
+                        {busyTaskId === t.id ? "Retrying..." : "Retry"}
+                      </button>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -29,12 +29,13 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
         "deal_navigation",
     )
     icon = "users"
-    actions = ["export_to_google_sheet"]
+    actions = ["export_to_google_sheet", "force_export_to_google_sheet_bypass_verification"]
 
-    @admin.action(description=_("Export selected leads to Google Sheet (only CONNECTED, not exported yet)"))
+    @admin.action(description=_("Export verified leads to Google Sheet (high-confidence outcomes only)"))
     def export_to_google_sheet(self, request, queryset):
         from google_integration.sheet_sync import sync_lead_to_google_sheet
         from linkedin.enums import ProfileState
+        from linkedin.outreach_tracking import lead_sheet_export_verification
 
         eligible = queryset.filter(
             sheet_exported_at__isnull=True,
@@ -43,11 +44,34 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
 
         ok = 0
         for lead in eligible:
-            if sync_lead_to_google_sheet(lead):
+            if lead_sheet_export_verification(lead)[0] and sync_lead_to_google_sheet(lead):
                 ok += 1
         self.message_user(
             request,
-            _("Exported %(n)d connected lead(s) to the configured Google Sheet.") % {"n": ok},
+            _("Exported %(n)d verified lead(s) to the configured Google Sheet.") % {"n": ok},
+        )
+
+    @admin.action(description=_("Force export to Google Sheet (bypass verification — superuser only)"))
+    def force_export_to_google_sheet_bypass_verification(self, request, queryset):
+        from google_integration.sheet_sync import sync_lead_to_google_sheet
+        from linkedin.enums import ProfileState
+
+        if not request.user.is_superuser:
+            self.message_user(request, _("Superuser only."), level="ERROR")
+            return
+
+        eligible = queryset.filter(
+            sheet_exported_at__isnull=True,
+            deal__state=ProfileState.CONNECTED,
+        ).distinct()
+
+        ok = 0
+        for lead in eligible:
+            if sync_lead_to_google_sheet(lead, bypass_verification=True):
+                ok += 1
+        self.message_user(
+            request,
+            _("Force-exported %(n)d lead(s) (verification bypassed).") % {"n": ok},
         )
 
     # (Removed duplicate company_name_status)
@@ -159,7 +183,8 @@ class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
     list_display = ("lead", "campaign", "state_pill", "connect_attempts", "short_reason", "creation_date")
     list_filter = ("state", "campaign", "closing_reason")
     search_fields = ("lead__first_name", "lead__last_name", "campaign__name")
-    readonly_fields = ("lead", "campaign", "creation_date", "update_date", "reason_box", "history_feed")
+    readonly_fields = ("lead", "campaign", "creation_date", "update_date", "reason_box", "history_feed",
+                        "connection_assessment_source", "connection_assessment_confidence", "connection_assessed_at")
     icon = "briefcase"
     inlines = [ChatMessageInline]
     actions = ["requeue_deal", "force_requalify"]
@@ -198,7 +223,13 @@ class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
             "fields": ("history_feed",)
         }),
         (_("Metadata"), {
-            "fields": ("creation_date", "update_date"),
+            "fields": (
+                "creation_date",
+                "update_date",
+                "connection_assessment_source",
+                "connection_assessment_confidence",
+                "connection_assessed_at",
+            ),
             "classes": ("collapse",)
         }),
     )

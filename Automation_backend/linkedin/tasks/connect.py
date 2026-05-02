@@ -81,7 +81,9 @@ def _seconds_until_tomorrow() -> float:
 
 def handle_connect(task, session, qualifiers):
     from linkedin.actions.connect import send_connection_request
-    from linkedin.actions.status import get_connection_status
+    from linkedin.actions.status import get_connection_assessment
+    from linkedin.models import OutreachEvent
+    from linkedin.outreach_tracking import emit_outreach_event, update_deal_inference
     from crm.models import Deal
 
     cfg = CAMPAIGN_CONFIG
@@ -126,16 +128,30 @@ def handle_connect(task, session, qualifiers):
     logger.info("[%s] %s (%s) — %s", campaign, public_id, stats, reason or "")
 
     try:
-        status = get_connection_status(session, profile)
+        assessment = get_connection_assessment(session, profile)
 
-        if status == ProfileState.CONNECTED:
-            set_profile_state(session, public_id, status.value)
+        if assessment.state == ProfileState.CONNECTED:
+            if deal:
+                update_deal_inference(deal, assessment.source, assessment.confidence)
+            emit_outreach_event(
+                OutreachEvent.EventType.CONNECTION_DETECTED,
+                deal=deal,
+                lead=deal.lead if deal else None,
+                campaign=session.campaign,
+                public_id=public_id,
+                metadata={
+                    "source": assessment.source,
+                    "confidence": assessment.confidence,
+                    "via": "pre_connect_status_check",
+                },
+            )
+            set_profile_state(session, public_id, assessment.state.value)
             enqueue_follow_up(campaign_id, public_id, deal=deal)
             _reschedule()
             return
 
-        if status == ProfileState.PENDING:
-            set_profile_state(session, public_id, status.value)
+        if assessment.state == ProfileState.PENDING:
+            set_profile_state(session, public_id, assessment.state.value)
             enqueue_check_pending(
                 campaign_id, public_id,
                 backoff_hours=cfg["check_pending_recheck_after_hours"],
@@ -144,7 +160,7 @@ def handle_connect(task, session, qualifiers):
             _reschedule()
             return
 
-        # get_connection_status already navigated to the profile page
+        # Profile page already loaded — attempt invite
         new_state = send_connection_request(session=session, profile=profile)
 
         if new_state == ProfileState.QUALIFIED:
@@ -153,21 +169,70 @@ def handle_connect(task, session, qualifiers):
             if attempts >= MAX_CONNECT_ATTEMPTS:
                 reason = f"Unreachable: no Connect button after {attempts} attempts"
                 disqualify_lead(public_id)
+                emit_outreach_event(
+                    OutreachEvent.EventType.INVITE_FAILED,
+                    deal=deal,
+                    lead=deal.lead if deal else None,
+                    campaign=session.campaign,
+                    public_id=public_id,
+                    metadata={"reason": "no_connect_button_max_attempts", "attempts": attempts},
+                )
                 set_profile_state(session, public_id, ProfileState.FAILED.value, reason=reason)
                 logger.warning("Disqualified %s — %s", public_id, reason)
             else:
+                emit_outreach_event(
+                    OutreachEvent.EventType.INVITE_FAILED,
+                    deal=deal,
+                    lead=deal.lead if deal else None,
+                    campaign=session.campaign,
+                    public_id=public_id,
+                    metadata={"reason": "no_connect_button", "attempt": attempts},
+                )
                 set_profile_state(session, public_id, new_state.value)
                 logger.debug("%s: connect attempt %d/%d — no button found", public_id, attempts, MAX_CONNECT_ATTEMPTS)
         else:
+            if new_state == ProfileState.PENDING and deal:
+                emit_outreach_event(
+                    OutreachEvent.EventType.INVITE_SENT,
+                    deal=deal,
+                    lead=deal.lead,
+                    campaign=session.campaign,
+                    public_id=public_id,
+                    metadata={"via": "send_connection_request"},
+                )
+            if new_state == ProfileState.CONNECTED and deal:
+                post = get_connection_assessment(session, profile)
+                update_deal_inference(deal, post.source, post.confidence)
+                emit_outreach_event(
+                    OutreachEvent.EventType.CONNECTION_DETECTED,
+                    deal=deal,
+                    lead=deal.lead,
+                    campaign=session.campaign,
+                    public_id=public_id,
+                    metadata={
+                        "source": post.source,
+                        "confidence": post.confidence,
+                        "via": "post_connect_send",
+                    },
+                )
             set_profile_state(session, public_id, new_state.value)
             name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
             session.linkedin_profile.record_action(
-                ActionLog.ActionType.CONNECT, 
+                ActionLog.ActionType.CONNECT,
                 session.campaign,
                 target_name=name,
                 target_public_id=public_id,
                 status="success" if new_state in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed"
             )
+            if new_state not in (ProfileState.PENDING, ProfileState.CONNECTED):
+                emit_outreach_event(
+                    OutreachEvent.EventType.INVITE_FAILED,
+                    deal=deal,
+                    lead=deal.lead if deal else None,
+                    campaign=session.campaign,
+                    public_id=public_id,
+                    metadata={"reason": "connect_action_unsuccessful", "state": new_state.value},
+                )
 
             if new_state == ProfileState.PENDING:
                 enqueue_check_pending(

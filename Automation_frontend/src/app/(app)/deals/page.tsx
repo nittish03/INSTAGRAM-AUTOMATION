@@ -59,7 +59,9 @@ export default function DealsPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    let cancelled = false;
     const cacheHit = pageCache.get<CachedDeals>(queryKey);
     if (cacheHit) {
       setAllItems(cacheHit.items);
@@ -72,8 +74,46 @@ export default function DealsPage() {
       setHasMore(true);
       setLoading(true);
     }
-    void loadPage(1, true, queryKey);
-  }, [queryKey]);
+
+    const loadInitialPage = async () => {
+      setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        p.set("page", "1");
+        p.set("pageSize", String(PAGE_SIZE));
+        if (debouncedQ) p.set("q", debouncedQ);
+        if (state) p.set("state", state);
+        const data = await api.deals(p);
+        if (cancelled) return;
+        const nextItems = data.items;
+        const nextHasMore = nextItems.length < data.pagination.total;
+        setAllItems(nextItems);
+        setPage(1);
+        setHasMore(nextHasMore);
+        pageCache.set<CachedDeals>(queryKey, {
+          items: nextItems,
+          page: 1,
+          hasMore: nextHasMore,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load deals");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadInitialPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQ, queryKey, state]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function onScroll() {
     const el = scrollRef.current;
@@ -94,6 +134,9 @@ export default function DealsPage() {
     <div className="space-y-4">
       <section className="card p-5">
         <h2 className="text-2xl font-semibold">Deals</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Use Campaign Health and Follow-up Suggestions for operator decisions.
+        </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <input
             className="input"
@@ -130,6 +173,7 @@ export default function DealsPage() {
                 <th className="th">Attempts</th>
                 <th className="th">Backoff (h)</th>
                 <th className="th">Reason</th>
+                <th className="th">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -141,6 +185,11 @@ export default function DealsPage() {
                   <td className="td">{d.connectAttempts}</td>
                   <td className="td">{d.backoffHours}</td>
                   <td className="td">{d.reason || "-"}</td>
+                  <td className="td">
+                    <a className="text-violet-300 hover:underline" href="/follow-up-suggestions">
+                      Suggestions
+                    </a>
+                  </td>
                 </tr>
               ))}
             </tbody>

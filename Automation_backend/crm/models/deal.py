@@ -41,6 +41,24 @@ class Deal(models.Model):
     creation_date = models.DateTimeField(default=timezone.now)
     update_date = models.DateTimeField(auto_now=True)
 
+    # Latest connection *inference* (API/UI heuristic). Export uses OutreachEvent + confidence, not this alone.
+    connection_assessment_source = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="How we last assessed connection (e.g. api_degree_1, ui_message_button).",
+    )
+    connection_assessment_confidence = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="0–1 confidence for the last connection assessment.",
+    )
+    connection_assessed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When connection_assessment_* was last updated.",
+    )
+
     history = HistoricalRecords()
 
     def __str__(self):

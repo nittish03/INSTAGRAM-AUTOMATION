@@ -12,6 +12,14 @@ import type {
   Lead,
   LinkedInProfileItem,
   MessagingDiagnostics,
+  FollowupSuggestion,
+  LeadInsights,
+  TimelineEvent,
+  WorkbenchSummary,
+  CampaignHealthItem,
+  RecoveryItem,
+  ExportPreviewItem,
+  SafeModeSettings,
   SearchKeywordItem,
   SiteConfig,
   SiteConfigResponse,
@@ -210,5 +218,40 @@ export const api = {
   analytics: (days = 14) => request<AnalyticsData>(`/api/analytics?days=${days}`),
   googleStatus: () => request<{ google: GoogleStatus }>("/api/google/status"),
   googleSheets: () => request<{ items: GoogleSheetItem[] }>("/api/google/sheets"),
+  workbench: () => request<WorkbenchSummary>("/api/workbench"),
+  leadInsights: (leadId: number) => request<{ insights: LeadInsights }>(`/api/leads/${leadId}/insights`),
+  leadTimeline: (leadId: number, limit = 50) => request<{ items: TimelineEvent[] }>(`/api/leads/${leadId}/timeline?limit=${limit}`),
+  campaignHealth: () => request<{ items: CampaignHealthItem[] }>("/api/campaign-health"),
+  recovery: (limit = 200) => request<{ items: RecoveryItem[] }>(`/api/recovery?limit=${limit}`),
+  retryTask: (taskId: number) =>
+    request<{ item: { taskId: number; status: string } }>(`/api/tasks/${taskId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  bulkRetryTasks: (ids: number[]) =>
+    request<{ retried: number }>("/api/tasks/bulk-retry", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  exportPreview: (limit = 250) =>
+    request<{ exportable: ExportPreviewItem[]; skipped: ExportPreviewItem[] }>(`/api/export-preview?limit=${limit}`),
+  exportSelected: (leadIds: number[]) =>
+    request<{ exported: number; failed: number }>("/api/export-selected", {
+      method: "POST",
+      body: JSON.stringify({ leadIds }),
+    }),
+  followupSuggestions: (limit = 200) =>
+    request<{ items: FollowupSuggestion[] }>(`/api/follow-up-suggestions?limit=${limit}`),
+  queueFollowups: (leadIds: number[]) =>
+    request<{ enqueued: number; skipped: number }>("/api/follow-ups/queue", {
+      method: "POST",
+      body: JSON.stringify({ leadIds }),
+    }),
+  safeMode: () => request<{ settings: SafeModeSettings }>("/api/safe-mode"),
+  saveSafeMode: (settings: SafeModeSettings) =>
+    request<{ settings: SafeModeSettings }>("/api/safe-mode", {
+      method: "POST",
+      body: JSON.stringify(settings),
+    }),
   invalidateCache: () => clearApiCache(),
 };

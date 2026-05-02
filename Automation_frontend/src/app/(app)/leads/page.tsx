@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import { pageCache } from "@/lib/page-cache";
+import { QualityScoreBadge } from "@/components/quality-score-badge";
 import { TableSkeleton } from "@/components/skeleton";
 import type { Lead } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -29,6 +30,7 @@ export default function LeadsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(cached?.page ?? 0);
   const [hasMore, setHasMore] = useState(cached?.hasMore ?? true);
+  const [quality, setQuality] = useState<Record<number, number>>({});
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   async function loadPage(targetPage: number, replace = false, key = queryKey) {
@@ -59,7 +61,9 @@ export default function LeadsPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    let cancelled = false;
     const cacheHit = pageCache.get<CachedLeads>(queryKey);
     if (cacheHit) {
       setAllItems(cacheHit.items);
@@ -72,8 +76,46 @@ export default function LeadsPage() {
       setHasMore(true);
       setLoading(true);
     }
-    void loadPage(1, true, queryKey);
-  }, [queryKey]);
+
+    const loadInitialPage = async () => {
+      setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        p.set("page", "1");
+        p.set("pageSize", String(PAGE_SIZE));
+        if (debouncedQ) p.set("q", debouncedQ);
+        if (state) p.set("state", state);
+        const data = await api.leads(p);
+        if (cancelled) return;
+        const nextItems = data.items;
+        const nextHasMore = nextItems.length < data.pagination.total;
+        setAllItems(nextItems);
+        setPage(1);
+        setHasMore(nextHasMore);
+        pageCache.set<CachedLeads>(queryKey, {
+          items: nextItems,
+          page: 1,
+          hasMore: nextHasMore,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load leads");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadInitialPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQ, queryKey, state]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function onScroll() {
     const el = scrollRef.current;
@@ -88,6 +130,25 @@ export default function LeadsPage() {
   const items = useMemo(() => {
     return allItems;
   }, [allItems]);
+
+  useEffect(() => {
+    const probe = async () => {
+      const subset = items.slice(0, 25);
+      const next: Record<number, number> = {};
+      await Promise.all(
+        subset.map(async (lead) => {
+          try {
+            const data = await api.leadInsights(lead.id);
+            next[lead.id] = data.insights.qualityScore;
+          } catch {
+            // best-effort only
+          }
+        }),
+      );
+      setQuality((cur) => ({ ...cur, ...next }));
+    };
+    if (items.length) void probe();
+  }, [items]);
 
   return (
     <div className="space-y-4">
@@ -110,7 +171,7 @@ export default function LeadsPage() {
       </section>
       {error ? <p className="text-sm text-rose-400">{error}</p> : null}
       {loading ? (
-        <TableSkeleton rows={8} cols={5} />
+        <TableSkeleton rows={8} cols={6} />
       ) : (
         <section className="card overflow-hidden">
           <div
@@ -124,6 +185,7 @@ export default function LeadsPage() {
                 <th className="th">Lead</th>
                 <th className="th">Company</th>
                 <th className="th">State</th>
+                <th className="th">Quality</th>
                 <th className="th">LinkedIn</th>
                 <th className="th">Sheet Exported</th>
               </tr>
@@ -134,9 +196,15 @@ export default function LeadsPage() {
                   <td className="td">
                     <div>{l.fullName}</div>
                     <div className="text-xs text-slate-500">{l.publicIdentifier}</div>
+                    <a href={`/leads/${l.id}`} className="text-xs text-violet-300 hover:underline">
+                      View insights and timeline
+                    </a>
                   </td>
                   <td className="td">{l.companyName || "-"}</td>
                   <td className="td">{l.state}</td>
+                  <td className="td">
+                    {quality[l.id] !== undefined ? <QualityScoreBadge score={quality[l.id]!} /> : "-"}
+                  </td>
                   <td className="td">
                     <a href={l.linkedinUrl} target="_blank" rel="noreferrer" className="text-violet-300 hover:underline">
                       Profile

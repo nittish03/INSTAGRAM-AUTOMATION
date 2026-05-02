@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { pageCache } from "@/lib/page-cache";
 import { TableSkeleton } from "@/components/skeleton";
-import type { DraftMessage, MessagingDiagnostics } from "@/lib/types";
+import type { DraftMessage, FollowupSuggestion, MessagingDiagnostics } from "@/lib/types";
 
 const DRAFTS_KEY = "messages.drafts";
 const DIAG_KEY = "messages.diagnostics";
@@ -26,13 +26,15 @@ export default function MessagesPage() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [suggestions, setSuggestions] = useState<FollowupSuggestion[]>([]);
 
   async function load() {
     try {
-      const [drafts, d] = await Promise.all([api.drafts(), api.messagingDiagnostics()]);
+      const [drafts, d, s] = await Promise.all([api.drafts(), api.messagingDiagnostics(), api.followupSuggestions(50)]);
       setItems(drafts.items);
       setSelected({});
       setDiag(d.diagnostics);
+      setSuggestions(s.items);
       pageCache.set(DRAFTS_KEY, drafts.items);
       pageCache.set(DIAG_KEY, d.diagnostics);
     } catch (e) {
@@ -46,10 +48,11 @@ export default function MessagesPage() {
     let mounted = true;
     (async () => {
       try {
-        const [drafts, d] = await Promise.all([api.drafts(), api.messagingDiagnostics()]);
+        const [drafts, d, s] = await Promise.all([api.drafts(), api.messagingDiagnostics(), api.followupSuggestions(50)]);
         if (!mounted) return;
         setItems(drafts.items);
         setDiag(d.diagnostics);
+        setSuggestions(s.items);
         setSelected({});
         pageCache.set(DRAFTS_KEY, drafts.items);
         pageCache.set(DIAG_KEY, d.diagnostics);
@@ -233,6 +236,12 @@ export default function MessagesPage() {
           <button disabled={healing} className="btn-secondary" onClick={healFollowups}>
             {healing ? "Queuing..." : "Re-queue follow-ups for connected leads"}
           </button>
+        </div>
+        <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+          <span>{suggestions.length} follow-up suggestion(s) available.</span>
+          <a className="text-violet-300 hover:underline" href="/follow-up-suggestions">
+            Open suggestions
+          </a>
         </div>
       </section>
 

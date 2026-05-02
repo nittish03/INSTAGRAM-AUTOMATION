@@ -77,9 +77,11 @@ export default function CampaignsPage() {
     }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     void loadAll();
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function openCreate() {
     setForm(blankForm);

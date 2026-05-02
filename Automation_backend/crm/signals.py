@@ -1,7 +1,9 @@
 """CRM signals — Google Sheet export and follow-up enqueue when a Deal hits CONNECTED.
 
-We sync on Deal save (not Lead save) because a Lead row exists from discovery
-onward; the user only cares about prospects who accepted the connection.
+Sheet export is **verification-gated** in ``sync_lead_to_google_sheet`` (explicit
+``OutreachEvent`` + confidence). This signal still runs on CONNECTED transition;
+sync may no-op until ``connection_detected`` / ``invite_sent`` events satisfy
+export rules — avoiding inferred-state pollution in the sheet.
 """
 from __future__ import annotations
 

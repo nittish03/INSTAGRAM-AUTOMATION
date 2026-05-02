@@ -1,9 +1,10 @@
 """Push CRM leads to a configured Google Sheet (append rows).
 
-Sync only runs once a Lead reaches the CONNECTED state on at least one Deal —
-pre-connection rows would clutter the sheet without any actionable signal.
+Exports are **verification-gated**: rows represent decision-grade outcomes only,
+not inferred Deal states. Eligibility is driven by explicit ``OutreachEvent``
+records (connection_detected, invite_sent) and confidence thresholds in SiteConfig.
 
-Uses SiteConfig for spreadsheet id / tab and OAuth via GoogleAccount.
+Raw diagnostic data lives in ``SystemRawLog``; never mix it with sheet rows.
 """
 from __future__ import annotations
 
@@ -72,11 +73,13 @@ def _lead_position(lead: "Lead") -> str:
     return ""
 
 
-def build_sheet_row(lead: "Lead") -> list[str]:
-    """One row aligned to A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action.
-
-    Sync only fires after a CONNECTED transition, so ``Connected`` is always TRUE here.
-    """
+def build_sheet_row(
+    lead: "Lead",
+    *,
+    status_label: str,
+    verification_reason: str,
+) -> list[str]:
+    """One row aligned to A–G. ``verification_reason`` is an internal audit code (export path)."""
     name = f"{lead.first_name} {lead.last_name}".strip()
     if not name:
         name = lead.public_identifier or ""
@@ -86,20 +89,24 @@ def build_sheet_row(lead: "Lead") -> list[str]:
         _lead_position(lead),
         lead.linkedin_url or "",
         "TRUE",
-        "Cold",
-        "",
+        status_label,
+        verification_reason,
     ]
 
 
-def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
+def sync_lead_to_google_sheet(
+    lead: "Lead",
+    *,
+    bypass_verification: bool = False,
+) -> bool:
     """Append one lead row to the configured sheet. Returns True if a row was written.
 
-    Only exports leads that have a CONNECTED Deal (i.e. the prospect accepted
-    the connection). Also skips if sync is disabled, OAuth missing, or the lead
-    was already exported (unless ``force`` is set).
+    Requires a CONNECTED deal plus export verification (see ``lead_sheet_export_verification``),
+    unless ``bypass_verification`` is True (superuser-only emergency — still requires CONNECTED deal).
     """
     from linkedin.enums import ProfileState
     from linkedin.models import SiteConfig
+    from linkedin.outreach_tracking import lead_sheet_export_verification
 
     cfg = SiteConfig.load()
     if not cfg.google_sheet_sync_enabled:
@@ -108,18 +115,29 @@ def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
     if not sid:
         logger.debug("google_sheet_sync enabled but google_sheet_id empty — skip")
         return False
-    if not force and lead.sheet_exported_at is not None:
+    if lead.sheet_exported_at is not None:
         return False
 
     if not lead.linkedin_url:
         return False
-    # Avoid exporting url-only stubs; wait until Voyager enrichment (or other) sets profile_data.
     if lead.profile_data is None:
         return False
 
     has_connected_deal = lead.deal_set.filter(state=ProfileState.CONNECTED).exists()
-    if not has_connected_deal and not force:
+    if not has_connected_deal:
         return False
+
+    ok_verify, reason_code, status_label = lead_sheet_export_verification(lead)
+    if not bypass_verification:
+        if not ok_verify:
+            logger.info("Google Sheet sync skipped lead pk=%s (%s)", lead.pk, reason_code)
+            return False
+    else:
+        if ok_verify:
+            reason_code = f"bypass_prefix:{reason_code}"
+        else:
+            status_label = "Unverified (manual bypass)"
+            reason_code = "bypass_verification"
 
     user = resolve_google_sync_user(cfg)
     if not user:
@@ -140,7 +158,7 @@ def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
             account,
             sid,
             f"{tab}!A{row_idx}:G{row_idx}",
-            [build_sheet_row(lead)],
+            [build_sheet_row(lead, status_label=status_label, verification_reason=reason_code)],
         )
     except Exception:
         logger.exception("Google Sheet sync failed for lead pk=%s", lead.pk)
@@ -150,5 +168,5 @@ def sync_lead_to_google_sheet(lead: "Lead", *, force: bool = False) -> bool:
     LeadModel.objects.filter(pk=lead.pk, sheet_exported_at__isnull=True).update(
         sheet_exported_at=timezone.now()
     )
-    logger.info("Google Sheet sync: appended lead pk=%s (%s)", lead.pk, lead.public_identifier)
+    logger.info("Google Sheet sync: appended lead pk=%s (%s) [%s]", lead.pk, lead.public_identifier, reason_code)
     return True
