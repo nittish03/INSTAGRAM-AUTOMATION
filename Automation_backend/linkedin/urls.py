@@ -34,6 +34,7 @@ urlpatterns = [
     path("api/analytics/", views.api_analytics, name="api_analytics"),
     path("api/google/status/", views.api_google_status, name="api_google_status"),
     path("api/google/sheets/", views.api_google_sheets, name="api_google_sheets"),
+    path("api/google/disconnect/", views.api_google_disconnect, name="api_google_disconnect"),
     path("api/workbench/", views.api_workbench, name="api_workbench"),
     path("api/leads/<int:lead_id>/insights/", views.api_lead_insights, name="api_lead_insights"),
     path("api/leads/<int:lead_id>/timeline/", views.api_lead_timeline, name="api_lead_timeline"),

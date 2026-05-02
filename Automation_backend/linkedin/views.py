@@ -1123,6 +1123,18 @@ def api_google_sheets(request):
 
 @login_required
 @require_http_methods(["POST"])
+def api_google_disconnect(request):
+    """Disconnect Google account for current user via JSON API."""
+    from google_integration.models import GoogleAccount
+
+    ga = GoogleAccount.objects.filter(user=request.user).first()
+    if ga:
+        ga.delete()
+    return JsonResponse({"ok": True})
+
+
+@login_required
+@require_http_methods(["POST"])
 def api_message_drafts_approve(request):
     import json
     from django.utils import timezone

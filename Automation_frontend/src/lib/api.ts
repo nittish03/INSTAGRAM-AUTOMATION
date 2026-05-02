@@ -218,6 +218,8 @@ export const api = {
   analytics: (days = 14) => request<AnalyticsData>(`/api/analytics?days=${days}`),
   googleStatus: () => request<{ google: GoogleStatus }>("/api/google/status"),
   googleSheets: () => request<{ items: GoogleSheetItem[] }>("/api/google/sheets"),
+  googleDisconnect: () =>
+    request<Record<string, never>>("/api/google/disconnect", { method: "POST" }),
   workbench: () => request<WorkbenchSummary>("/api/workbench"),
   leadInsights: (leadId: number) => request<{ insights: LeadInsights }>(`/api/leads/${leadId}/insights`),
   leadTimeline: (leadId: number, limit = 50) => request<{ items: TimelineEvent[] }>(`/api/leads/${leadId}/timeline?limit=${limit}`),

@@ -21,6 +21,19 @@ export default function GooglePage() {
   const [loading, setLoading] = useState(!cachedStatus);
   const [sheetsLoading, setSheetsLoading] = useState(false);
 
+  async function disconnectGoogle() {
+    setError("");
+    try {
+      await api.googleDisconnect();
+      pageCache.clear(STATUS_KEY);
+      pageCache.clear(SHEETS_KEY);
+      setStatus({ connected: false, email: "", scopes: [] });
+      setSheets([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to disconnect Google");
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -59,11 +72,12 @@ export default function GooglePage() {
         description="OAuth status, connected account, and your spreadsheets."
         actions={
           status?.connected ? (
-            <form action="/oauth/google/disconnect" method="post">
-              <button className="btn-secondary text-rose-300 hover:bg-rose-500/10">
-                Disconnect
-              </button>
-            </form>
+            <button
+              className="btn-secondary text-rose-300 hover:bg-rose-500/10"
+              onClick={() => void disconnectGoogle()}
+            >
+              Disconnect
+            </button>
           ) : (
             <a href="/oauth/google/start" className="btn-primary">
               Connect Google
