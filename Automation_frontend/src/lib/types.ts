@@ -148,6 +148,8 @@ export type GoogleStatus = {
   connected: boolean;
   email: string;
   scopes: string[];
+  /** Redirect URI registered with Google – display so user can match Google Console exactly. */
+  redirectUri?: string;
 };
 
 export type GoogleSheetItem = {
@@ -156,6 +158,22 @@ export type GoogleSheetItem = {
   modifiedTime: string;
   webViewLink: string;
   isConfiguredSheet?: boolean;
+};
+
+export type GoogleSheetMeta = {
+  spreadsheetId: string;
+  title: string;
+  spreadsheetUrl: string;
+  sheetTabs: string[];
+};
+
+export type GoogleGridCellStyle = {
+  bg?: Record<string, number>;
+  text?: Record<string, number>;
+  bold?: boolean;
+  italic?: boolean;
+  align?: string;
+  hyperlink?: string;
 };
 
 export type MessagingDiagnostics = {

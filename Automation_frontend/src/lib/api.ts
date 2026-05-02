@@ -7,6 +7,7 @@ import type {
   DashboardStats,
   Deal,
   DraftMessage,
+  GoogleGridCellStyle,
   GoogleSheetItem,
   GoogleStatus,
   Lead,
@@ -220,6 +221,61 @@ export const api = {
   googleSheets: () => request<{ items: GoogleSheetItem[] }>("/api/google/sheets"),
   googleDisconnect: () =>
     request<Record<string, never>>("/api/google/disconnect", { method: "POST" }),
+  googleAuthUrl: () =>
+    request<{ authUrl: string; redirectUri: string }>(
+      "/api/google/auth/url",
+      undefined,
+      { bypassCache: true },
+    ),
+  googleAuthExchange: (code: string, state: string) =>
+    request<{ email: string }>("/api/google/auth/exchange", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    }),
+  googleSheetCreate: (title: string) =>
+    request<{ item: { id: string; name: string; webViewLink: string } }>(
+      "/api/google/sheets/create/",
+      { method: "POST", body: JSON.stringify({ title }) },
+    ),
+  googleSheetMeta: (spreadsheetId: string) =>
+    request<{
+      spreadsheetId: string;
+      title: string;
+      spreadsheetUrl: string;
+      sheetTabs: string[];
+    }>(
+      `/api/google/sheets/${encodeURIComponent(spreadsheetId)}/meta/`,
+      undefined,
+      { bypassCache: true },
+    ),
+  googleSheetGrid: (spreadsheetId: string, rangeA1: string) => {
+    const q = new URLSearchParams({ range: rangeA1 });
+    return request<{
+      range: string;
+      values: string[][];
+      styles: GoogleGridCellStyle[][];
+    }>(
+      `/api/google/sheets/${encodeURIComponent(spreadsheetId)}/grid/?${q.toString()}`,
+      undefined,
+      { bypassCache: true },
+    );
+  },
+  googleSheetSave: (spreadsheetId: string, rangeA1: string, values: string[][]) =>
+    request<{ updatedRange: string }>(
+      `/api/google/sheets/${encodeURIComponent(spreadsheetId)}/save/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ range: rangeA1, values }),
+      },
+    ),
+  googleSheetAppend: (spreadsheetId: string, rangeA1: string, rows: string[][]) =>
+    request<{ updates: Record<string, unknown> }>(
+      `/api/google/sheets/${encodeURIComponent(spreadsheetId)}/append/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ range: rangeA1, rows }),
+      },
+    ),
   workbench: () => request<WorkbenchSummary>("/api/workbench"),
   leadInsights: (leadId: number) => request<{ insights: LeadInsights }>(`/api/leads/${leadId}/insights`),
   leadTimeline: (leadId: number, limit = 50) => request<{ items: TimelineEvent[] }>(`/api/leads/${leadId}/timeline?limit=${limit}`),

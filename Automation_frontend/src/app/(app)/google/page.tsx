@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -20,6 +21,9 @@ export default function GooglePage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!cachedStatus);
   const [sheetsLoading, setSheetsLoading] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
 
   async function disconnectGoogle() {
     setError("");
@@ -31,6 +35,41 @@ export default function GooglePage() {
       setSheets([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to disconnect Google");
+    }
+  }
+
+  async function connectGoogle() {
+    setError("");
+    setConnecting(true);
+    try {
+      const res = await api.googleAuthUrl();
+      window.location.href = res.authUrl;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start Google OAuth");
+      setConnecting(false);
+    }
+  }
+
+  async function createSheet() {
+    setError("");
+    setCreating(true);
+    try {
+      const created = await api.googleSheetCreate(newTitle.trim() || "Untitled spreadsheet");
+      const createdItem: GoogleSheetItem = {
+        id: created.item.id,
+        name: created.item.name,
+        webViewLink: created.item.webViewLink,
+        modifiedTime: "",
+        isConfiguredSheet: false,
+      };
+      const next = [createdItem, ...sheets];
+      setSheets(next);
+      pageCache.set(SHEETS_KEY, next);
+      setNewTitle("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create sheet");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -79,9 +118,9 @@ export default function GooglePage() {
               Disconnect
             </button>
           ) : (
-            <a href="/oauth/google/start" className="btn-primary">
-              Connect Google
-            </a>
+            <button className="btn-primary" onClick={() => void connectGoogle()} disabled={connecting}>
+              {connecting ? "Redirecting..." : "Connect Google"}
+            </button>
           )
         }
       />
@@ -110,12 +149,50 @@ export default function GooglePage() {
                 Scopes: {status.scopes.join(", ")}
               </div>
             ) : null}
+            {status?.redirectUri ? (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-400">
+                <div className="mb-1 font-medium text-slate-300">
+                  Authorized redirect URI (must match Google Cloud Console exactly)
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 break-all rounded bg-slate-900 px-2 py-1 font-mono text-[11px] text-violet-300">
+                    {status.redirectUri}
+                  </code>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    onClick={() => void navigator.clipboard?.writeText(status.redirectUri || "")}
+                  >
+                    Copy
+                  </button>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Google Cloud Console → Credentials → your OAuth client → Authorized redirect URIs.
+                  Keep only this one URI to avoid <code>redirect_uri_mismatch</code>.
+                </p>
+              </div>
+            ) : null}
           </div>
         )}
       </section>
 
       <section>
-        <h3 className="mb-2 text-base font-semibold text-slate-200">Your spreadsheets</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-semibold text-slate-200">Your spreadsheets</h3>
+          {status?.connected ? (
+            <div className="flex items-center gap-2">
+              <input
+                className="input w-64"
+                placeholder="New spreadsheet title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+              />
+              <button className="btn-secondary" onClick={() => void createSheet()} disabled={creating}>
+                {creating ? "Creating..." : "Create"}
+              </button>
+            </div>
+          ) : null}
+        </div>
         {!status?.connected && !loading ? (
           <EmptyState
             title="Google account not connected"
@@ -153,14 +230,14 @@ export default function GooglePage() {
                       {s.modifiedTime ? new Date(s.modifiedTime).toLocaleString() : "-"}
                     </td>
                     <td className="td">
-                      <a
-                        href={s.webViewLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-violet-300 hover:underline"
-                      >
-                        Open
-                      </a>
+                      <div className="flex items-center gap-3">
+                        <Link href={`/google/sheets/${encodeURIComponent(s.id)}`} className="text-violet-300 hover:underline">
+                          Open
+                        </Link>
+                        <a href={s.webViewLink} target="_blank" rel="noreferrer" className="text-slate-400 hover:underline">
+                          Google ↗
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))}

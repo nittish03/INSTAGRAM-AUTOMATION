@@ -1,17 +1,11 @@
-from django.urls import path
+"""URL conf intentionally empty.
 
-from . import views
+The Google integration app no longer exposes Django admin OAuth/HTML pages.
+All flows are JSON APIs in ``linkedin.views`` (``/api/google/...``) and the
+Next.js frontend owns the OAuth redirect at ``/google/callback``.
+"""
+from django.urls import path
 
 app_name = "google_integration"
 
-urlpatterns = [
-    path("", views.connect, name="connect"),
-    path("auth/start/", views.auth_start, name="auth_start"),
-    path("auth/callback/", views.auth_callback, name="callback"),
-    path("auth/disconnect/", views.disconnect, name="disconnect"),
-    path("sheets/", views.sheets_list, name="sheets_list"),
-    path("sheets/create/", views.sheets_create, name="sheets_create"),
-    path("sheets/<str:spreadsheet_id>/", views.sheet_view, name="sheet_view"),
-    path("sheets/<str:spreadsheet_id>/save/", views.sheet_save, name="sheet_save"),
-    path("sheets/<str:spreadsheet_id>/append/", views.sheet_append, name="sheet_append"),
-]
+urlpatterns: list[path] = []

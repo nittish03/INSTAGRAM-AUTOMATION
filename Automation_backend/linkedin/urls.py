@@ -34,7 +34,30 @@ urlpatterns = [
     path("api/analytics/", views.api_analytics, name="api_analytics"),
     path("api/google/status/", views.api_google_status, name="api_google_status"),
     path("api/google/sheets/", views.api_google_sheets, name="api_google_sheets"),
+    path("api/google/sheets/create/", views.api_google_sheet_create, name="api_google_sheet_create"),
+    path(
+        "api/google/sheets/<str:spreadsheet_id>/meta/",
+        views.api_google_sheet_meta,
+        name="api_google_sheet_meta",
+    ),
+    path(
+        "api/google/sheets/<str:spreadsheet_id>/grid/",
+        views.api_google_sheet_grid,
+        name="api_google_sheet_grid",
+    ),
+    path(
+        "api/google/sheets/<str:spreadsheet_id>/save/",
+        views.api_google_sheet_save,
+        name="api_google_sheet_save",
+    ),
+    path(
+        "api/google/sheets/<str:spreadsheet_id>/append/",
+        views.api_google_sheet_append,
+        name="api_google_sheet_append",
+    ),
     path("api/google/disconnect/", views.api_google_disconnect, name="api_google_disconnect"),
+    path("api/google/auth/url/", views.api_google_auth_url, name="api_google_auth_url"),
+    path("api/google/auth/exchange/", views.api_google_auth_exchange, name="api_google_auth_exchange"),
     path("api/workbench/", views.api_workbench, name="api_workbench"),
     path("api/leads/<int:lead_id>/insights/", views.api_lead_insights, name="api_lead_insights"),
     path("api/leads/<int:lead_id>/timeline/", views.api_lead_timeline, name="api_lead_timeline"),
@@ -48,7 +71,6 @@ urlpatterns = [
     path("api/follow-ups/queue/", views.api_followups_queue, name="api_followups_queue"),
     path("api/safe-mode/", views.api_safe_mode, name="api_safe_mode"),
     path("admin/analytics/", analytics_views.analytics_dashboard, name="analytics_dashboard"),
-    path("admin/google/", include("google_integration.urls", namespace="google_integration")),
     # App index pages list the same models as the sidebar; send bookmarks/old links to dashboard.
     path(
         "admin/linkedin/",
@@ -63,9 +85,6 @@ urlpatterns = [
         RedirectView.as_view(url="/admin/", permanent=False),
     ),
     path("admin/", admin.site.urls),
-    # Backward-compatible redirects for older links/bookmarks.
-    path("google/", RedirectView.as_view(url="/admin/google/", permanent=False)),
-    path("google/<path:subpath>", RedirectView.as_view(url="/admin/google/%(subpath)s", permanent=False)),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

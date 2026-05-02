@@ -5,6 +5,8 @@ short-lived access tokens transparently for downstream API calls.
 """
 from __future__ import annotations
 
+import os
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from google.auth.transport.requests import Request
@@ -12,6 +14,10 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
 from .models import GOOGLE_SCOPES, GoogleAccount
+
+# Users may previously authorize additional Google scopes; allow token responses
+# that include supersets of currently requested scopes instead of failing OAuth.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 
 def _ensure_oauth_configured() -> None:

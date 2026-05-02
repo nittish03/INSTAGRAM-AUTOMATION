@@ -1050,17 +1050,24 @@ def api_messaging_heal(request):
 @login_required
 @require_GET
 def api_google_status(request):
-    google = {"connected": False, "email": "", "scopes": []}
+    google = {
+        "connected": False,
+        "email": "",
+        "scopes": [],
+        "redirectUri": _google_frontend_callback_url(),
+    }
     try:
         from google_integration.models import GoogleAccount
 
         ga = GoogleAccount.objects.filter(user=request.user).first()
         if ga and ga.is_connected:
-            google = {
-                "connected": True,
-                "email": ga.google_email or "",
-                "scopes": ga.scopes or [],
-            }
+            google.update(
+                {
+                    "connected": True,
+                    "email": ga.google_email or "",
+                    "scopes": ga.scopes or [],
+                }
+            )
     except Exception:
         pass
     return JsonResponse({"ok": True, "google": google})
@@ -1121,6 +1128,153 @@ def api_google_sheets(request):
     return JsonResponse({"ok": True, "items": items})
 
 
+def _google_account_or_error(request):
+    from google_integration.models import GoogleAccount
+
+    ga = GoogleAccount.objects.filter(user=request.user).first()
+    if not ga or not ga.is_connected:
+        return None, JsonResponse(
+            {"ok": False, "error": "Google account not connected"},
+            status=400,
+        )
+    return ga, None
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_google_sheet_create(request):
+    import json as _json
+
+    from google_integration import services as gs
+
+    ga, err = _google_account_or_error(request)
+    if err:
+        return err
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    title = (payload.get("title") or "").strip() or "Untitled spreadsheet"
+    try:
+        resp = gs.create_spreadsheet(ga, title)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+    sid = resp.get("spreadsheetId") or ""
+    return JsonResponse(
+        {
+            "ok": True,
+            "item": {
+                "id": sid,
+                "name": (resp.get("properties") or {}).get("title", title),
+                "webViewLink": resp.get(
+                    "spreadsheetUrl",
+                    f"https://docs.google.com/spreadsheets/d/{sid}/edit",
+                ),
+            },
+        }
+    )
+
+
+@login_required
+@require_GET
+def api_google_sheet_meta(request, spreadsheet_id: str):
+    from google_integration import services as gs
+
+    ga, err = _google_account_or_error(request)
+    if err:
+        return err
+    try:
+        meta = gs.get_spreadsheet_meta(ga, spreadsheet_id)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    sheet_tabs = [
+        s["properties"]["title"] for s in meta.get("sheets", []) if isinstance(s, dict)
+    ]
+    return JsonResponse(
+        {
+            "ok": True,
+            "spreadsheetId": meta.get("spreadsheetId", spreadsheet_id),
+            "title": meta.get("properties", {}).get("title", ""),
+            "spreadsheetUrl": meta.get("spreadsheetUrl", ""),
+            "sheetTabs": sheet_tabs,
+        }
+    )
+
+
+@login_required
+@require_GET
+def api_google_sheet_grid(request, spreadsheet_id: str):
+    from google_integration import services as gs
+
+    ga, err = _google_account_or_error(request)
+    if err:
+        return err
+    range_a1 = (request.GET.get("range") or "Sheet1!A1:ZZ500").strip()
+    try:
+        grid = gs.get_grid_data(ga, spreadsheet_id, range_a1)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    return JsonResponse(
+        {
+            "ok": True,
+            "range": range_a1,
+            "values": grid.get("values", []),
+            "styles": grid.get("styles", []),
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_google_sheet_save(request, spreadsheet_id: str):
+    import json as _json
+
+    from google_integration import services as gs
+
+    ga, err = _google_account_or_error(request)
+    if err:
+        return err
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    range_a1 = payload.get("range") or "Sheet1!A1:ZZ500"
+    values = payload.get("values") or []
+    if not isinstance(values, list):
+        return JsonResponse({"ok": False, "error": "values must be a 2D list"}, status=400)
+    try:
+        anchor = gs.range_anchor_top_left_a1(range_a1)
+        result = gs.update_values(ga, spreadsheet_id, anchor, values)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+    return JsonResponse({"ok": True, "updatedRange": result.get("updatedRange", range_a1)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_google_sheet_append(request, spreadsheet_id: str):
+    import json as _json
+
+    from google_integration import services as gs
+
+    ga, err = _google_account_or_error(request)
+    if err:
+        return err
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+    range_a1 = payload.get("range") or "Sheet1!A1"
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list):
+        return JsonResponse({"ok": False, "error": "rows must be a list"}, status=400)
+    try:
+        result = gs.append_rows(ga, spreadsheet_id, range_a1, rows)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+    return JsonResponse({"ok": True, "updates": result.get("updates", {})})
+
+
 @login_required
 @require_http_methods(["POST"])
 def api_google_disconnect(request):
@@ -1131,6 +1285,124 @@ def api_google_disconnect(request):
     if ga:
         ga.delete()
     return JsonResponse({"ok": True})
+
+
+def _google_frontend_callback_url() -> str:
+    """Single source of truth for the Google OAuth redirect URI.
+
+    OAuth happens entirely on the Next.js frontend so Google needs exactly one
+    redirect URI registered: ``${FRONTEND_BASE_URL}/google/callback``.
+    Defaults to ``http://localhost:3000/google/callback`` for local dev.
+    """
+    import os as _os
+
+    base = (_os.environ.get("FRONTEND_BASE_URL") or "http://localhost:3000").rstrip("/")
+    return f"{base}/google/callback"
+
+
+@login_required
+@require_GET
+def api_google_auth_url(request):
+    """Build a Google OAuth URL pointing to the frontend callback page."""
+    from django.core.exceptions import ImproperlyConfigured
+    from google_integration.oauth import build_flow
+
+    redirect_uri = _google_frontend_callback_url()
+    try:
+        flow = build_flow(redirect_uri)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+    request.session["google_oauth_state"] = state
+    request.session["google_oauth_code_verifier"] = getattr(flow, "code_verifier", "")
+    request.session["google_oauth_redirect_uri"] = redirect_uri
+    return JsonResponse(
+        {"ok": True, "authUrl": auth_url, "redirectUri": redirect_uri}
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_google_auth_exchange(request):
+    """Exchange the authorization ``code`` returned by Google for tokens."""
+    import json as _json
+    import logging
+    import os as _os
+    from urllib.parse import urlencode
+
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+
+    from google_integration.models import GoogleAccount
+    from google_integration.oauth import build_flow
+
+    log = logging.getLogger(__name__)
+
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    code = (payload.get("code") or "").strip()
+    state = (payload.get("state") or "").strip()
+    if not code or not state:
+        return JsonResponse({"ok": False, "error": "Missing code or state"}, status=400)
+
+    saved_state = request.session.pop("google_oauth_state", None)
+    code_verifier = request.session.pop("google_oauth_code_verifier", "")
+    redirect_uri = request.session.pop(
+        "google_oauth_redirect_uri",
+        _google_frontend_callback_url(),
+    )
+
+    if not saved_state or saved_state != state:
+        return JsonResponse(
+            {"ok": False, "error": "OAuth state mismatch — please retry"},
+            status=400,
+        )
+
+    try:
+        flow = build_flow(redirect_uri, state=state)
+        if code_verifier:
+            flow.code_verifier = code_verifier
+        auth_response = f"{redirect_uri}?{urlencode({'code': code, 'state': state})}"
+        flow.fetch_token(authorization_response=auth_response)
+    except Exception as exc:
+        log.exception("Google OAuth token exchange failed")
+        return JsonResponse(
+            {"ok": False, "error": f"Token exchange failed: {exc}"},
+            status=400,
+        )
+
+    creds = flow.credentials
+    google_email = ""
+    google_sub = ""
+    try:
+        if getattr(creds, "id_token", None):
+            info = id_token.verify_oauth2_token(
+                creds.id_token,
+                google_requests.Request(),
+                audience=_os.environ.get("GOOGLE_CLIENT_ID"),
+            )
+            google_email = info.get("email", "") or ""
+            google_sub = info.get("sub", "") or ""
+    except Exception:
+        log.warning(
+            "Could not verify id_token; continuing without email", exc_info=True
+        )
+
+    account, _ = GoogleAccount.objects.get_or_create(user=request.user)
+    account.google_email = google_email or account.google_email
+    account.google_sub = google_sub or account.google_sub
+    account.update_from_credentials(creds)
+    account.save()
+
+    return JsonResponse({"ok": True, "email": account.google_email})
 
 
 @login_required
