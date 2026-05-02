@@ -8,7 +8,12 @@ from django.test import TestCase
 
 from crm.models import Deal, Lead
 from google_integration.models import GoogleAccount
-from google_integration.sheet_sync import build_sheet_row, sync_lead_to_google_sheet
+from google_integration.sheet_sync import (
+    build_sheet_row,
+    derive_active_label,
+    normalize_sheet_status,
+    sync_lead_to_google_sheet,
+)
 from linkedin.enums import ProfileState
 from linkedin.models import Campaign, OutreachEvent, SiteConfig
 from linkedin.outreach_tracking import emit_outreach_event, lead_sheet_export_verification
@@ -55,7 +60,19 @@ class OutreachExportGateTests(TestCase):
         self.assertTrue(ok)
         self.assertEqual(reason, "verified_api_first_degree")
         row = build_sheet_row(self.lead, status_label=label, verification_reason=reason)
-        self.assertIn("Verified (API)", row)
+        self.assertEqual(len(row), 10)
+        self.assertEqual(row[5], "Connected")
+        self.assertEqual(row[6], derive_active_label("Connected"))
+        self.assertRegex(row[8], r"^\d{2}/\d{2}/\d{4}$")
+        self.assertEqual(row[9], "")
+
+    def test_normalize_and_active_are_deterministic(self):
+        self.assertEqual(normalize_sheet_status("Verified (API)"), "Connected")
+        self.assertEqual(normalize_sheet_status("Accepted (post-invite)"), "Connected")
+        self.assertEqual(normalize_sheet_status("Pending"), "Pending")
+        self.assertEqual(derive_active_label("Qualified"), "Follow up")
+        self.assertEqual(derive_active_label("Pending"), "Follow up-1")
+        self.assertEqual(derive_active_label("Connected"), "Follow up-2")
 
     def test_ui_only_without_invite_not_eligible(self):
         emit_outreach_event(

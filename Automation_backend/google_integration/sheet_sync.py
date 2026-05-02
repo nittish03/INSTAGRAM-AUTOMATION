@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# A–J: column H Review = human; I = export date; J = last follow-up (from ActionLog) when known.
 SHEET_HEADER = [
     "Name",
     "Company Name",
@@ -31,15 +32,88 @@ SHEET_HEADER = [
     "Connected",
     "Status",
     "Action",
+    "Review",
+    "Date",
+    "Last Follow up Date",
 ]
+
+# After normalize_sheet_status(), only these appear in column F (dropdown-safe).
+SHEET_NORMALIZED_STATUSES = frozenset({"Qualified", "Pending", "Connected"})
+
+# Bot-written Action column labels — tiered follow-up (data validation must match exactly).
+SHEET_ACTIVE_FOLLOW_UP = "Follow up"
+SHEET_ACTIVE_FOLLOW_UP_1 = "Follow up-1"
+SHEET_ACTIVE_FOLLOW_UP_2 = "Follow up-2"
+SHEET_ACTIVE_FOLLOW_UP_3 = "Follow up-3"
+
+
+def normalize_sheet_status(raw: str) -> str:
+    """Map internal/export labels to CRM dropdown values (Qualified / Pending / Connected).
+
+    **Deterministic:** every ``status_label`` produced by the app is either already one of
+    those three or is mapped from the fixed set below — suitable for a strict Status dropdown.
+
+    Maps export-verification labels onto ``Connected`` so they match a simple 3-option sheet.
+    """
+    from linkedin.enums import ProfileState
+
+    s = (raw or "").strip()
+    mapped_to_connected = frozenset(
+        {
+            "Verified (API)",
+            "Accepted (post-invite)",
+            "Unverified (manual bypass)",
+        }
+    )
+    if s in mapped_to_connected:
+        return ProfileState.CONNECTED.value
+    if s in (
+        ProfileState.QUALIFIED.value,
+        ProfileState.PENDING.value,
+        ProfileState.CONNECTED.value,
+    ):
+        return s
+    logger.warning("Unknown sheet status label %r — using Pending for dropdown safety", raw)
+    return ProfileState.PENDING.value
+
+
+def derive_active_label(normalized_status: str) -> str:
+    """Pick Action-column dropdown value from normalized CRM status (tiered follow-up)."""
+    from linkedin.enums import ProfileState
+
+    return {
+        ProfileState.QUALIFIED.value: SHEET_ACTIVE_FOLLOW_UP,
+        ProfileState.PENDING.value: SHEET_ACTIVE_FOLLOW_UP_1,
+        ProfileState.CONNECTED.value: SHEET_ACTIVE_FOLLOW_UP_2,
+    }.get(normalized_status, SHEET_ACTIVE_FOLLOW_UP)
+
+
+def sheet_status_keywords_reference() -> dict[str, list[str]]:
+    """Documentation helper: internal labels vs normalized Status (for operators)."""
+    from linkedin.enums import ProfileState
+
+    return {
+        "normalized_status_dropdown_values": sorted(SHEET_NORMALIZED_STATUSES),
+        "maps_to_connected": ["Verified (API)", "Accepted (post-invite)", "Unverified (manual bypass)"],
+        "passthrough_unchanged": [
+            ProfileState.QUALIFIED.value,
+            ProfileState.PENDING.value,
+            ProfileState.CONNECTED.value,
+        ],
+        "action_labels_emitted": [
+            SHEET_ACTIVE_FOLLOW_UP,
+            SHEET_ACTIVE_FOLLOW_UP_1,
+            SHEET_ACTIVE_FOLLOW_UP_2,
+        ],
+    }
 
 
 def _ensure_header_row(account, sid: str, tab: str) -> None:
-    """Idempotently write A1:G1 if the header row is missing/empty."""
-    existing = get_values(account, sid, f"{tab}!A1:G1")
+    """Idempotently write A1:J1 if the header row is missing/empty."""
+    existing = get_values(account, sid, f"{tab}!A1:J1")
     row = existing[0] if existing else []
     if not row or all(not (c or "").strip() for c in row):
-        update_values(account, sid, f"{tab}!A1:G1", [SHEET_HEADER])
+        update_values(account, sid, f"{tab}!A1:J1", [SHEET_HEADER])
 
 
 def _next_row_index(account, sid: str, tab: str) -> int:
@@ -73,24 +147,63 @@ def _lead_position(lead: "Lead") -> str:
     return ""
 
 
+def _sheet_entry_date_cell() -> str:
+    """Column **Date**: local date when this row is written (export / rebuild)."""
+    return timezone.localtime(timezone.now()).strftime("%m/%d/%Y")
+
+
+def _sheet_last_follow_up_date_cell(lead: "Lead") -> str:
+    """Column **Last Follow up Date**: latest successful follow-up action for this lead, if any."""
+    from linkedin.models import ActionLog
+
+    pid = (lead.public_identifier or "").strip()
+    if not pid:
+        return ""
+    log = (
+        ActionLog.objects.filter(
+            target_public_id=pid,
+            action_type=ActionLog.ActionType.FOLLOW_UP,
+            status=ActionLog.Status.SUCCESS,
+        )
+        .order_by("-created_at")
+        .only("created_at")
+        .first()
+    )
+    if not log:
+        return ""
+    return timezone.localtime(log.created_at).strftime("%m/%d/%Y")
+
+
 def build_sheet_row(
     lead: "Lead",
     *,
     status_label: str,
-    verification_reason: str,
+    verification_reason: str = "",
 ) -> list[str]:
-    """One row aligned to A–G. ``verification_reason`` is an internal audit code (export path)."""
+    """One row aligned to A–J.
+
+    Column **Status** is normalized for dropdown validation. Column **Action** holds the
+    tiered follow-up label derived from that status. **Review** stays blank for humans.
+    **Date** is today's date (local tz) when the row is produced. **Last Follow up Date**
+    is filled when we have a successful ``ActionLog`` FOLLOW_UP for this lead's public id.
+    ``verification_reason`` is not written to the sheet (log-only).
+    """
     name = f"{lead.first_name} {lead.last_name}".strip()
     if not name:
         name = lead.public_identifier or ""
+    norm = normalize_sheet_status(status_label)
+    active = derive_active_label(norm)
     return [
         name,
         lead.company_name or "",
         _lead_position(lead),
         lead.linkedin_url or "",
         "TRUE",
-        status_label,
-        verification_reason,
+        norm,
+        active,
+        "",
+        _sheet_entry_date_cell(),
+        _sheet_last_follow_up_date_cell(lead),
     ]
 
 
@@ -157,7 +270,7 @@ def sync_lead_to_google_sheet(
         update_values(
             account,
             sid,
-            f"{tab}!A{row_idx}:G{row_idx}",
+            f"{tab}!A{row_idx}:J{row_idx}",
             [build_sheet_row(lead, status_label=status_label, verification_reason=reason_code)],
         )
     except Exception:
