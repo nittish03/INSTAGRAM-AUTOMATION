@@ -12,8 +12,8 @@ Three generators chain via next(upstream, None):
                             |
                   search_source  <- yields keywords (never truly exhausts)
 
-Each qualify_source iteration produces exactly one label, which shifts the GP
-model — preventing the infinite-search-without-qualifying bug.
+Each run_qualification call produces at most one label, which shifts the GP
+model. Rejected labels are skipped until an accepted candidate is available.
 """
 from __future__ import annotations
 
@@ -92,13 +92,13 @@ def search_source(session) -> Generator[str, None, None]:
 
 
 def qualify_source(session, qualifier: BayesianQualifier) -> Generator[str, None, None]:
-    """Yield public_ids from run_qualification(), pulling from search when needed.
+    """Yield accepted public_ids from run_qualification(), pulling from search when needed.
 
     In exploit mode, the effective pool is candidates with P > 0.5. When
     this pool is empty, keeps searching until high-P candidates appear or
     search is exhausted. Every yield produces a label that shifts the GP
-    model. Only falls through to qualifying low-P candidates when search
-    can no longer bring in new profiles.
+    model. Rejected labels are recorded and skipped; the generator keeps
+    qualifying until it finds an accepted lead or the pool is exhausted.
     """
     search = search_source(session)
 
@@ -122,7 +122,7 @@ def qualify_source(session, qualifier: BayesianQualifier) -> Generator[str, None
 
         result = run_qualification(session, qualifier)
         if result is None:
-            return
+            continue
         yield result
 
 

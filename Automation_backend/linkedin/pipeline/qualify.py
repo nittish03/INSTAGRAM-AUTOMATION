@@ -42,7 +42,7 @@ def fetch_qualification_candidates(session):
 
 
 def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
-    """Qualify one unlabelled profile via BALD/auto-decision/LLM. Returns public_id or None."""
+    """Qualify one unlabelled profile. Returns public_id only when accepted."""
     from linkedin.ml.qualifier import qualify_with_llm, format_prediction
 
     candidates = fetch_qualification_candidates(session)
@@ -88,7 +88,7 @@ def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
     if not profile_text:
         logger.warning("No profile text for lead %d \u2014 disqualifying", lead_id)
         _save_qualification_result(session, qualifier, lead_id, public_id, embedding, 0, "no profile text available")
-        return public_id
+        return None
 
     campaign = session.campaign
     label, reason = qualify_with_llm(
@@ -96,11 +96,11 @@ def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
         product_docs=campaign.product_docs,
         campaign_objective=campaign.campaign_objective,
     )
-    _save_qualification_result(session, qualifier, lead_id, public_id, embedding, label, reason)
-    return public_id
+    accepted = _save_qualification_result(session, qualifier, lead_id, public_id, embedding, label, reason)
+    return public_id if accepted else None
 
 
-def _save_qualification_result(session, qualifier: BayesianQualifier, lead_id: int, public_id: str, embedding: np.ndarray, label: int, reason: str):
+def _save_qualification_result(session, qualifier: BayesianQualifier, lead_id: int, public_id: str, embedding: np.ndarray, label: int, reason: str) -> bool:
     # LLM rejections are tracked as FAILED Deals with "Disqualified" closing reason
     # (campaign-scoped), not as Lead.disqualified (permanent account-level exclusion).
     from linkedin.db.deals import create_disqualified_deal
@@ -114,10 +114,12 @@ def _save_qualification_result(session, qualifier: BayesianQualifier, lead_id: i
         except ValueError as e:
             logger.warning("Cannot promote %s: %s \u2014 disqualifying", public_id, e)
             create_disqualified_deal(session, public_id, reason=str(e))
-            return
+            return False
         logger.info("%s %s: %s", public_id, colored("QUALIFIED", "green", attrs=["bold"]), reason)
+        return True
     else:
         create_disqualified_deal(session, public_id, reason=reason)
+        return False
 
 
 def _fetch_profile_text(session, lead_id: int, public_id: str) -> str | None:

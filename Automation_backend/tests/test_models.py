@@ -1,4 +1,3 @@
-import os
 from django.test import TestCase
 from django.contrib.auth.models import User
 from linkedin.models import LinkedInProfile, Task, Campaign
@@ -51,3 +50,15 @@ class ModelHardeningTest(TestCase):
         self.assertEqual(task.status, Task.Status.FAILED)
         self.assertEqual(task.error, "Fatal error")
         self.assertIsNotNone(task.ended_at)
+
+    def test_invalid_token_decrypt_fallback_logs_once_at_debug(self):
+        import linkedin.models as linkedin_models
+
+        linkedin_models._decrypt_invalid_token_logged = False
+
+        with self.assertLogs("linkedin.models", level="DEBUG") as logs:
+            self.assertEqual(linkedin_models.decrypt_value("legacy-plaintext"), "legacy-plaintext")
+            self.assertEqual(linkedin_models.decrypt_value("another-legacy-value"), "another-legacy-value")
+
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(logs.records[0].levelname, "DEBUG")

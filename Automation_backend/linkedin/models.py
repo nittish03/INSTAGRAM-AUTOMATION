@@ -7,10 +7,11 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from simple_history.models import HistoricalRecords
 
 logger = logging.getLogger(__name__)
+_decrypt_invalid_token_logged = False
 
 def _get_cipher():
     # [NEW-CRIT-02] Dedicated env var for encryption; dev fallback matches django_settings (non-production).
@@ -41,6 +42,15 @@ def decrypt_value(value: str) -> str:
     try:
         cipher = _get_cipher()
         return cipher.decrypt(value.encode()).decode()
+    except InvalidToken:
+        global _decrypt_invalid_token_logged
+        if not _decrypt_invalid_token_logged:
+            _decrypt_invalid_token_logged = True
+            logger.debug(
+                "decrypt_value received legacy/plaintext or key-mismatched data; "
+                "returning raw value and suppressing repeat InvalidToken logs"
+            )
+        return value
     except Exception as exc:
         logger.warning(
             "decrypt_value failed (%s); returning raw value for compatibility",

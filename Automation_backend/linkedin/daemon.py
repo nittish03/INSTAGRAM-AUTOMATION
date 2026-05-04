@@ -8,6 +8,7 @@ import traceback
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
+from django.db import close_old_connections, connections
 from django.utils import timezone
 from termcolor import colored
 
@@ -42,7 +43,11 @@ _HANDLERS = {
 }
 
 
-
+def _close_old_connections_for_daemon():
+    """Refresh stale DB connections without breaking Django TestCase transactions."""
+    if any(conn.in_atomic_block for conn in connections.all()):
+        return
+    close_old_connections()
 
 
 def _build_qualifiers(campaigns, cfg):
@@ -218,6 +223,7 @@ def run_daemon(session):
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
+        _close_old_connections_for_daemon()
         pause = seconds_until_active()
         if pause > 0:
             h, m = int(pause // 3600), int(pause % 3600 // 60)
@@ -291,12 +297,24 @@ def run_daemon(session):
         try:
             with failure_diagnostics(session):
                 handler(task, session, qualifiers)
+            _close_old_connections_for_daemon()
             task.mark_completed()
         except TaskSkipped as e:
+            _close_old_connections_for_daemon()
             task.mark_skipped(str(e))
             logger.info("Task %s skipped: %s", task, str(e))
         except Exception:
-            task.mark_failed(traceback.format_exc())
-            logger.exception("Task %s failed", task)
+            error = traceback.format_exc()
+            _close_old_connections_for_daemon()
+            try:
+                task.mark_failed(error)
+            except Exception:
+                logger.exception(
+                    "Task %s failed and could not be marked failed. Original traceback:\n%s",
+                    task,
+                    error,
+                )
+            else:
+                logger.exception("Task %s failed", task)
             continue
 

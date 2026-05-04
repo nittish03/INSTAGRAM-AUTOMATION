@@ -6,7 +6,42 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/Automation_backend"
 FRONTEND_DIR="$ROOT_DIR/Automation_frontend"
 BACKEND_VENV="$BACKEND_DIR/.venv"
-MODE="${1:-system}"
+MODE="system"
+MODE_SET=0
+RUN_DAEMON=0
+
+usage() {
+  echo "Usage: ./run-dev.sh [current|system] [--daemon|-d]"
+  echo "  system (default): open separate macOS Terminal tabs"
+  echo "  current: run servers in this terminal session"
+  echo "  --daemon, -d: also run the LinkedIn daemon"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    current|system)
+      if [[ "$MODE_SET" -eq 1 ]]; then
+        echo "Only one mode may be provided."
+        usage
+        exit 1
+      fi
+      MODE="$arg"
+      MODE_SET=1
+      ;;
+    --daemon|--with-daemon|-d)
+      RUN_DAEMON=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 if [[ ! -d "$BACKEND_DIR" ]]; then
   echo "Missing backend directory: $BACKEND_DIR"
@@ -26,14 +61,16 @@ if [[ ! -d "$BACKEND_VENV" ]]; then
 fi
 
 backend_cmd="cd \"$BACKEND_DIR\" && source .venv/bin/activate && python manage.py runserver"
+daemon_cmd="cd \"$BACKEND_DIR\" && source .venv/bin/activate && python manage.py rundaemon"
 frontend_cmd="cd \"$FRONTEND_DIR\" && npm run dev"
 
 start_in_current_terminal() {
   cleanup() {
     echo
-    echo "Stopping backend and frontend..."
+    echo "Stopping dev processes..."
     [[ -n "${BACKEND_PID:-}" ]] && kill "$BACKEND_PID" 2>/dev/null || true
     [[ -n "${FRONTEND_PID:-}" ]] && kill "$FRONTEND_PID" 2>/dev/null || true
+    [[ -n "${DAEMON_PID:-}" ]] && kill "$DAEMON_PID" 2>/dev/null || true
     wait 2>/dev/null || true
   }
 
@@ -53,11 +90,23 @@ start_in_current_terminal() {
   ) &
   FRONTEND_PID=$!
 
+  if [[ "$RUN_DAEMON" -eq 1 ]]; then
+    (
+      cd "$BACKEND_DIR"
+      source ".venv/bin/activate"
+      python manage.py rundaemon
+    ) &
+    DAEMON_PID=$!
+  fi
+
   echo
   echo "Running:"
   echo "  Backend  -> http://127.0.0.1:8000 (pid: $BACKEND_PID)"
   echo "  Frontend -> http://localhost:3000 (pid: $FRONTEND_PID)"
-  echo "Press Ctrl+C to stop both."
+  if [[ "$RUN_DAEMON" -eq 1 ]]; then
+    echo "  Daemon   -> rundaemon (pid: $DAEMON_PID)"
+  fi
+  echo "Press Ctrl+C to stop all."
   echo
   wait
 }
@@ -69,13 +118,21 @@ start_in_system_terminal() {
     return
   fi
 
-  local backend_cmd_escaped frontend_cmd_escaped
+  local backend_cmd_escaped frontend_cmd_escaped daemon_cmd_escaped
   backend_cmd_escaped="${backend_cmd//\"/\\\"}"
   frontend_cmd_escaped="${frontend_cmd//\"/\\\"}"
+  daemon_cmd_escaped="${daemon_cmd//\"/\\\"}"
 
-  echo "Opening 2 separate Terminal tabs:"
+  if [[ "$RUN_DAEMON" -eq 1 ]]; then
+    echo "Opening 3 separate Terminal tabs:"
+  else
+    echo "Opening 2 separate Terminal tabs:"
+  fi
   echo "  1) Backend: $backend_cmd"
   echo "  2) Frontend: $frontend_cmd"
+  if [[ "$RUN_DAEMON" -eq 1 ]]; then
+    echo "  3) Daemon: $daemon_cmd"
+  fi
 
   osascript <<EOF
 tell application "Terminal"
@@ -86,6 +143,9 @@ tell application "Terminal"
     do script "$backend_cmd_escaped" in selected tab of front window
   end if
   do script "$frontend_cmd_escaped"
+  if $RUN_DAEMON = 1 then
+    do script "$daemon_cmd_escaped"
+  end if
 end tell
 EOF
 
@@ -100,9 +160,7 @@ case "$MODE" in
     start_in_system_terminal
     ;;
   *)
-    echo "Usage: ./run-dev.sh [current|system]"
-    echo "  system (default): open separate macOS Terminal tabs"
-    echo "  current: run both servers in this terminal session"
+    usage
     exit 1
     ;;
 esac
