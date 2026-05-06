@@ -39,10 +39,10 @@ export default function DashboardPage() {
   const [safeMode, setSafeMode] = useState<SafeModeSettings | null>(null);
   const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
   const [daemonLoading, setDaemonLoading] = useState(true);
-  const [launchingDaemon, setLaunchingDaemon] = useState(false);
+  const [daemonMutating, setDaemonMutating] = useState(false);
   const [loading, setLoading] = useState(!cachedStats);
-  const latestLaunchStartedAt = useRef(0);
-  const launchInFlight = useRef(false);
+  const latestDaemonActionStartedAt = useRef(0);
+  const daemonActionInFlight = useRef(false);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(
     cachedRefreshed ? new Date(cachedRefreshed) : null,
   );
@@ -62,7 +62,7 @@ export default function DashboardPage() {
       setStats(data.stats);
       setGoogle(data.google);
       setSafeMode(safe.settings);
-      if (!launchInFlight.current && statusRequestStartedAt > latestLaunchStartedAt.current) {
+      if (!daemonActionInFlight.current && statusRequestStartedAt > latestDaemonActionStartedAt.current) {
         setDaemon(daemonStatus.daemon);
       }
       const now = new Date();
@@ -92,7 +92,7 @@ export default function DashboardPage() {
         setStats(data.stats);
         setGoogle(data.google);
         setSafeMode(safe.settings);
-        if (!launchInFlight.current && statusRequestStartedAt > latestLaunchStartedAt.current) {
+        if (!daemonActionInFlight.current && statusRequestStartedAt > latestDaemonActionStartedAt.current) {
           setDaemon(daemonStatus.daemon);
         }
         const now = new Date();
@@ -115,21 +115,27 @@ export default function DashboardPage() {
     };
   }, []);
 
-  async function launchDaemon() {
-    latestLaunchStartedAt.current = Date.now();
-    launchInFlight.current = true;
-    setLaunchingDaemon(true);
+  async function toggleDaemon() {
+    latestDaemonActionStartedAt.current = Date.now();
+    daemonActionInFlight.current = true;
+    setDaemonMutating(true);
     setError("");
     setInfo("");
     try {
-      const data = await api.launchDaemon();
+      const data = daemon?.running ? await api.stopDaemon() : await api.launchDaemon();
       setDaemon(data.daemon);
-      setInfo(data.daemon.running ? "Daemon is running." : "Daemon launch requested.");
+      setInfo(data.daemon.running ? "Daemon is running." : "Daemon stopped.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to launch daemon");
+      setError(
+        e instanceof Error
+          ? e.message
+          : daemon?.running
+            ? "Failed to stop daemon"
+            : "Failed to launch daemon",
+      );
     } finally {
-      launchInFlight.current = false;
-      setLaunchingDaemon(false);
+      daemonActionInFlight.current = false;
+      setDaemonMutating(false);
     }
   }
 
@@ -153,16 +159,30 @@ export default function DashboardPage() {
           </span>
           <button
             className="btn-primary"
-            onClick={() => void launchDaemon()}
-            disabled={daemonLoading || launchingDaemon || daemon?.running}
-            title={daemonLoading ? "Checking daemon status" : daemon?.running ? "Daemon is already running" : "Launch the local Leadway daemon"}
+            onClick={() => void toggleDaemon()}
+            disabled={daemonLoading || daemonMutating}
+            title={
+              daemonLoading
+                ? "Checking daemon status"
+                : daemon?.running
+                  ? "Stop the running daemon"
+                  : "Launch the local Leadway daemon"
+            }
           >
-            {daemonLoading ? "Checking Daemon..." : launchingDaemon ? "Launching..." : daemon?.running ? "Daemon Running" : "Launch Daemon"}
+            {daemonLoading
+              ? "Checking Daemon..."
+              : daemonMutating
+                ? daemon?.running
+                  ? "Stopping..."
+                  : "Launching..."
+                : daemon?.running
+                  ? "Stop Daemon"
+                  : "Run Daemon"}
           </button>
           <button
             className="btn-secondary"
             onClick={() => void refresh()}
-            disabled={loading || launchingDaemon}
+            disabled={loading || daemonMutating}
           >
             {loading ? "Refreshing..." : "Refresh"}
           </button>

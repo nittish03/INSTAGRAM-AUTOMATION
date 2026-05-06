@@ -357,6 +357,38 @@ def api_daemon_launch(request):
     )
 
 
+@login_required
+@require_http_methods(["POST"])
+def api_daemon_stop(request):
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
+    if not _dashboard_daemon_launch_allowed(request):
+        return JsonResponse(
+            {"ok": False, "error": "Daemon control from dashboard is only enabled for local development"},
+            status=409,
+        )
+
+    from linkedin.services.daemon_control import stop_daemon
+
+    try:
+        status = stop_daemon()
+    except Exception:
+        logger.exception("Failed to stop daemon from dashboard")
+        return JsonResponse({"ok": False, "error": "Failed to stop daemon"}, status=500)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "daemon": {
+                "running": status.running,
+                "pid": status.pid,
+                "startedAt": status.started_at,
+            },
+        }
+    )
+
+
 def _parse_int(value: str | None, default: int, minimum: int, maximum: int):
     try:
         parsed = int(value or default)

@@ -68,6 +68,28 @@ class DaemonControlServiceTests(TestCase):
         self.assertEqual(status.pid, 12345)
         mock_popen.assert_not_called()
 
+    def test_stop_daemon_when_running_removes_pid_file(self):
+        with TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "daemon.pid"
+            lock_file = Path(tmp) / "daemon.lock"
+            log_file = Path(tmp) / "logs" / "daemon.log"
+            pid_file.write_text(json.dumps({"pid": 12345, "started_at": "now"}))
+
+            with patch.object(daemon_control, "PID_FILE", pid_file), patch.object(
+                daemon_control, "LOCK_FILE", lock_file
+            ), patch.object(
+                daemon_control, "LOG_FILE", log_file
+            ), patch.object(
+                daemon_control, "_pid_is_running", side_effect=[True, False, False]
+            ), patch.object(
+                daemon_control.os, "killpg"
+            ) as mock_killpg:
+                status = daemon_control.stop_daemon(timeout_seconds=0.1)
+
+        self.assertFalse(status.running)
+        self.assertIsNone(status.pid)
+        mock_killpg.assert_called()
+
 
 class DaemonControlApiTests(TestCase):
     def setUp(self):
@@ -141,3 +163,21 @@ class DaemonControlApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["daemon"]["running"])
+
+    def test_stop_requires_staff(self):
+        self.client.login(username="daemon_viewer", password="testpass123")
+
+        response = self.client.post("/api/daemon/stop/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_stop_returns_daemon_status(self):
+        self.client.login(username="daemon_staff", password="testpass123")
+        status = DaemonStatus(running=False, pid=None, started_at="")
+
+        with patch("linkedin.services.daemon_control.stop_daemon", return_value=status) as mock_stop:
+            response = self.client.post("/api/daemon/stop/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["daemon"]["running"])
+        mock_stop.assert_called_once()

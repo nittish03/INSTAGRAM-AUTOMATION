@@ -143,6 +143,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  stopDaemon: () =>
+    request<{ daemon: DaemonStatus }>("/api/daemon/stop", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   campaigns: () => request<{ items: Campaign[] }>("/api/campaigns"),
   createCampaign: (payload: {
     name: string;

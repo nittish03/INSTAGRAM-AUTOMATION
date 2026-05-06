@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -130,3 +132,52 @@ def launch_daemon() -> DaemonStatus:
             log_handle.close()
         _write_pid_file(process.pid)
     return daemon_status()
+
+
+def stop_daemon(timeout_seconds: float = 8.0) -> DaemonStatus:
+    """Stop the running daemon process group, if present.
+
+    The daemon is launched with ``start_new_session=True`` so we can terminate
+    the whole process group cleanly via ``os.killpg``.
+    """
+    with _launch_lock():
+        current = daemon_status()
+        if not current.running or not current.pid:
+            return current
+
+        pid = current.pid
+        try:
+            # Prefer signaling the daemon process group so child processes
+            # (if any) don't outlive the parent worker.
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            _remove_pid_file()
+            return daemon_status()
+        except Exception:
+            # Fallback: terminate just the root process.
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                _remove_pid_file()
+                return daemon_status()
+
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if not _pid_is_running(pid):
+                _remove_pid_file()
+                return daemon_status()
+            time.sleep(0.2)
+
+        # Hard kill if graceful shutdown timed out.
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except Exception:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        # Give OS a short moment to reap the process.
+        time.sleep(0.2)
+        _remove_pid_file()
+        return daemon_status()
