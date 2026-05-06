@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import fcntl
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -11,6 +10,12 @@ from pathlib import Path
 
 from django.conf import settings
 from django.utils import timezone
+
+try:
+    import fcntl  # type: ignore
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+    import msvcrt
 
 
 PID_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.pid"
@@ -29,11 +34,19 @@ class DaemonStatus:
 def _launch_lock():
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     with LOCK_FILE.open("w") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        else:  # Windows
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            if fcntl:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            else:  # Windows
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _read_pid_file() -> dict:
