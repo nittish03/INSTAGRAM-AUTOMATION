@@ -27,6 +27,23 @@ class Command(BaseCommand):
                 "Defaults to the first active profile globally (single-tenant mode)."
             ),
         )
+        parser.add_argument(
+            "--launcher-pid",
+            metavar="PID",
+            type=int,
+            default=None,
+            help="Backend launcher process id; daemon exits if this pid is gone.",
+        )
+        parser.add_argument(
+            "--heartbeat-timeout-seconds",
+            metavar="SECONDS",
+            type=float,
+            default=45.0,
+            help=(
+                "Frontend/backend heartbeat timeout. Daemon exits when stale. "
+                "Set <=0 to disable heartbeat auto-stop."
+            ),
+        )
 
     def handle(self, *args, **options):
         self._configure_logging()
@@ -66,7 +83,11 @@ class Command(BaseCommand):
 
         from linkedin.daemon import run_daemon
         try:
-            run_daemon(session)
+            run_daemon(
+                session,
+                launcher_pid=options.get("launcher_pid"),
+                heartbeat_timeout_seconds=options.get("heartbeat_timeout_seconds", 45.0),
+            )
         finally:
             session.close()
 

@@ -40,7 +40,9 @@ class DaemonControlServiceTests(TestCase):
         self.assertEqual(status.pid, 12345)
         mock_popen.assert_called_once()
         args, kwargs = mock_popen.call_args
-        self.assertEqual(args[0][-2:], ["manage.py", "rundaemon"])
+        self.assertIn("manage.py", args[0])
+        self.assertIn("rundaemon", args[0])
+        self.assertIn("--launcher-pid", args[0])
         self.assertNotIn("--handle", args[0])
         self.assertTrue(kwargs["start_new_session"])
 
@@ -68,9 +70,11 @@ class DaemonControlServiceTests(TestCase):
 
         args, _ = mock_popen.call_args
         self.assertIn("--handle", args[0])
-        self.assertEqual(
-            args[0][-4:], ["manage.py", "rundaemon", "--handle", "alice"]
-        )
+        self.assertIn("manage.py", args[0])
+        self.assertIn("rundaemon", args[0])
+        handle_idx = args[0].index("--handle")
+        self.assertEqual(args[0][handle_idx + 1], "alice")
+        self.assertIn("--launcher-pid", args[0])
 
     def test_launch_daemon_does_not_spawn_duplicate_when_pid_running(self):
         with TemporaryDirectory() as tmp:

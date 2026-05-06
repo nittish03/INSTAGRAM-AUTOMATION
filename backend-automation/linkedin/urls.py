@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/auth/me/", views.api_me, name="api_me"),
     path("api/dashboard/", views.api_dashboard, name="api_dashboard"),
     path("api/daemon/status/", views.api_daemon_status, name="api_daemon_status"),
+    path("api/daemon/logs/", views.api_daemon_logs, name="api_daemon_logs"),
     path("api/daemon/launch/", views.api_daemon_launch, name="api_daemon_launch"),
     path("api/daemon/stop/", views.api_daemon_stop, name="api_daemon_stop"),
     path("api/campaigns/", views.api_campaigns, name="api_campaigns"),

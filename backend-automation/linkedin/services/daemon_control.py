@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone as dt_timezone
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover - Windows
 PID_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.pid"
 LOCK_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.lock"
 LOG_FILE = Path(settings.BASE_DIR) / "logs" / "daemon.log"
+HEARTBEAT_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.heartbeat"
 
 
 @dataclass
@@ -30,6 +32,41 @@ class DaemonStatus:
     running: bool
     pid: int | None
     started_at: str
+
+
+def read_daemon_logs(limit: int = 300) -> dict:
+    """Return recent daemon logs for the Control Center live log view."""
+    safe_limit = max(20, min(int(limit or 300), 2000))
+    if not LOG_FILE.exists():
+        return {
+            "exists": False,
+            "path": str(LOG_FILE),
+            "lines": [],
+            "sizeBytes": 0,
+            "modifiedAt": "",
+        }
+
+    try:
+        content = LOG_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {
+            "exists": True,
+            "path": str(LOG_FILE),
+            "lines": ["[log read error] Unable to read daemon log file."],
+            "sizeBytes": 0,
+            "modifiedAt": "",
+        }
+
+    all_lines = content.splitlines()
+    tail = all_lines[-safe_limit:]
+    stat = LOG_FILE.stat()
+    return {
+        "exists": True,
+        "path": str(LOG_FILE),
+        "lines": tail,
+        "sizeBytes": int(stat.st_size),
+        "modifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=dt_timezone.utc).isoformat(),
+    }
 
 
 @contextmanager
@@ -58,11 +95,12 @@ def _read_pid_file() -> dict:
         return {}
 
 
-def _write_pid_file(pid: int) -> None:
+def _write_pid_file(pid: int, *, launcher_pid: int | None = None) -> None:
     PID_FILE.write_text(
         json.dumps(
             {
                 "pid": pid,
+                "launcher_pid": launcher_pid,
                 "started_at": timezone.now().isoformat(),
             }
         )
@@ -74,6 +112,27 @@ def _remove_pid_file() -> None:
         PID_FILE.unlink()
     except FileNotFoundError:
         pass
+
+
+def touch_daemon_heartbeat() -> None:
+    """Mark frontend/backend app heartbeat for daemon liveness checks."""
+    HEARTBEAT_FILE.write_text(
+        json.dumps({"at": timezone.now().isoformat()}),
+    )
+
+
+def read_daemon_heartbeat_age_seconds() -> float | None:
+    """Return heartbeat staleness in seconds, or None if no heartbeat exists."""
+    try:
+        payload = json.loads(HEARTBEAT_FILE.read_text())
+        raw = payload.get("at")
+        if not raw:
+            return None
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        now = datetime.now(ts.tzinfo or dt_timezone.utc)
+        return max((now - ts).total_seconds(), 0.0)
+    except Exception:
+        return None
 
 
 def _pid_is_running(pid: int | None) -> bool:
@@ -122,13 +181,18 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             return current
 
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = LOG_FILE.open("a")
+        # Fresh daemon run should start with a clean log buffer so Control
+        # Center "Daemon Logs (Live)" only shows the current run.
+        log_handle = LOG_FILE.open("w")
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
 
         cmd = [sys.executable, "manage.py", "rundaemon"]
         if handle:
             cmd.extend(["--handle", handle])
+        launcher_pid = os.getpid()
+        cmd.extend(["--launcher-pid", str(launcher_pid)])
+        touch_daemon_heartbeat()
 
         try:
             process = subprocess.Popen(
@@ -141,7 +205,7 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             )
         finally:
             log_handle.close()
-        _write_pid_file(process.pid)
+        _write_pid_file(process.pid, launcher_pid=launcher_pid)
     return daemon_status()
 
 

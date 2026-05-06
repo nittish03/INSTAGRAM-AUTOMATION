@@ -28,6 +28,14 @@ export type DaemonStatus = {
   startedAt: string;
 };
 
+export type DaemonLogsPayload = {
+  exists: boolean;
+  path: string;
+  lines: string[];
+  sizeBytes: number;
+  modifiedAt: string;
+};
+
 export type Campaign = {
   id: number;
   name: string;

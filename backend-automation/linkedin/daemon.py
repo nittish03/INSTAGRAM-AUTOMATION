@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import time
 import traceback
@@ -203,8 +204,26 @@ def heal_tasks(session):
     logger.info("Task queue healed: %d pending tasks", pending_count)
 
 
-def run_daemon(session):
+def _pid_alive(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def run_daemon(
+    session,
+    *,
+    launcher_pid: int | None = None,
+    heartbeat_timeout_seconds: float = 45.0,
+):
     from linkedin.models import Campaign
+    from linkedin.services.daemon_control import read_daemon_heartbeat_age_seconds
 
     cfg = CAMPAIGN_CONFIG
 
@@ -231,6 +250,22 @@ def run_daemon(session):
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
+        if launcher_pid and not _pid_alive(launcher_pid):
+            logger.info(
+                "Launcher process %s is gone — auto-stopping daemon.",
+                launcher_pid,
+            )
+            return
+        if heartbeat_timeout_seconds > 0:
+            age = read_daemon_heartbeat_age_seconds()
+            if age is not None and age > heartbeat_timeout_seconds:
+                logger.info(
+                    "Daemon heartbeat stale (%.1fs > %.1fs) — auto-stopping daemon.",
+                    age,
+                    heartbeat_timeout_seconds,
+                )
+                return
+
         _close_old_connections_for_daemon()
         pause = seconds_until_active()
         if pause > 0:

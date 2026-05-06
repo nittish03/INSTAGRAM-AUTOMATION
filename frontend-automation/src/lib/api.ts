@@ -4,6 +4,7 @@ import type {
   ActionLog,
   AnalyticsData,
   Campaign,
+  DaemonLogsPayload,
   DaemonStatus,
   DashboardStats,
   Deal,
@@ -139,6 +140,12 @@ export const api = {
     request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>("/api/dashboard"),
   daemonStatus: () =>
     request<{ daemon: DaemonStatus }>("/api/daemon/status", undefined, { bypassCache: true }),
+  daemonLogs: (limit = 300) =>
+    request<{ daemon: DaemonStatus; logs: DaemonLogsPayload }>(
+      `/api/daemon/logs/?limit=${Math.max(20, Math.min(limit, 2000))}`,
+      undefined,
+      { bypassCache: true },
+    ),
   launchDaemon: () =>
     request<{ daemon: DaemonStatus }>("/api/daemon/launch", {
       method: "POST",
