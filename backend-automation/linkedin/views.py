@@ -340,8 +340,8 @@ def api_daemon_launch(request):
     from linkedin.services.daemon_control import launch_daemon
 
     try:
-        status = launch_daemon()
-    except Exception as exc:
+        status = launch_daemon(handle=request.user.get_username())
+    except Exception:
         logger.exception("Failed to launch daemon from dashboard")
         return JsonResponse({"ok": False, "error": "Failed to launch daemon"}, status=500)
 
@@ -808,42 +808,170 @@ def api_action_logs(request):
     return JsonResponse({"ok": True, "items": items, "pagination": {"page": page, "pageSize": page_size, "total": total}})
 
 
+def _serialize_linkedin_profile(p: LinkedInProfile) -> dict:
+    return {
+        "id": p.id,
+        "userId": p.user_id,
+        "djangoUser": p.user.username,
+        "djangoEmail": p.user.email,
+        "linkedinUsername": p.linkedin_username,
+        "active": p.active,
+        "subscribeNewsletter": p.subscribe_newsletter,
+        "newsletterProcessed": p.newsletter_processed,
+        "legalAccepted": p.legal_accepted,
+        "connectDailyLimit": p.connect_daily_limit,
+        "connectWeeklyLimit": p.connect_weekly_limit,
+        "followUpDailyLimit": p.follow_up_daily_limit,
+        "hasCookies": bool(p.cookie_data),
+        "createdAt": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+def _owned_profile_qs(user):
+    """Profiles owned by the requesting Django user.
+
+    Each admin/superadmin only sees and manages the LinkedIn accounts they have
+    personally connected — never another admin's accounts.
+    """
+    return (
+        LinkedInProfile.objects.filter(user=user)
+        .select_related("user")
+        .order_by("-created_at", "linkedin_username")
+    )
+
+
 @login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def api_linkedin_profiles(request):
-    qs = LinkedInProfile.objects.select_related("user").order_by("user__username")
-    items = [
-        {
-            "id": p.id,
-            "userId": p.user_id,
-            "djangoUser": p.user.username,
-            "djangoEmail": p.user.email,
-            "linkedinUsername": p.linkedin_username,
-            "active": p.active,
-            "subscribeNewsletter": p.subscribe_newsletter,
-            "newsletterProcessed": p.newsletter_processed,
-            "legalAccepted": p.legal_accepted,
-            "connectDailyLimit": p.connect_daily_limit,
-            "connectWeeklyLimit": p.connect_weekly_limit,
-            "followUpDailyLimit": p.follow_up_daily_limit,
-            "hasCookies": bool(p.cookie_data),
-        }
-        for p in qs
-    ]
+    if request.method == "POST":
+        return _api_linkedin_profile_create(request)
+
+    items = [_serialize_linkedin_profile(p) for p in _owned_profile_qs(request.user)]
     return JsonResponse({"ok": True, "items": items})
+
+
+def _coerce_positive_int(value, default: int, *, max_value: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    if n < 1:
+        return default
+    return min(n, max_value)
+
+
+def _api_linkedin_profile_create(request):
+    """Create a LinkedIn profile owned by ``request.user``.
+
+    Always attributes the profile to the logged-in user — never accepts a
+    ``userId`` from the client. Enforces case-insensitive uniqueness within the
+    same Django user via the ``uniq_linkedinprofile_user_username`` constraint.
+    """
+    import json as _json
+
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    linkedin_username = (payload.get("linkedinUsername") or "").strip()
+    linkedin_password = payload.get("linkedinPassword") or ""
+
+    if not linkedin_username:
+        return JsonResponse(
+            {"ok": False, "error": "linkedinUsername is required"}, status=400
+        )
+    if not linkedin_password:
+        return JsonResponse(
+            {"ok": False, "error": "linkedinPassword is required"}, status=400
+        )
+
+    if LinkedInProfile.objects.filter(
+        user=request.user, linkedin_username__iexact=linkedin_username
+    ).exists():
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "You already have a LinkedIn profile with this username.",
+            },
+            status=409,
+        )
+
+    active = bool(payload.get("active", True))
+    subscribe_newsletter = bool(payload.get("subscribeNewsletter", True))
+    connect_daily = _coerce_positive_int(
+        payload.get("connectDailyLimit"), default=20, max_value=500
+    )
+    connect_weekly = _coerce_positive_int(
+        payload.get("connectWeeklyLimit"), default=100, max_value=2000
+    )
+    follow_up_daily = _coerce_positive_int(
+        payload.get("followUpDailyLimit"), default=30, max_value=500
+    )
+
+    try:
+        profile = LinkedInProfile.objects.create(
+            user=request.user,
+            linkedin_username=linkedin_username,
+            linkedin_password=linkedin_password,
+            active=active,
+            subscribe_newsletter=subscribe_newsletter,
+            connect_daily_limit=connect_daily,
+            connect_weekly_limit=connect_weekly,
+            follow_up_daily_limit=follow_up_daily,
+        )
+    except Exception:
+        logger.exception("Failed to create LinkedIn profile for user %s", request.user)
+        return JsonResponse(
+            {"ok": False, "error": "Failed to create LinkedIn profile"},
+            status=500,
+        )
+
+    return JsonResponse(
+        {"ok": True, "item": _serialize_linkedin_profile(profile)}, status=201
+    )
+
+
+def _get_owned_profile_or_error(request, profile_id: int):
+    """Return (profile, None) when the user owns it, else (None, JsonResponse)."""
+    try:
+        profile = LinkedInProfile.objects.select_related("user").get(pk=profile_id)
+    except LinkedInProfile.DoesNotExist:
+        return None, JsonResponse(
+            {"ok": False, "error": "Profile not found"}, status=404
+        )
+    if profile.user_id != request.user.id:
+        # 404 (not 403) so we don't leak the existence of profiles the user
+        # doesn't own.
+        return None, JsonResponse(
+            {"ok": False, "error": "Profile not found"}, status=404
+        )
+    return profile, None
 
 
 @login_required
 @require_http_methods(["POST"])
 def api_linkedin_profile_toggle(request, profile_id: int):
-    try:
-        profile = LinkedInProfile.objects.get(pk=profile_id)
-    except LinkedInProfile.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Profile not found"}, status=404)
+    profile, error = _get_owned_profile_or_error(request, profile_id)
+    if error is not None:
+        return error
 
     profile.active = not profile.active
     profile.save(update_fields=["active"])
     return JsonResponse({"ok": True, "active": profile.active})
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def api_linkedin_profile_delete(request, profile_id: int):
+    profile, error = _get_owned_profile_or_error(request, profile_id)
+    if error is not None:
+        return error
+
+    profile.delete()
+    return JsonResponse({"ok": True, "deleted": True, "id": profile_id})
 
 
 @login_required

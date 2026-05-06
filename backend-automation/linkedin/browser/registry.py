@@ -18,11 +18,20 @@ def get_or_create_session(linkedin_profile) -> "AccountSession":
     return _sessions[pk]
 
 
-def get_first_active_profile():
-    """Return the first active LinkedInProfile, or None."""
+def get_first_active_profile(handle: str | None = None):
+    """Return the first active LinkedInProfile.
+
+    When ``handle`` is provided the lookup is scoped to that Django user's
+    profiles only (multi-tenant mode used by the dashboard's "Run Daemon"
+    button). With no handle the daemon picks the first active profile
+    globally — preserving the legacy single-tenant CLI behavior.
+    """
     from linkedin.models import LinkedInProfile
 
-    return LinkedInProfile.objects.filter(active=True).select_related("user").first()
+    qs = LinkedInProfile.objects.filter(active=True).select_related("user")
+    if handle:
+        qs = qs.filter(user__username=handle)
+    return qs.order_by("-created_at", "id").first()
 
 
 def resolve_profile(username: str | None = None):
@@ -32,7 +41,7 @@ def resolve_profile(username: str | None = None):
 
         return LinkedInProfile.objects.select_related("user").filter(
             user__username=username,
-        ).first()
+        ).order_by("-created_at", "id").first()
     return get_first_active_profile()
 
 

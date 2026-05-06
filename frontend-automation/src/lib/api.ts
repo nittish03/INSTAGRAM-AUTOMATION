@@ -13,6 +13,7 @@ import type {
   GoogleSheetItem,
   GoogleStatus,
   Lead,
+  LinkedInProfileCreatePayload,
   LinkedInProfileItem,
   MessagingDiagnostics,
   FollowupSuggestion,
@@ -212,9 +213,19 @@ export const api = {
     request<{ items: ActionLog[]; pagination: { page: number; pageSize: number; total: number } }>(
       `/api/action-logs?${params.toString()}`,
     ),
-  linkedinProfiles: () => request<{ items: LinkedInProfileItem[] }>("/api/linkedin-profiles"),
+  linkedinProfiles: () => request<{ items: LinkedInProfileItem[] }>("/api/linkedin-profiles/"),
+  createLinkedinProfile: (payload: LinkedInProfileCreatePayload) =>
+    request<{ item: LinkedInProfileItem }>("/api/linkedin-profiles/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteLinkedinProfile: (profileId: number) =>
+    request<{ deleted: boolean; id: number }>(
+      `/api/linkedin-profiles/${profileId}/`,
+      { method: "DELETE" },
+    ),
   toggleLinkedinProfile: (profileId: number) =>
-    request<{ active: boolean }>(`/api/linkedin-profiles/${profileId}/toggle`, {
+    request<{ active: boolean }>(`/api/linkedin-profiles/${profileId}/toggle/`, {
       method: "POST",
       body: JSON.stringify({}),
     }),

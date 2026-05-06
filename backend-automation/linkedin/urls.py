@@ -29,6 +29,11 @@ urlpatterns = [
     path("api/messaging/heal/", views.api_messaging_heal, name="api_messaging_heal"),
     path("api/action-logs/", views.api_action_logs, name="api_action_logs"),
     path("api/linkedin-profiles/", views.api_linkedin_profiles, name="api_linkedin_profiles"),
+    path(
+        "api/linkedin-profiles/<int:profile_id>/",
+        views.api_linkedin_profile_delete,
+        name="api_linkedin_profile_delete",
+    ),
     path("api/linkedin-profiles/<int:profile_id>/toggle/", views.api_linkedin_profile_toggle, name="api_linkedin_profile_toggle"),
     path("api/search-keywords/", views.api_search_keywords, name="api_search_keywords"),
     path("api/search-keywords/create/", views.api_search_keywords_create, name="api_search_keywords_create"),

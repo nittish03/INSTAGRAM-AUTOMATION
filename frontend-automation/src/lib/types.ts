@@ -139,6 +139,17 @@ export type LinkedInProfileItem = {
   connectWeeklyLimit: number;
   followUpDailyLimit: number;
   hasCookies: boolean;
+  createdAt: string | null;
+};
+
+export type LinkedInProfileCreatePayload = {
+  linkedinUsername: string;
+  linkedinPassword: string;
+  active?: boolean;
+  subscribeNewsletter?: boolean;
+  connectDailyLimit?: number;
+  connectWeeklyLimit?: number;
+  followUpDailyLimit?: number;
 };
 
 export type SearchKeywordItem = {

@@ -18,6 +18,15 @@ class Command(BaseCommand):
             metavar="CONFIG_JSON",
             help="Path to onboard config JSON (non-interactive mode).",
         )
+        parser.add_argument(
+            "--handle",
+            metavar="USERNAME",
+            default=None,
+            help=(
+                "Run only against this Django user's active LinkedIn profiles. "
+                "Defaults to the first active profile globally (single-tenant mode)."
+            ),
+        )
 
     def handle(self, *args, **options):
         self._configure_logging()
@@ -25,7 +34,7 @@ class Command(BaseCommand):
         self._ensure_playwright_browsers()
         self._ensure_db()
         self._ensure_onboarded(options["onboard"])
-        session = self._create_session()
+        session = self._create_session(handle=options.get("handle"))
 
         from linkedin.exceptions import AuthenticationError
 
@@ -124,7 +133,7 @@ class Command(BaseCommand):
             )
             sys.exit(1)
 
-    def _create_session(self):
+    def _create_session(self, handle: str | None = None):
         from linkedin.browser.registry import get_first_active_profile, get_or_create_session
         from linkedin.conf import get_llm_site_config
         from linkedin.llm import validate_llm_site_config
@@ -135,9 +144,16 @@ class Command(BaseCommand):
             logger.error("LLM configuration invalid: %s", reason)
             sys.exit(1)
 
-        profile = get_first_active_profile()
+        profile = get_first_active_profile(handle=handle)
         if profile is None:
-            logger.error("No active LinkedIn profiles found.")
+            if handle:
+                logger.error(
+                    "No active LinkedIn profiles found for user %r. "
+                    "Open the LinkedIn Profiles page and add or activate one.",
+                    handle,
+                )
+            else:
+                logger.error("No active LinkedIn profiles found.")
             sys.exit(1)
 
         session = get_or_create_session(profile)

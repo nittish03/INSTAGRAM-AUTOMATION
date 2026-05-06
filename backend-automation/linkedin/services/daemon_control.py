@@ -108,7 +108,14 @@ def daemon_status() -> DaemonStatus:
     )
 
 
-def launch_daemon() -> DaemonStatus:
+def launch_daemon(handle: str | None = None) -> DaemonStatus:
+    """Spawn ``manage.py rundaemon``, optionally pinning it to a Django user.
+
+    When ``handle`` is provided the daemon will only operate against that
+    user's LinkedIn profiles. Multi-tenant frontends pass
+    ``request.user.username`` so each admin's launch uses their own
+    accounts even though the host can only run one daemon at a time.
+    """
     with _launch_lock():
         current = daemon_status()
         if current.running:
@@ -119,9 +126,13 @@ def launch_daemon() -> DaemonStatus:
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
 
+        cmd = [sys.executable, "manage.py", "rundaemon"]
+        if handle:
+            cmd.extend(["--handle", handle])
+
         try:
             process = subprocess.Popen(
-                [sys.executable, "manage.py", "rundaemon"],
+                cmd,
                 cwd=settings.BASE_DIR,
                 env=env,
                 stdout=log_handle,

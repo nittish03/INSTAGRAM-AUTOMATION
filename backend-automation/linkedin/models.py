@@ -229,10 +229,14 @@ class Campaign(models.Model):
 
 
 class LinkedInProfile(models.Model):
-    user = models.OneToOneField(
+    # Multi-tenant ownership: each Django admin/superadmin owns the LinkedIn
+    # accounts they've personally connected. They can only see and manage their
+    # own profiles. Listing, toggling and deletion are scoped to ``user`` on the
+    # API layer (see ``linkedin.views.api_linkedin_profiles``).
+    user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name="linkedin_profile",
+        related_name="linkedin_profiles",
     )
     self_lead = models.ForeignKey(
         "crm.Lead",
@@ -251,6 +255,7 @@ class LinkedInProfile(models.Model):
     legal_accepted = models.BooleanField(default=False)
     cookie_data = models.JSONField(null=True, blank=True)
     newsletter_processed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -341,6 +346,15 @@ class LinkedInProfile(models.Model):
 
     class Meta:
         app_label = "linkedin"
+        # Same Django user can't add the same LinkedIn handle twice. Different
+        # users can independently connect the same LinkedIn handle (rare but
+        # legal — e.g. a shared corporate account).
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "linkedin_username"],
+                name="uniq_linkedinprofile_user_username",
+            ),
+        ]
 
 
 class SearchKeyword(models.Model):

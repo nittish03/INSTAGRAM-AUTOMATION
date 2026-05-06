@@ -41,7 +41,36 @@ class DaemonControlServiceTests(TestCase):
         mock_popen.assert_called_once()
         args, kwargs = mock_popen.call_args
         self.assertEqual(args[0][-2:], ["manage.py", "rundaemon"])
+        self.assertNotIn("--handle", args[0])
         self.assertTrue(kwargs["start_new_session"])
+
+    def test_launch_daemon_passes_handle_to_subprocess(self):
+        with TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "daemon.pid"
+            lock_file = Path(tmp) / "daemon.lock"
+            log_file = Path(tmp) / "logs" / "daemon.log"
+            process = MagicMock(pid=99999)
+
+            with patch.object(daemon_control, "PID_FILE", pid_file), patch.object(
+                daemon_control,
+                "LOCK_FILE",
+                lock_file,
+            ), patch.object(
+                daemon_control,
+                "LOG_FILE",
+                log_file,
+            ), patch.object(daemon_control, "_pid_is_running", side_effect=[False, True]), patch.object(
+                daemon_control.subprocess,
+                "Popen",
+                return_value=process,
+            ) as mock_popen:
+                daemon_control.launch_daemon(handle="alice")
+
+        args, _ = mock_popen.call_args
+        self.assertIn("--handle", args[0])
+        self.assertEqual(
+            args[0][-4:], ["manage.py", "rundaemon", "--handle", "alice"]
+        )
 
     def test_launch_daemon_does_not_spawn_duplicate_when_pid_running(self):
         with TemporaryDirectory() as tmp:
@@ -142,7 +171,7 @@ class DaemonControlApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["daemon"]["running"])
         self.assertEqual(response.json()["daemon"]["pid"], 12345)
-        mock_launch.assert_called_once()
+        mock_launch.assert_called_once_with(handle="daemon_staff")
 
     def test_launch_error_response_is_sanitized(self):
         self.client.login(username="daemon_staff", password="testpass123")
