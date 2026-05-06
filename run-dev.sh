@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_DIR="$ROOT_DIR/Automation_backend"
-FRONTEND_DIR="$ROOT_DIR/Automation_frontend"
+BACKEND_DIR="$ROOT_DIR/backend-automation"
+FRONTEND_DIR="$ROOT_DIR/frontend-automation"
 BACKEND_VENV="$BACKEND_DIR/.venv"
 MODE="system"
 MODE_SET=0
@@ -56,7 +56,7 @@ fi
 if [[ ! -d "$BACKEND_VENV" ]]; then
   echo "Missing backend virtualenv: $BACKEND_VENV"
   echo "Create it first (example):"
-  echo "  cd Automation_backend && python3.12 -m venv .venv"
+  echo "  cd backend-automation && python3.12 -m venv .venv"
   exit 1
 fi
 
