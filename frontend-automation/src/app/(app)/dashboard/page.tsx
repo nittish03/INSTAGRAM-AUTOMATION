@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import { pageCache } from "@/lib/page-cache";
 import { SafeModeBanner } from "@/components/safe-mode-banner";
 import { Skeleton } from "@/components/skeleton";
-import type { DashboardStats, SafeModeSettings } from "@/lib/types";
+import type { DaemonStatus, DashboardStats, SafeModeSettings } from "@/lib/types";
 
 const STATS_KEY = "dashboard.stats";
 const GOOGLE_KEY = "dashboard.google";
@@ -35,21 +35,36 @@ export default function DashboardPage() {
     cachedGoogle ?? { connected: false, email: "" },
   );
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [safeMode, setSafeMode] = useState<SafeModeSettings | null>(null);
+  const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
+  const [daemonLoading, setDaemonLoading] = useState(true);
+  const [launchingDaemon, setLaunchingDaemon] = useState(false);
   const [loading, setLoading] = useState(!cachedStats);
+  const latestLaunchStartedAt = useRef(0);
+  const launchInFlight = useRef(false);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(
     cachedRefreshed ? new Date(cachedRefreshed) : null,
   );
 
   async function refresh() {
+    const statusRequestStartedAt = Date.now();
     setLoading(true);
+    setDaemonLoading(true);
     setError("");
+    setInfo("");
     try {
-      const data = await api.dashboard();
-      const safe = await api.safeMode();
+      const [data, safe, daemonStatus] = await Promise.all([
+        api.dashboard(),
+        api.safeMode(),
+        api.daemonStatus(),
+      ]);
       setStats(data.stats);
       setGoogle(data.google);
       setSafeMode(safe.settings);
+      if (!launchInFlight.current && statusRequestStartedAt > latestLaunchStartedAt.current) {
+        setDaemon(daemonStatus.daemon);
+      }
       const now = new Date();
       setRefreshedAt(now);
       pageCache.set(STATS_KEY, data.stats);
@@ -59,19 +74,27 @@ export default function DashboardPage() {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
+      setDaemonLoading(false);
     }
   }
 
   useEffect(() => {
     let mounted = true;
     (async () => {
+      const statusRequestStartedAt = Date.now();
       try {
-        const data = await api.dashboard();
-        const safe = await api.safeMode();
+        const [data, safe, daemonStatus] = await Promise.all([
+          api.dashboard(),
+          api.safeMode(),
+          api.daemonStatus(),
+        ]);
         if (!mounted) return;
         setStats(data.stats);
         setGoogle(data.google);
         setSafeMode(safe.settings);
+        if (!launchInFlight.current && statusRequestStartedAt > latestLaunchStartedAt.current) {
+          setDaemon(daemonStatus.daemon);
+        }
         const now = new Date();
         setRefreshedAt(now);
         pageCache.set(STATS_KEY, data.stats);
@@ -81,13 +104,34 @@ export default function DashboardPage() {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load dashboard");
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          setDaemonLoading(false);
+        }
       }
     })();
     return () => {
       mounted = false;
     };
   }, []);
+
+  async function launchDaemon() {
+    latestLaunchStartedAt.current = Date.now();
+    launchInFlight.current = true;
+    setLaunchingDaemon(true);
+    setError("");
+    setInfo("");
+    try {
+      const data = await api.launchDaemon();
+      setDaemon(data.daemon);
+      setInfo(data.daemon.running ? "Daemon is running." : "Daemon launch requested.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to launch daemon");
+    } finally {
+      launchInFlight.current = false;
+      setLaunchingDaemon(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -98,19 +142,35 @@ export default function DashboardPage() {
             Monitor the full outreach pipeline and approve outbound drafts.
           </p>
         </div>
-        <div className="flex items-center gap-3 text-xs text-slate-400">
+        <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-slate-400">
           {refreshedAt ? <span>Updated {refreshedAt.toLocaleTimeString()}</span> : null}
+          <span
+            aria-live="polite"
+            className={daemon?.running ? "text-emerald-400" : "text-slate-500"}
+            role="status"
+          >
+            Daemon: {daemon?.running ? `Running${daemon.pid ? ` (#${daemon.pid})` : ""}` : "Stopped"}
+          </span>
+          <button
+            className="btn-primary"
+            onClick={() => void launchDaemon()}
+            disabled={daemonLoading || launchingDaemon || daemon?.running}
+            title={daemonLoading ? "Checking daemon status" : daemon?.running ? "Daemon is already running" : "Launch the local Leadway daemon"}
+          >
+            {daemonLoading ? "Checking Daemon..." : launchingDaemon ? "Launching..." : daemon?.running ? "Daemon Running" : "Launch Daemon"}
+          </button>
           <button
             className="btn-secondary"
             onClick={() => void refresh()}
-            disabled={loading}
+            disabled={loading || launchingDaemon}
           >
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </section>
 
-      {error ? <p className="text-sm text-rose-400">{error}</p> : null}
+      {error ? <p className="text-sm text-rose-400" role="alert">{error}</p> : null}
+      {info ? <p className="text-sm text-emerald-300" role="status">{info}</p> : null}
       <SafeModeBanner settings={safeMode} />
 
       <section className="card p-4 text-sm text-slate-300">

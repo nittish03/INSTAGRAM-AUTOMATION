@@ -4,9 +4,11 @@ import type {
   ActionLog,
   AnalyticsData,
   Campaign,
+  DaemonStatus,
   DashboardStats,
   Deal,
   DraftMessage,
+  DraftRegenerationResponse,
   GoogleGridCellStyle,
   GoogleSheetItem,
   GoogleStatus,
@@ -134,6 +136,13 @@ export const api = {
   me: () => request<{ user: User }>("/api/auth/me"),
   dashboard: () =>
     request<{ stats: DashboardStats; google: { connected: boolean; email: string } }>("/api/dashboard"),
+  daemonStatus: () =>
+    request<{ daemon: DaemonStatus }>("/api/daemon/status", undefined, { bypassCache: true }),
+  launchDaemon: () =>
+    request<{ daemon: DaemonStatus }>("/api/daemon/launch", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   campaigns: () => request<{ items: Campaign[] }>("/api/campaigns"),
   createCampaign: (payload: {
     name: string;
@@ -178,6 +187,11 @@ export const api = {
       `/api/messages/drafts/${id}`,
       { method: "PATCH", body: JSON.stringify({ content }) },
     ),
+  regenerateDraft: (id: number) =>
+    request<DraftRegenerationResponse>(`/api/messages/drafts/${id}/regenerate/`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   deleteDraft: (id: number) =>
     request<{ deleted: boolean; id: number }>(`/api/messages/drafts/${id}`, {
       method: "DELETE",

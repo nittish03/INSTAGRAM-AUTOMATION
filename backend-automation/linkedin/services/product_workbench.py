@@ -21,6 +21,7 @@ from linkedin.tasks.connect import enqueue_follow_up
 class SafeModeSettings:
     enabled: bool
     global_pause_outreach: bool
+    pause_new_connection_invites: bool
     max_bulk_approve: int
     max_bulk_export: int
 
@@ -344,6 +345,13 @@ def recovery_items(limit: int = 200) -> list[dict[str, Any]]:
 
 
 def retry_task(task: Task) -> Task:
+    cfg = SiteConfig.load()
+    if (
+        task.task_type == Task.TaskType.CONNECT
+        and bool(getattr(cfg, "pause_new_connection_invites", False))
+    ):
+        return task
+
     payload = dict(task.payload or {})
     existing = Task.objects.filter(
         task_type=task.task_type,
@@ -493,6 +501,7 @@ def get_safe_mode_settings() -> SafeModeSettings:
     return SafeModeSettings(
         enabled=bool(getattr(cfg, "safe_mode_enabled", True)),
         global_pause_outreach=bool(getattr(cfg, "global_pause_outreach", False)),
+        pause_new_connection_invites=bool(getattr(cfg, "pause_new_connection_invites", False)),
         max_bulk_approve=int(getattr(cfg, "max_bulk_approve", 25)),
         max_bulk_export=int(getattr(cfg, "max_bulk_export", 50)),
     )
@@ -508,7 +517,18 @@ def set_safe_mode_settings(payload: dict[str, Any]) -> SafeModeSettings:
         max_bulk_export = cfg.max_bulk_export
     cfg.safe_mode_enabled = bool(payload.get("enabled", cfg.safe_mode_enabled))
     cfg.global_pause_outreach = bool(payload.get("globalPauseOutreach", cfg.global_pause_outreach))
+    cfg.pause_new_connection_invites = bool(
+        payload.get("pauseNewConnectionInvites", cfg.pause_new_connection_invites)
+    )
     cfg.max_bulk_approve = max(1, min(max_bulk_approve, 500))
     cfg.max_bulk_export = max(1, min(max_bulk_export, 1000))
-    cfg.save(update_fields=["safe_mode_enabled", "global_pause_outreach", "max_bulk_approve", "max_bulk_export"])
+    cfg.save(
+        update_fields=[
+            "safe_mode_enabled",
+            "global_pause_outreach",
+            "pause_new_connection_invites",
+            "max_bulk_approve",
+            "max_bulk_export",
+        ]
+    )
     return get_safe_mode_settings()

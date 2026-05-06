@@ -63,6 +63,9 @@ CAMPAIGN_CONFIG = {
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "connect_delay_seconds": 0,
     "connect_no_candidate_delay_seconds": 0,
+    "reply_check_interval_seconds": 10 * 60,
+    "reply_check_max_attempts": 12,
+    "reply_check_window_seconds": 2 * 60 * 60,
     # Optional: ``daemon_idle_sleep_cap_seconds`` — max seconds per idle loop iteration.
     # Omit (default): one sleep for the full time until the next task (sleep timer).
     # Positive number: wake periodically at most that often (for faster shutdown / checks).

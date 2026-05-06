@@ -169,12 +169,17 @@ def get_values(
     account: GoogleAccount,
     spreadsheet_id: str,
     range_a1: str,
+    *,
+    value_render_option: str | None = None,
 ) -> list[list[str]]:
     sheets = _sheets_service(account)
-    resp = sheets.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=range_a1,
-    ).execute()
+    kwargs = {
+        "spreadsheetId": spreadsheet_id,
+        "range": range_a1,
+    }
+    if value_render_option:
+        kwargs["valueRenderOption"] = value_render_option
+    resp = sheets.spreadsheets().values().get(**kwargs).execute()
     return resp.get("values", [])
 
 

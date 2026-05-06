@@ -165,9 +165,10 @@ def send_raw_message(session, profile: Dict[str, Any], message: str) -> bool:
         return True
     dump_page_html(session, profile, category="message_popup")
 
-    if _send_message(session, profile, message):
-        return True
-    dump_page_html(session, profile, category="message_direct")
+    logger.warning(
+        "Skipping name-search messaging fallback for %s to avoid same-name cross messaging",
+        public_identifier,
+    )
 
     if _send_message_via_api(session, profile, message):
         return True

@@ -15,9 +15,8 @@ logger = logging.getLogger(__name__)
 
 def handle_send_message(task, session, qualifiers=None):
     from linkedin.actions.message import send_raw_message
-    from linkedin.db.deals import set_profile_state
-    from linkedin.enums import ProfileState
-    from linkedin.tasks.connect import enqueue_follow_up
+    from django.utils import timezone
+    from linkedin.tasks.connect import enqueue_follow_up, enqueue_reply_check
 
     payload = task.payload
     public_id = payload["public_id"]
@@ -41,6 +40,7 @@ def handle_send_message(task, session, qualifiers=None):
         raise RuntimeError(f"No Deal found for {public_id}")
 
     profile = profile_dict.get("profile") or profile_dict
+    profile.setdefault("public_identifier", public_id)
 
     # Send path requires an active Playwright page; initialize browser explicitly.
     session.ensure_browser()
@@ -54,9 +54,13 @@ def handle_send_message(task, session, qualifiers=None):
         raise RuntimeError("LinkedIn blocked the message delivery (UI failed).")
 
     # Assuming success, remove draft suffix if it exists, record rate limit actions
+    sent_at = timezone.now()
     if msg.linkedin_urn.startswith("draft_"):
         msg.linkedin_urn = msg.linkedin_urn.replace("draft_", "sent_")
-        msg.save(update_fields=["linkedin_urn"])
+    msg.creation_date = sent_at
+    msg.is_draft = False
+    msg.is_approved = True
+    msg.save(update_fields=["linkedin_urn", "creation_date", "is_draft", "is_approved"])
 
     name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
     session.linkedin_profile.record_action(
@@ -71,4 +75,11 @@ def handle_send_message(task, session, qualifiers=None):
     from crm.models.deal import Deal
     deal = Deal.objects.filter(lead__public_identifier=public_id, campaign_id=campaign_id).first()
     enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600, deal=deal)
-    logger.info("Message dispatched successfully. Next follow-up scheduled in ~4h.")
+    enqueue_reply_check(
+        campaign_id,
+        public_id,
+        sent_message_id=msg.pk,
+        sent_at=sent_at,
+        deal=deal,
+    )
+    logger.info("Message dispatched successfully. Reply checks scheduled before ~4h follow-up.")

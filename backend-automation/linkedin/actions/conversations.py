@@ -9,6 +9,48 @@ from linkedin.api.messaging import fetch_conversations, fetch_messages, encode_u
 logger = logging.getLogger(__name__)
 
 
+def _payload_mentions_urn(value, target_urn: str) -> bool:
+    """Return True when a nested Voyager payload explicitly mentions target_urn."""
+    if isinstance(value, str):
+        if value == target_urn:
+            return True
+        index = value.find(target_urn)
+        if index == -1:
+            return False
+        end = index + len(target_urn)
+        # Conversation URNs can embed member URNs; avoid accepting prefix matches
+        # like "...:abc1234" when the target is "...:abc123".
+        return end == len(value) or not (value[end].isalnum() or value[end] in "-_")
+    if isinstance(value, dict):
+        return any(_payload_mentions_urn(v, target_urn) for v in value.values())
+    if isinstance(value, list):
+        return any(_payload_mentions_urn(v, target_urn) for v in value)
+    return False
+
+
+def _conversation_urn_from_target_element(element: dict, target_urn: str) -> str | None:
+    if not isinstance(element, dict):
+        return None
+
+    conversation = element.get("conversation")
+    conversation_urn = conversation.get("entityUrn") if isinstance(conversation, dict) else None
+    if not conversation_urn:
+        return None
+
+    sender = element.get("sender")
+    if isinstance(sender, dict) and sender.get("hostIdentityUrn") == target_urn:
+        return conversation_urn
+
+    if _payload_mentions_urn(conversation, target_urn):
+        return conversation_urn
+
+    participants = element.get("conversationParticipants")
+    if _payload_mentions_urn(participants, target_urn):
+        return conversation_urn
+
+    return None
+
+
 def find_conversation_urn(api: PlaywrightLinkedinAPI, target_urn: str, mailbox_urn: str) -> str | None:
     """Find conversation URN for a target profile URN by scanning recent conversations."""
     elements = fetch_conversations(api, mailbox_urn) or []
@@ -39,8 +81,11 @@ def find_conversation_urn_via_navigation(session, target_urn: str) -> str | None
         try:
             data = response.json()
             elements = data.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
-            if elements:
-                captured_urn[0] = elements[0].get("conversation", {}).get("entityUrn")
+            for element in elements:
+                conversation_urn = _conversation_urn_from_target_element(element, target_urn)
+                if conversation_urn:
+                    captured_urn[0] = conversation_urn
+                    break
         except Exception:
             pass
 

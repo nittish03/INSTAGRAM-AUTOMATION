@@ -2,7 +2,7 @@ import os
 import datetime
 from django.test import TestCase
 from django.contrib.auth.models import User
-from linkedin.models import LinkedInProfile, Task, Campaign
+from linkedin.models import LinkedInProfile, SiteConfig, Task, Campaign
 from linkedin.daemon import run_daemon
 from linkedin.exceptions import TaskSkipped
 from django.utils import timezone
@@ -88,3 +88,37 @@ class DaemonHardeningTest(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, Task.Status.FAILED)
         self.assertIn("Hard failure", task.error)
+
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon._HANDLERS")
+    @patch("linkedin.daemon.failure_diagnostics")
+    @patch("linkedin.daemon.timezone.now")
+    def test_daemon_polls_instead_of_consuming_connect_tasks_when_invites_paused(
+        self,
+        mock_now,
+        mock_diag,
+        mock_handlers,
+    ):
+        fixed_now = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        mock_now.return_value = fixed_now
+        cfg = SiteConfig.load()
+        cfg.pause_new_connection_invites = True
+        cfg.save(update_fields=["pause_new_connection_invites"])
+        task = Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            scheduled_at=fixed_now - datetime.timedelta(minutes=1),
+            payload={"campaign_id": self.campaign.pk},
+        )
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+
+        with patch("django.utils.timezone.now", return_value=fixed_now):
+            with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
+                try:
+                    run_daemon(mock_session)
+                except KeyboardInterrupt:
+                    pass
+
+        mock_handlers.get.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.status, Task.Status.PENDING)

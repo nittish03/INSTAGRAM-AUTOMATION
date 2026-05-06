@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections import defaultdict
 from datetime import timedelta
 
 from django.contrib.admin.views.decorators import staff_member_required
@@ -30,6 +32,34 @@ from linkedin.services.product_workbench import (
     set_safe_mode_settings,
     workbench_summary,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _message_context_payload(message: ChatMessage | None) -> dict | None:
+    if not message:
+        return None
+    return {
+        "content": message.content,
+        "createdAt": message.creation_date.isoformat(),
+        "isOutgoing": message.is_outgoing,
+        "senderLabel": "You" if message.is_outgoing else "Lead",
+    }
+
+
+def _latest_conversation_message_payload(content_type_id: int, object_id: int, owner_id: int | None) -> dict | None:
+    latest_message = (
+        ChatMessage.objects.filter(
+            content_type_id=content_type_id,
+            object_id=object_id,
+            owner_id=owner_id,
+            is_draft=False,
+        )
+        .exclude(linkedin_urn__startswith="draft_")
+        .order_by("-creation_date", "-id")
+        .first()
+    )
+    return _message_context_payload(latest_message)
 
 def dashboard_callback(request, context):
     """
@@ -259,6 +289,70 @@ def api_dashboard(request):
                 "draftsAwaitingApproval": drafts_awaiting,
             },
             "google": google_status,
+        }
+    )
+
+
+@login_required
+@require_GET
+def api_daemon_status(request):
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
+    from linkedin.services.daemon_control import daemon_status
+
+    status = daemon_status()
+    return JsonResponse(
+        {
+            "ok": True,
+            "daemon": {
+                "running": status.running,
+                "pid": status.pid,
+                "startedAt": status.started_at,
+            },
+        }
+    )
+
+
+def _dashboard_daemon_launch_allowed(request) -> bool:
+    import os
+
+    if os.environ.get("ENV", "").lower() == "production":
+        return False
+    if os.environ.get("DASHBOARD_DAEMON_LAUNCH_ENABLED", "").lower() in {"1", "true", "yes"}:
+        return True
+    host = request.get_host().split(":", 1)[0].lower()
+    return host in {"localhost", "127.0.0.1", "testserver"}
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_daemon_launch(request):
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
+    if not _dashboard_daemon_launch_allowed(request):
+        return JsonResponse(
+            {"ok": False, "error": "Daemon launch from dashboard is only enabled for local development"},
+            status=409,
+        )
+
+    from linkedin.services.daemon_control import launch_daemon
+
+    try:
+        status = launch_daemon()
+    except Exception as exc:
+        logger.exception("Failed to launch daemon from dashboard")
+        return JsonResponse({"ok": False, "error": "Failed to launch daemon"}, status=500)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "daemon": {
+                "running": status.running,
+                "pid": status.pid,
+                "startedAt": status.started_at,
+            },
         }
     )
 
@@ -570,19 +664,45 @@ def api_tasks(request):
 @login_required
 @require_GET
 def api_message_drafts(request):
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
     qs = (
         ChatMessage.objects.filter(is_draft=True, is_approved=False)
         .select_related("campaign", "owner")
         .order_by("-creation_date")
     )
+
+    drafts = list(qs)
+    object_ids_by_content_type_and_owner: dict[tuple[int, int | None], set[int]] = defaultdict(set)
+    for draft in drafts:
+        object_ids_by_content_type_and_owner[(draft.content_type_id, draft.owner_id)].add(draft.object_id)
+
+    latest_by_object: dict[tuple[int, int, int | None], ChatMessage] = {}
+    for (content_type_id, owner_id), object_ids in object_ids_by_content_type_and_owner.items():
+        latest_messages = (
+            ChatMessage.objects.filter(
+                content_type_id=content_type_id,
+                object_id__in=object_ids,
+                owner_id=owner_id,
+                is_draft=False,
+            )
+            .exclude(linkedin_urn__startswith="draft_")
+            .order_by("content_type_id", "object_id", "-creation_date", "-id")
+        )
+        for message in latest_messages:
+            latest_by_object.setdefault((message.content_type_id, message.object_id, message.owner_id), message)
+
     items = []
-    for m in qs:
+    for m in drafts:
         lead_name = ""
         lead_public_id = ""
         obj = m.content_object
         if obj and obj.__class__.__name__ == "Lead":
             lead_name = f"{obj.first_name} {obj.last_name}".strip() or obj.public_identifier
             lead_public_id = obj.public_identifier
+
+        latest_payload = _message_context_payload(latest_by_object.get((m.content_type_id, m.object_id, m.owner_id)))
 
         items.append(
             {
@@ -594,6 +714,7 @@ def api_message_drafts(request):
                 "owner": m.owner.username if m.owner else "",
                 "leadName": lead_name,
                 "leadPublicIdentifier": lead_public_id,
+                "latestMessage": latest_payload,
             }
         )
     return JsonResponse({"ok": True, "items": items})
@@ -812,6 +933,9 @@ def api_site_config(request):
 def api_site_config_save(request):
     import json as _json
     from linkedin.models import SiteConfig
+
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
     try:
         payload = _json.loads(request.body or b"{}")
@@ -1411,6 +1535,9 @@ def api_message_drafts_approve(request):
     import json
     from django.utils import timezone
 
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
     try:
         payload = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
@@ -1456,6 +1583,9 @@ def api_message_draft_detail(request, draft_id: int):
     """Edit or delete a single unapproved draft."""
     import json
 
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
     try:
         draft = ChatMessage.objects.get(pk=draft_id, is_draft=True, is_approved=False)
     except ChatMessage.DoesNotExist:
@@ -1487,6 +1617,70 @@ def api_message_draft_detail(request, draft_id: int):
                 "content": draft.content,
                 "createdAt": draft.creation_date.isoformat(),
                 "campaignId": draft.campaign_id,
+            },
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_message_draft_regenerate(request, draft_id: int):
+    """Regenerate a single unapproved draft without approving or sending it."""
+    from linkedin.browser.registry import get_or_create_session
+    from linkedin.llm import validate_llm_site_config
+    from linkedin.models import SiteConfig
+    from linkedin.services.draft_regeneration import regenerate_draft
+
+    if not request.user.is_staff:
+        return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
+
+    try:
+        draft = ChatMessage.objects.select_related("campaign", "owner").get(
+            pk=draft_id,
+            is_draft=True,
+            is_approved=False,
+        )
+    except ChatMessage.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Draft not found or already approved"}, status=404)
+
+    ok, reason = validate_llm_site_config(SiteConfig.load())
+    if not ok:
+        return JsonResponse({"ok": False, "error": f"LLM configuration invalid: {reason}"}, status=400)
+
+    linkedin_profile = LinkedInProfile.objects.filter(user=draft.owner, active=True).select_related("user").first()
+    if linkedin_profile is None:
+        return JsonResponse(
+            {"ok": False, "error": "No active LinkedIn profile found for this draft owner"},
+            status=400,
+        )
+
+    try:
+        result = regenerate_draft(draft, get_or_create_session(linkedin_profile))
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("Failed to regenerate draft %s", draft_id)
+        return JsonResponse({"ok": False, "error": "Draft regeneration failed"}, status=500)
+
+    if result.status != "stale":
+        draft.refresh_from_db()
+    return JsonResponse(
+        {
+            "ok": True,
+            "status": result.status,
+            "changed": result.changed,
+            "reason": result.reason,
+            "oldContent": result.old_content,
+            "item": {
+                "id": draft.id,
+                "content": draft.content,
+                "createdAt": draft.creation_date.isoformat(),
+                "campaignId": draft.campaign_id,
+                "latestMessage": _latest_conversation_message_payload(
+                    draft.content_type_id,
+                    draft.object_id,
+                    draft.owner_id,
+                ),
             },
         }
     )
@@ -1645,6 +1839,7 @@ def api_safe_mode(request):
                 "settings": {
                     "enabled": safe.enabled,
                     "globalPauseOutreach": safe.global_pause_outreach,
+                    "pauseNewConnectionInvites": safe.pause_new_connection_invites,
                     "maxBulkApprove": safe.max_bulk_approve,
                     "maxBulkExport": safe.max_bulk_export,
                 },
@@ -1664,6 +1859,7 @@ def api_safe_mode(request):
             "settings": {
                 "enabled": safe.enabled,
                 "globalPauseOutreach": safe.global_pause_outreach,
+                "pauseNewConnectionInvites": safe.pause_new_connection_invites,
                 "maxBulkApprove": safe.max_bulk_approve,
                 "maxBulkExport": safe.max_bulk_export,
             },

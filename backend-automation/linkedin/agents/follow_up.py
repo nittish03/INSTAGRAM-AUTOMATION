@@ -10,12 +10,15 @@ import logging
 from typing import Literal
 
 import jinja2
+from django.utils import timezone
 from pydantic import BaseModel, Field, model_validator
 
 from linkedin.conf import PROMPTS_DIR, get_llm_site_config
 from linkedin.llm import build_chat_llm
 
 logger = logging.getLogger(__name__)
+
+MIN_FOLLOW_UP_DELAY_HOURS = 24.0
 
 
 class FollowUpDecision(BaseModel):
@@ -59,7 +62,36 @@ def _format_conversation(messages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_system_prompt(session, profile: dict, conversation_text: str) -> str:
+def _classify_follow_up_mode(
+    messages: list[dict],
+    *,
+    min_follow_up_delay_hours: float = MIN_FOLLOW_UP_DELAY_HOURS,
+) -> tuple[str, str, float | None]:
+    """Classify the next action mode before any LLM drafting."""
+    if not messages:
+        return "FOLLOW_UP", "No conversation exists yet, so draft an initial outreach message.", None
+
+    last_message = messages[-1]
+    if not last_message.get("timestamp_dt"):
+        return "WAIT", "Latest message timestamp is missing or ambiguous.", min_follow_up_delay_hours
+
+    if not last_message["is_outgoing"]:
+        return "REPLY", "The prospect sent the latest message, so draft a direct reply.", None
+
+    elapsed = timezone.now() - last_message["timestamp_dt"]
+    hours_since_last_message = max(0.0, elapsed.total_seconds() / 3600)
+    if hours_since_last_message < min_follow_up_delay_hours:
+        remaining_hours = min_follow_up_delay_hours - hours_since_last_message
+        return (
+            "WAIT",
+            f"Last message was sent by us {hours_since_last_message:.1f} hours ago.",
+            remaining_hours,
+        )
+
+    return "FOLLOW_UP", "We sent the latest message and the minimum follow-up delay has elapsed.", None
+
+
+def _render_system_prompt(session, profile: dict, conversation_text: str, outreach_mode: str, mode_reason: str) -> str:
     """Render the agent system prompt from the Jinja2 template."""
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
     template = env.get_template("follow_up_agent.j2")
@@ -79,6 +111,8 @@ def _render_system_prompt(session, profile: dict, conversation_text: str) -> str
         location=profile.get("location", ""),
         supported_locales=profile.get("supported_locales", []),
         conversation=conversation_text,
+        outreach_mode=outreach_mode,
+        mode_reason=mode_reason,
     )
 
 
@@ -86,6 +120,9 @@ def run_follow_up_agent(
     session,
     public_id: str,
     profile: dict,
+    *,
+    include_drafts: bool = False,
+    min_follow_up_delay_hours: float = MIN_FOLLOW_UP_DELAY_HOURS,
 ) -> FollowUpDecision:
     """Read conversation and return a structured follow-up decision.
 
@@ -94,9 +131,17 @@ def run_follow_up_agent(
     """
     from linkedin.db.chat import sync_conversation
 
-    messages = sync_conversation(session, public_id)
+    messages = sync_conversation(session, public_id, include_drafts=include_drafts)
+    outreach_mode, mode_reason, wait_hours = _classify_follow_up_mode(
+        messages,
+        min_follow_up_delay_hours=min_follow_up_delay_hours,
+    )
+    if outreach_mode == "WAIT":
+        logger.info("follow_up agent for %s: wait (%s)", public_id, mode_reason)
+        return FollowUpDecision(action="wait", reason=mode_reason, follow_up_hours=wait_hours)
+
     conversation_text = _format_conversation(messages)
-    system_prompt = _render_system_prompt(session, profile, conversation_text)
+    system_prompt = _render_system_prompt(session, profile, conversation_text, outreach_mode, mode_reason)
 
     site_config = get_llm_site_config()
     llm = build_chat_llm(site_config, temperature=0.7, timeout=60)

@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 MAX_CONNECT_ATTEMPTS = 3
 
 
+def new_connection_invites_paused() -> bool:
+    from linkedin.models import SiteConfig
+
+    return bool(getattr(SiteConfig.load(), "pause_new_connection_invites", False))
+
+
 @dataclass
 class ConnectStrategy:
     find_candidate: Callable
@@ -89,6 +95,10 @@ def handle_connect(task, session, qualifiers):
     cfg = CAMPAIGN_CONFIG
     campaign = session.campaign
     campaign_id = campaign.pk
+
+    if new_connection_invites_paused():
+        raise TaskSkipped("New connection invite expansion is paused.")
+
     strategy = strategy_for(campaign, qualifiers)
 
     # --- FIRST: rate limit check (cheapest gate) ---
@@ -152,6 +162,13 @@ def handle_connect(task, session, qualifiers):
 
         if assessment.state == ProfileState.PENDING:
             set_profile_state(session, public_id, assessment.state.value)
+            if deal and deal.lead_id:
+                from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
+
+                sync_pending_lead_to_google_sheet(
+                    deal.lead,
+                    reason_code="pre_connect_pending_detected",
+                )
             enqueue_check_pending(
                 campaign_id, public_id,
                 backoff_hours=cfg["check_pending_recheck_after_hours"],
@@ -216,6 +233,13 @@ def handle_connect(task, session, qualifiers):
                     },
                 )
             set_profile_state(session, public_id, new_state.value)
+            if new_state == ProfileState.PENDING and deal and deal.lead_id:
+                from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
+
+                sync_pending_lead_to_google_sheet(
+                    deal.lead,
+                    reason_code="invite_sent",
+                )
             name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
             session.linkedin_profile.record_action(
                 ActionLog.ActionType.CONNECT,
@@ -281,6 +305,10 @@ def _enqueue_task(task_type, payload, delay_seconds=10, dedup_keys=None, deal=No
 
 
 def enqueue_connect(campaign_id: int, delay_seconds: float = 10, deal=None):
+    if new_connection_invites_paused():
+        logger.info("connect enqueue skipped for campaign %s: new connection invite expansion is paused", campaign_id)
+        return
+
     _enqueue_task(
         task_type=Task.TaskType.CONNECT,
         payload={"campaign_id": campaign_id},
@@ -318,5 +346,46 @@ def enqueue_follow_up(campaign_id: int, public_id: str, delay_seconds: float = 1
         task_type=Task.TaskType.FOLLOW_UP,
         payload={"campaign_id": campaign_id, "public_id": public_id},
         delay_seconds=delay_seconds,
+        deal=deal,
+    )
+
+
+def enqueue_reply_check(
+    campaign_id: int,
+    public_id: str,
+    *,
+    sent_message_id: int | None = None,
+    sent_at=None,
+    attempt: int = 1,
+    interval_seconds: float | None = None,
+    max_attempts: int | None = None,
+    window_seconds: float | None = None,
+    delay_seconds: float | None = None,
+    deal=None,
+):
+    from datetime import timedelta
+
+    cfg = CAMPAIGN_CONFIG
+    interval = interval_seconds or cfg["reply_check_interval_seconds"]
+    max_checks = max_attempts or cfg["reply_check_max_attempts"]
+    window = window_seconds or cfg["reply_check_window_seconds"]
+    anchor = sent_at or timezone.now()
+    payload = {
+        "campaign_id": campaign_id,
+        "public_id": public_id,
+        "sent_at": anchor.isoformat(),
+        "attempt": attempt,
+        "max_attempts": max_checks,
+        "interval_seconds": interval,
+        "expires_at": (anchor + timedelta(seconds=window)).isoformat(),
+    }
+    if sent_message_id is not None:
+        payload["sent_message_id"] = sent_message_id
+
+    _enqueue_task(
+        task_type=Task.TaskType.REPLY_CHECK,
+        payload=payload,
+        delay_seconds=delay_seconds if delay_seconds is not None else interval,
+        dedup_keys=["campaign_id", "public_id", "sent_message_id"] if sent_message_id is not None else ["campaign_id", "public_id"],
         deal=deal,
     )

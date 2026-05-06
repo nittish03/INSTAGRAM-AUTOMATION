@@ -82,6 +82,13 @@ def handle_check_pending(task, session, qualifiers):
     if assessment.state == ProfileState.CONNECTED:
         enqueue_follow_up(campaign_id, public_id, deal=deal)
     elif assessment.state == ProfileState.PENDING:
+        if deal and deal.lead_id:
+            from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
+
+            sync_pending_lead_to_google_sheet(
+                deal.lead,
+                reason_code="check_pending_ui_pending",
+            )
         new_backoff = min(backoff_hours * 2, 6)
         with transaction.atomic():
             if deal:

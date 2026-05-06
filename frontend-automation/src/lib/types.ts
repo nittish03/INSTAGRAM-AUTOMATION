@@ -22,6 +22,12 @@ export type DashboardStats = {
   draftsAwaitingApproval: number;
 };
 
+export type DaemonStatus = {
+  running: boolean;
+  pid: number | null;
+  startedAt: string;
+};
+
 export type Campaign = {
   id: number;
   name: string;
@@ -54,7 +60,12 @@ export type Deal = {
   connectAttempts: number;
   backoffHours: number;
   campaign: { id: number; name: string };
-  lead: { id: number; name: string; publicIdentifier: string; linkedinUrl: string };
+  lead: {
+    id: number;
+    name: string;
+    publicIdentifier: string;
+    linkedinUrl: string;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -80,6 +91,26 @@ export type DraftMessage = {
   owner: string;
   leadName: string;
   leadPublicIdentifier: string;
+  latestMessage: {
+    content: string;
+    createdAt: string;
+    isOutgoing: boolean;
+    senderLabel: string;
+  } | null;
+};
+
+export type DraftRegenerationResponse = {
+  status: string;
+  changed: boolean;
+  reason: string;
+  oldContent: string;
+  item: {
+    id: number;
+    content: string;
+    createdAt: string;
+    campaignId: number | null;
+    latestMessage?: DraftMessage["latestMessage"];
+  };
 };
 
 export type ActionLog = {
@@ -184,8 +215,17 @@ export type MessagingDiagnostics = {
   failedFollowupTasks: number;
   pendingSendMessageTasks: number;
   llmConfigured: boolean;
-  lastFailedFollowup: { taskId: number; endedAt: string | null; error: string } | null;
-  leadsWithoutDraft: { leadId: number; publicIdentifier: string; fullName: string; campaign: string }[];
+  lastFailedFollowup: {
+    taskId: number;
+    endedAt: string | null;
+    error: string;
+  } | null;
+  leadsWithoutDraft: {
+    leadId: number;
+    publicIdentifier: string;
+    fullName: string;
+    campaign: string;
+  }[];
 };
 
 export type WorkbenchSummary = {
@@ -272,6 +312,7 @@ export type FollowupSuggestion = {
 export type SafeModeSettings = {
   enabled: boolean;
   globalPauseOutreach: boolean;
+  pauseNewConnectionInvites: boolean;
   maxBulkApprove: number;
   maxBulkExport: number;
 };

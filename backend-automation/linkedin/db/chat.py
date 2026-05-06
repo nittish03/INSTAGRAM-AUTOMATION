@@ -17,7 +17,7 @@ def _get_lead_and_ct(public_identifier: str):
     return lead, ct
 
 
-def sync_conversation(session, public_identifier: str) -> list[dict]:
+def sync_conversation(session, public_identifier: str, *, include_drafts: bool = False) -> list[dict]:
     """Fetch messages from Voyager API and upsert into ChatMessage.
 
     Returns messages as a list of {sender, text, timestamp, is_outgoing} dicts
@@ -27,7 +27,7 @@ def sync_conversation(session, public_identifier: str) -> list[dict]:
     _sync_from_api(session, public_identifier, lead, ct)
 
     # Optimized (MED-01): Pass objects directly to avoid redundant lookup
-    return _read_from_db(lead, ct)
+    return _read_from_db(lead, ct, include_drafts=include_drafts)
 
 
 def _sync_from_api(session, public_identifier: str, lead, ct):
@@ -65,6 +65,33 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
             continue
 
         is_outgoing = parsed["sender_host_urn"] == self_urn
+        if parsed["sender_host_urn"] not in {self_urn, target_urn}:
+            logger.error(
+                "sync: conversation sender mismatch for %s; expected only %s/%s but saw %s",
+                public_identifier,
+                self_urn,
+                target_urn,
+                parsed["sender_host_urn"],
+            )
+            return
+
+        # If our send task created a local placeholder, attach the real LinkedIn
+        # URN instead of creating a duplicate outgoing message in history.
+        if is_outgoing:
+            placeholder = ChatMessage.objects.filter(
+                content_type=ct,
+                object_id=lead.pk,
+                is_outgoing=True,
+                linkedin_urn__startswith="sent_",
+                content=parsed["text"],
+            ).order_by("-creation_date").first()
+            if placeholder and not ChatMessage.objects.filter(linkedin_urn=parsed["entityUrn"]).exists():
+                placeholder.linkedin_urn = parsed["entityUrn"]
+                placeholder.creation_date = parsed["delivered_at"] or placeholder.creation_date
+                placeholder.is_draft = False
+                placeholder.save(update_fields=["linkedin_urn", "creation_date", "is_draft"])
+                logger.debug("sync: matched local sent placeholder for %s", public_identifier)
+                continue
 
         # Upsert by linkedin_urn
         _, created = ChatMessage.objects.update_or_create(
@@ -84,7 +111,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
     logger.debug("sync: processed %d messages for %s", len(elements), public_identifier)
 
 
-def _read_from_db(lead, ct) -> list[dict]:
+def _read_from_db(lead, ct, *, include_drafts: bool = True) -> list[dict]:
     """Read all ChatMessages for a lead, sorted chronologically."""
     from chat.models import ChatMessage
 
@@ -93,10 +120,21 @@ def _read_from_db(lead, ct) -> list[dict]:
     messages = ChatMessage.objects.filter(
         content_type=ct, object_id=lead.pk,
     ).select_related("owner").order_by("creation_date")
+    if not include_drafts:
+        messages = messages.filter(is_draft=False).exclude(linkedin_urn__startswith="draft_")
+
+    real_outgoing_texts = set(
+        messages.filter(is_outgoing=True)
+        .exclude(linkedin_urn__startswith="sent_")
+        .exclude(linkedin_urn__startswith="draft_")
+        .values_list("content", flat=True)
+    )
 
     result = []
     for msg in messages:
         if not msg.content:
+            continue
+        if msg.linkedin_urn.startswith("sent_") and msg.is_outgoing and msg.content in real_outgoing_texts:
             continue
         if msg.is_outgoing:
             owner = msg.owner
@@ -107,6 +145,7 @@ def _read_from_db(lead, ct) -> list[dict]:
             "sender": sender or "me",
             "text": msg.content,
             "timestamp": msg.creation_date.strftime("%Y-%m-%d %H:%M") if msg.creation_date else "",
+            "timestamp_dt": msg.creation_date,
             "is_outgoing": msg.is_outgoing,
         })
     return result

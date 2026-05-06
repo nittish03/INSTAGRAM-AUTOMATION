@@ -9,13 +9,15 @@ Raw diagnostic data lives in ``SystemRawLog``; never mix it with sheet rows.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 
 from django.contrib.auth.models import User
 from django.utils import timezone
 
 from google_integration.models import GoogleAccount
-from google_integration.services import get_values, update_values
+from google_integration.services import append_rows, get_values, update_values
 from google_integration.spreadsheet_id import normalize_spreadsheet_id
 
 if TYPE_CHECKING:
@@ -122,6 +124,71 @@ def _next_row_index(account, sid: str, tab: str) -> int:
     return max(len(col_a) + 1, 2)
 
 
+def _normalize_linkedin_cell(raw: str) -> str:
+    """Normalize profile URL/cell text enough to match plain and URL-encoded rows."""
+    return unquote((raw or "").strip()).rstrip("/").lower()
+
+
+def _sheet_text(raw: str) -> str:
+    """Escape user-controlled text so USER_ENTERED writes cannot create formulas."""
+    value = str(raw or "")
+    if value.startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
+def _extract_public_id_from_linkedin_cell(raw: str) -> str:
+    """Extract exact /in/<public_id> from a URL or HYPERLINK formula cell."""
+    cell = _normalize_linkedin_cell(raw)
+    match = re.search(r"linkedin\.com/in/([^/?#\"')\s]+)", cell)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _linkedin_column_index(header_row: list[str]) -> int:
+    for idx, value in enumerate(header_row):
+        if "linkedin" in (value or "").strip().lower():
+            return idx
+    return 3
+
+
+def _lead_sheet_url(lead: "Lead") -> str:
+    return _normalize_linkedin_cell(lead.linkedin_url or "")
+
+
+def _lead_sheet_public_id(lead: "Lead") -> str:
+    public_id = _normalize_linkedin_cell(lead.public_identifier or "")
+    if public_id:
+        return public_id
+    return _extract_public_id_from_linkedin_cell(lead.linkedin_url or "")
+
+
+def _find_existing_lead_row(
+    account,
+    sid: str,
+    tab: str,
+    lead: "Lead",
+) -> tuple[int | None, list[str] | None]:
+    """Return the 1-based row index for this lead, matching only the LinkedIn URL column."""
+    lead_url = _lead_sheet_url(lead)
+    lead_public_id = _lead_sheet_public_id(lead)
+    if not lead_url and not lead_public_id:
+        return None, None
+
+    rows = get_values(account, sid, f"{tab}!A:J", value_render_option="FORMULA")
+    linkedin_col = _linkedin_column_index(rows[0] if rows else [])
+    for idx, row in enumerate(rows, start=1):
+        cell = row[linkedin_col] if len(row) > linkedin_col else ""
+        cell_url = _normalize_linkedin_cell(cell)
+        cell_public_id = _extract_public_id_from_linkedin_cell(cell)
+        if lead_url and cell_url == lead_url:
+            return idx, row
+        if lead_public_id and cell_public_id == lead_public_id:
+            return idx, row
+    return None, None
+
+
 def resolve_google_sync_user(config) -> User | None:
     """User whose OAuth tokens are used for Sheets (explicit sync user or first connected superuser)."""
     u = getattr(config, "google_sheet_sync_user", None)
@@ -194,17 +261,111 @@ def build_sheet_row(
     norm = normalize_sheet_status(status_label)
     active = derive_active_label(norm)
     return [
-        name,
-        lead.company_name or "",
-        _lead_position(lead),
+        _sheet_text(name),
+        _sheet_text(lead.company_name or ""),
+        _sheet_text(_lead_position(lead)),
         lead.linkedin_url or "",
-        "TRUE",
+        "TRUE" if norm == "Connected" else "FALSE",
         norm,
         active,
         "",
         _sheet_entry_date_cell(),
         _sheet_last_follow_up_date_cell(lead),
     ]
+
+
+def _sync_lead_status_to_google_sheet(
+    lead: "Lead",
+    *,
+    status_label: str,
+    reason_code: str,
+    skip_if_existing_statuses: set[str] | None = None,
+) -> bool:
+    """Write or update one lead row by LinkedIn profile URL/public id."""
+    from linkedin.models import SiteConfig
+
+    cfg = SiteConfig.load()
+    if not cfg.google_sheet_sync_enabled:
+        return False
+    sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
+    if not sid:
+        logger.debug("google_sheet_sync enabled but google_sheet_id empty — skip")
+        return False
+
+    if not lead.linkedin_url:
+        return False
+
+    user = resolve_google_sync_user(cfg)
+    if not user:
+        logger.warning("Google Sheet sync: no user — set SiteConfig.google_sheet_sync_user or connect Google as a superuser")
+        return False
+
+    account = GoogleAccount.objects.filter(user=user).first()
+    if not account or not account.is_connected:
+        logger.warning("Google Sheet sync: user %s has no connected GoogleAccount", user)
+        return False
+
+    tab = (cfg.google_sheet_tab or "Sheet1").strip() or "Sheet1"
+    normalized_status = normalize_sheet_status(status_label)
+
+    try:
+        _ensure_header_row(account, sid, tab)
+        row_idx, existing_row = _find_existing_lead_row(account, sid, tab, lead)
+        if row_idx is not None and skip_if_existing_statuses:
+            existing_status = normalize_sheet_status(existing_row[5] if existing_row and len(existing_row) > 5 else "")
+            if existing_status in skip_if_existing_statuses:
+                return False
+
+        row = build_sheet_row(lead, status_label=normalized_status, verification_reason=reason_code)
+        if existing_row and len(existing_row) > 7:
+            row[7] = existing_row[7]
+
+        if row_idx is None:
+            append_rows(account, sid, f"{tab}!A:J", [row])
+        else:
+            update_values(
+                account,
+                sid,
+                f"{tab}!A{row_idx}:J{row_idx}",
+                [row],
+            )
+    except Exception:
+        logger.exception("Google Sheet sync failed for lead pk=%s", lead.pk)
+        return False
+
+    if normalized_status == "Connected":
+        LeadModel = lead.__class__
+        LeadModel.objects.filter(pk=lead.pk, sheet_exported_at__isnull=True).update(
+            sheet_exported_at=timezone.now()
+        )
+    logger.info(
+        "Google Sheet sync: upserted lead pk=%s (%s) as %s [%s]",
+        lead.pk,
+        lead.public_identifier,
+        normalized_status,
+        reason_code,
+    )
+    return True
+
+
+def sync_pending_lead_to_google_sheet(
+    lead: "Lead",
+    *,
+    reason_code: str = "pending_invite_sent",
+) -> bool:
+    """Ensure a sent/pending invite appears in the sheet with Status=Pending."""
+    from linkedin.enums import ProfileState
+
+    has_pending_deal = lead.deal_set.filter(state=ProfileState.PENDING).exists()
+    if not has_pending_deal:
+        return False
+
+    return _sync_lead_status_to_google_sheet(
+        lead,
+        status_label=ProfileState.PENDING.value,
+        reason_code=reason_code,
+        skip_if_existing_statuses={ProfileState.PENDING.value, ProfileState.CONNECTED.value},
+    )
 
 
 def sync_lead_to_google_sheet(
@@ -228,8 +389,6 @@ def sync_lead_to_google_sheet(
     if not sid:
         logger.debug("google_sheet_sync enabled but google_sheet_id empty — skip")
         return False
-    if lead.sheet_exported_at is not None:
-        return False
 
     if not lead.linkedin_url:
         return False
@@ -252,34 +411,8 @@ def sync_lead_to_google_sheet(
             status_label = "Unverified (manual bypass)"
             reason_code = "bypass_verification"
 
-    user = resolve_google_sync_user(cfg)
-    if not user:
-        logger.warning("Google Sheet sync: no user — set SiteConfig.google_sheet_sync_user or connect Google as a superuser")
-        return False
-
-    account = GoogleAccount.objects.filter(user=user).first()
-    if not account or not account.is_connected:
-        logger.warning("Google Sheet sync: user %s has no connected GoogleAccount", user)
-        return False
-
-    tab = (cfg.google_sheet_tab or "Sheet1").strip() or "Sheet1"
-
-    try:
-        _ensure_header_row(account, sid, tab)
-        row_idx = _next_row_index(account, sid, tab)
-        update_values(
-            account,
-            sid,
-            f"{tab}!A{row_idx}:J{row_idx}",
-            [build_sheet_row(lead, status_label=status_label, verification_reason=reason_code)],
-        )
-    except Exception:
-        logger.exception("Google Sheet sync failed for lead pk=%s", lead.pk)
-        return False
-
-    LeadModel = lead.__class__
-    LeadModel.objects.filter(pk=lead.pk, sheet_exported_at__isnull=True).update(
-        sheet_exported_at=timezone.now()
+    return _sync_lead_status_to_google_sheet(
+        lead,
+        status_label=status_label,
+        reason_code=reason_code,
     )
-    logger.info("Google Sheet sync: appended lead pk=%s (%s) [%s]", lead.pk, lead.public_identifier, reason_code)
-    return True

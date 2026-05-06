@@ -69,6 +69,7 @@ class ProductWorkbenchApiTests(TestCase):
             data={
                 "enabled": True,
                 "globalPauseOutreach": True,
+                "pauseNewConnectionInvites": True,
                 "maxBulkApprove": 3,
                 "maxBulkExport": 4,
             },
@@ -77,8 +78,38 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertEqual(patch_resp.status_code, 200)
         cfg = SiteConfig.load()
         self.assertTrue(cfg.global_pause_outreach)
+        self.assertTrue(cfg.pause_new_connection_invites)
         self.assertEqual(cfg.max_bulk_approve, 3)
         self.assertEqual(cfg.max_bulk_export, 4)
+
+    def test_site_config_save_does_not_update_invite_pause(self):
+        cfg = SiteConfig.load()
+        cfg.pause_new_connection_invites = False
+        cfg.save(update_fields=["pause_new_connection_invites"])
+
+        response = self.client.post(
+            "/api/site-config/save/",
+            data={"pauseNewConnectionInvites": True},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cfg.refresh_from_db()
+        self.assertFalse(cfg.pause_new_connection_invites)
+
+    def test_site_config_save_requires_staff(self):
+        non_staff = User.objects.create_user(username="site_viewer", password="pass123")
+        self.client.logout()
+        self.client.login(username="site_viewer", password="pass123")
+
+        response = self.client.post(
+            "/api/site-config/save/",
+            data={"aiModel": "gpt-test"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Staff access required", response.json()["error"])
 
     def test_bulk_retry_blocked_by_safe_mode(self):
         cfg = SiteConfig.load()
@@ -102,6 +133,56 @@ class ProductWorkbenchApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Safe mode limit exceeded", response.json()["error"])
+
+    def test_pause_new_connection_invites_is_not_global_pause_for_warm_retry(self):
+        cfg = SiteConfig.load()
+        cfg.pause_new_connection_invites = True
+        cfg.global_pause_outreach = False
+        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+
+        response = self.client.post(f"/api/tasks/{self.failed_task.id}/retry/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            Task.objects.filter(
+                task_type=Task.TaskType.FOLLOW_UP,
+                status=Task.Status.PENDING,
+                payload=self.failed_task.payload,
+            ).exists()
+        )
+
+    def test_pause_new_connection_invites_does_not_retry_connect_tasks(self):
+        cfg = SiteConfig.load()
+        cfg.pause_new_connection_invites = True
+        cfg.global_pause_outreach = False
+        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+        connect_task = Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            status=Task.Status.FAILED,
+            scheduled_at=timezone.now(),
+            deal=self.deal,
+            payload={"campaign_id": self.campaign.id},
+            error="No candidate",
+        )
+
+        response = self.client.post(f"/api/tasks/{connect_task.id}/retry/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["item"]["taskId"], connect_task.id)
+        self.assertFalse(
+            Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+        )
+
+    def test_global_pause_behavior_remains_hard_pause(self):
+        cfg = SiteConfig.load()
+        cfg.pause_new_connection_invites = False
+        cfg.global_pause_outreach = True
+        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+
+        response = self.client.post(f"/api/tasks/{self.failed_task.id}/retry/")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Global pause", response.json()["error"])
 
     def test_safe_mode_post_requires_staff(self):
         non_staff = User.objects.create_user(username="viewer", password="pass123")

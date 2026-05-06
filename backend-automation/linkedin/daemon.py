@@ -26,8 +26,15 @@ from linkedin.diagnostics import failure_diagnostics
 from linkedin.ml.qualifier import BayesianQualifier, KitQualifier
 from linkedin.models import Task
 from linkedin.tasks.check_pending import handle_check_pending
-from linkedin.tasks.connect import enqueue_check_pending, enqueue_connect, enqueue_follow_up, handle_connect
+from linkedin.tasks.connect import (
+    enqueue_check_pending,
+    enqueue_connect,
+    enqueue_follow_up,
+    handle_connect,
+    new_connection_invites_paused,
+)
 from linkedin.tasks.follow_up import handle_follow_up
+from linkedin.tasks.reply_check import handle_reply_check
 from linkedin.tasks.send_message import handle_send_message
 
 logger = logging.getLogger(__name__)
@@ -40,6 +47,7 @@ _HANDLERS = {
     Task.TaskType.CHECK_PENDING: handle_check_pending,
     Task.TaskType.FOLLOW_UP: handle_follow_up,
     Task.TaskType.SEND_MESSAGE: handle_send_message,
+    Task.TaskType.REPLY_CHECK: handle_reply_check,
 }
 
 
@@ -235,6 +243,13 @@ def run_daemon(session):
         if task is None:
             wait = Task.objects.seconds_to_next()
             if wait is None:
+                if (
+                    new_connection_invites_paused()
+                    and Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+                ):
+                    logger.info("New connection invite expansion paused — polling until unpaused")
+                    time.sleep(_IDLE_POLL_WHEN_CAP_ZERO_SECONDS)
+                    continue
                 logger.info("Queue empty — nothing to do")
                 return
             if wait > 0:

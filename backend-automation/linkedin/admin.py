@@ -80,6 +80,23 @@ class SiteConfigAdmin(ModelAdmin):
                 ),
             },
         ),
+        (
+            _("Safety controls"),
+            {
+                "fields": (
+                    "safe_mode_enabled",
+                    "global_pause_outreach",
+                    "pause_new_connection_invites",
+                    "max_bulk_approve",
+                    "max_bulk_export",
+                ),
+                "description": _(
+                    "Use global pause for a hard stop on operator-triggered outreach. "
+                    "Use pause new connection invites to stop only fresh top-of-funnel invite expansion "
+                    "while monitoring, replies, follow-ups, and pending invite checks continue."
+                ),
+            },
+        ),
     )
 
     readonly_fields = ("llm_connection_test",)

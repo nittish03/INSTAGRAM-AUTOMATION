@@ -118,6 +118,13 @@ class SiteConfig(models.Model):
         default=False,
         help_text="Hard pause for queueing new outreach actions from operator workflows.",
     )
+    pause_new_connection_invites = models.BooleanField(
+        default=False,
+        help_text=(
+            "Stops new connection invite expansion while allowing monitoring, replies, "
+            "follow-ups, and existing pending invite checks to continue."
+        ),
+    )
     max_bulk_approve = models.PositiveIntegerField(
         default=25,
         help_text="Maximum draft approvals allowed per bulk operator action.",
@@ -455,12 +462,21 @@ class TaskQuerySet(models.QuerySet):
     def due(self):
         return self.pending().filter(scheduled_at__lte=timezone.now())
 
+    def runnable(self):
+        qs = self.due()
+        if bool(getattr(SiteConfig.load(), "pause_new_connection_invites", False)):
+            return qs.exclude(task_type=Task.TaskType.CONNECT)
+        return qs
+
     def claim_next(self) -> "Task | None":
-        return self.due().first()
+        return self.runnable().first()
 
     def seconds_to_next(self) -> float | None:
         """Seconds until the next pending task, or None if queue is empty."""
-        next_task = self.pending().only("scheduled_at").first()
+        qs = self.pending()
+        if bool(getattr(SiteConfig.load(), "pause_new_connection_invites", False)):
+            qs = qs.exclude(task_type=Task.TaskType.CONNECT)
+        next_task = qs.only("scheduled_at").first()
         if next_task is None:
             return None
         return max((next_task.scheduled_at - timezone.now()).total_seconds(), 0)
@@ -472,6 +488,7 @@ class Task(models.Model):
         CHECK_PENDING = "check_pending"
         FOLLOW_UP = "follow_up"
         SEND_MESSAGE = "send_message"
+        REPLY_CHECK = "reply_check"
 
     class Status(models.TextChoices):
         PENDING = "pending"

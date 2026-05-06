@@ -25,7 +25,7 @@ def _sync_lead_after_commit(lead_pk: int) -> None:
     from google_integration.sheet_sync import sync_lead_to_google_sheet
 
     lead = Lead.objects.filter(pk=lead_pk).first()
-    if not lead or lead.sheet_exported_at is not None:
+    if not lead:
         return
     sync_lead_to_google_sheet(lead)
 
