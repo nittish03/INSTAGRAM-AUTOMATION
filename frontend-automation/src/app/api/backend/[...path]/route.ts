@@ -14,18 +14,40 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   const { path } = await ctx.params;
   const target = buildUrl(path, req.nextUrl.search);
   const cookie = req.headers.get("cookie") || "";
-
-  const backendRes = await fetch(target, {
-    method: req.method,
-    headers: {
-      cookie,
-      "content-type": req.headers.get("content-type") || "application/json",
-      "x-csrftoken": req.headers.get("x-csrftoken") || "",
-    },
-    body: ["GET", "HEAD"].includes(req.method) ? undefined : await req.text(),
-    redirect: "manual",
-    cache: "no-store",
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await fetch(target, {
+      method: req.method,
+      headers: {
+        cookie,
+        "content-type": req.headers.get("content-type") || "application/json",
+        "x-csrftoken": req.headers.get("x-csrftoken") || "",
+      },
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : await req.text(),
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error && /ECONNREFUSED|fetch failed/i.test(err.message)
+        ? `Backend service is unreachable at ${BASE_URL}. Start backend server on port 8000 and retry.`
+        : "Backend proxy request failed.";
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+      },
+      {
+        status: 503,
+        headers: {
+          "cache-control": "private, no-store, no-cache, max-age=0, must-revalidate",
+          pragma: "no-cache",
+          expires: "0",
+          vary: "Cookie",
+        },
+      },
+    );
+  }
 
   const contentType = backendRes.headers.get("content-type") || "application/json";
   const body = await backendRes.text();
