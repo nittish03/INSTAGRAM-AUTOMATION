@@ -98,6 +98,15 @@ class Command(BaseCommand):
         logger.info("Leadway %s", sha[:8])
 
     def _configure_logging(self):
+        # Windows console often defaults to cp1252, which cannot encode several
+        # Unicode symbols used in logs. Prefer UTF-8 when the stream supports it.
+        for stream_name in ("stdout", "stderr"):
+            stream = getattr(sys, stream_name, None)
+            if stream and hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
         logging.getLogger().handlers.clear()
         logging.basicConfig(level=logging.DEBUG, format="%(message)s")
         for name in (

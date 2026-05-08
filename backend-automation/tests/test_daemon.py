@@ -122,3 +122,15 @@ class DaemonHardeningTest(TestCase):
         mock_handlers.get.assert_not_called()
         task.refresh_from_db()
         self.assertEqual(task.status, Task.Status.PENDING)
+
+    @patch("linkedin.daemon.os.kill", side_effect=OSError("winerror87"))
+    def test_pid_alive_handles_windows_oserror(self, _mock_kill):
+        from linkedin.daemon import _pid_alive
+
+        self.assertFalse(_pid_alive(12345))
+
+    @patch("linkedin.daemon.os.kill", side_effect=SystemError("exception set"))
+    def test_pid_alive_handles_windows_systemerror(self, _mock_kill):
+        from linkedin.daemon import _pid_alive
+
+        self.assertFalse(_pid_alive(12345))

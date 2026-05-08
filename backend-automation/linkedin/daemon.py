@@ -213,6 +213,12 @@ def _pid_alive(pid: int | None) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        # Windows may raise OSError (e.g. WinError 87/11) for stale/invalid PIDs.
+        return False
+    except SystemError:
+        # Defensive Windows guard: os.kill can surface SystemError wrapping WinError.
+        return False
     return True
 
 
@@ -234,12 +240,12 @@ def run_daemon(
 
     campaigns = session.campaigns
     if not campaigns:
-        logger.error("No campaigns found — cannot start daemon")
+        logger.error("No campaigns found - cannot start daemon")
         return
 
     logger.info(
         colored("Daemon started", "green", attrs=["bold"])
-        + " — %d campaigns, task queue worker",
+        + " - %d campaigns, task queue worker",
         len(campaigns),
     )
 
@@ -252,7 +258,7 @@ def run_daemon(
     while True:
         if launcher_pid and not _pid_alive(launcher_pid):
             logger.info(
-                "Launcher process %s is gone — auto-stopping daemon.",
+                "Launcher process %s is gone - auto-stopping daemon.",
                 launcher_pid,
             )
             return
@@ -260,7 +266,7 @@ def run_daemon(
             age = read_daemon_heartbeat_age_seconds()
             if age is not None and age > heartbeat_timeout_seconds:
                 logger.info(
-                    "Daemon heartbeat stale (%.1fs > %.1fs) — auto-stopping daemon.",
+                    "Daemon heartbeat stale (%.1fs > %.1fs) - auto-stopping daemon.",
                     age,
                     heartbeat_timeout_seconds,
                 )
@@ -270,7 +276,7 @@ def run_daemon(
         pause = seconds_until_active()
         if pause > 0:
             h, m = int(pause // 3600), int(pause % 3600 // 60)
-            logger.info("Outside active hours — sleeping %dh%02dm", h, m)
+            logger.info("Outside active hours - sleeping %dh%02dm", h, m)
             time.sleep(pause)
             continue
 
@@ -282,10 +288,10 @@ def run_daemon(
                     new_connection_invites_paused()
                     and Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
                 ):
-                    logger.info("New connection invite expansion paused — polling until unpaused")
+                    logger.info("New connection invite expansion paused - polling until unpaused")
                     time.sleep(_IDLE_POLL_WHEN_CAP_ZERO_SECONDS)
                     continue
-                logger.info("Queue empty — nothing to do")
+                logger.info("Queue empty - nothing to do")
                 return
             if wait > 0:
                 cap_raw = cfg.get("daemon_idle_sleep_cap_seconds")
@@ -301,7 +307,7 @@ def run_daemon(
                 cap_display = cap_raw if cap_raw is not None else "full"
                 if sleep_s + 1e-6 >= wait:
                     logger.info(
-                        "Next task in %dh%02dm — sleeping %dh%02dm (idle cap=%s)",
+                        "Next task in %dh%02dm - sleeping %dh%02dm (idle cap=%s)",
                         h,
                         m,
                         hs,
@@ -313,7 +319,7 @@ def run_daemon(
                     if now_m - last_idle_info_at >= _idle_info_interval_s:
                         last_idle_info_at = now_m
                         logger.info(
-                            "Next task in %dh%02dm — polling until due (idle cap=%s, ~%.0fs slices)",
+                            "Next task in %dh%02dm - polling until due (idle cap=%s, ~%.0fs slices)",
                             h,
                             m,
                             cap_display,
@@ -321,7 +327,7 @@ def run_daemon(
                         )
                     else:
                         logger.debug(
-                            "Next task in %dh%02dm — idle poll sleep %dh%02dm (idle cap=%s)",
+                            "Next task in %dh%02dm - idle poll sleep %dh%02dm (idle cap=%s)",
                             h,
                             m,
                             hs,

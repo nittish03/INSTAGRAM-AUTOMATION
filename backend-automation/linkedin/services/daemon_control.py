@@ -258,7 +258,7 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         # Fresh daemon run starts with a clean log buffer so the Control
         # Center "Daemon Logs (Live)" tab only shows the current run.
-        log_handle = LOG_FILE.open("w")
+        log_handle = LOG_FILE.open("w", encoding="utf-8", errors="replace")
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
 

@@ -85,7 +85,7 @@ class AccountSession:
             if cookie.get("name") == _AUTH_COOKIE_NAME:
                 expires = cookie.get("expires", -1)
                 if expires > 0 and expires < time.time():
-                    logger.warning("Auth cookie expired for %s — re-authenticating", self)
+                    logger.warning("Auth cookie expired for %s - re-authenticating", self)
                     self.close()
                     start_browser_session(session=self)
                 return
@@ -104,7 +104,7 @@ class AccountSession:
             finally:
                 self.page = self.context = self.browser = self.playwright = None
 
-        logger.info("Account session closed → %s", self)
+        logger.info("Account session closed -> %s", self)
 
     def __del__(self):
         try:
