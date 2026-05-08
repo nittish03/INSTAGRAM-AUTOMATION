@@ -123,6 +123,10 @@ class DaemonControlServiceTests(TestCase):
         self.assertIsNone(status.pid)
         mock_killpg.assert_called()
 
+    def test_pid_is_running_handles_generic_oserror(self):
+        with patch.object(daemon_control.os, "kill", side_effect=OSError("winerror11")):
+            self.assertFalse(daemon_control._pid_is_running(12345))
+
 
 class DaemonControlApiTests(TestCase):
     def setUp(self):

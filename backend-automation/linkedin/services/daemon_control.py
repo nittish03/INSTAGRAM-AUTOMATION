@@ -144,6 +144,11 @@ def _pid_is_running(pid: int | None) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        # Windows can raise generic OSError (e.g. WinError 11 / incorrect format)
+        # for stale/invalid PIDs. Treat as "not running" instead of bubbling
+        # up and breaking /api/daemon/status/.
+        return False
     return True
 
 
