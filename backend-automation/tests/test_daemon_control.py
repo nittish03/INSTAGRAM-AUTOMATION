@@ -13,6 +13,18 @@ from linkedin.services.daemon_control import DaemonStatus
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
 
+def _assert_child_is_detached(test, kwargs):
+    """Daemon must spawn a child detached from the dev server.
+
+    POSIX uses ``start_new_session``; Windows uses ``creationflags`` with the
+    detached-process / new-process-group bits. Either is acceptable.
+    """
+    detached = bool(
+        kwargs.get("start_new_session") or kwargs.get("creationflags")
+    )
+    test.assertTrue(detached, "daemon child must be detached from launcher")
+
+
 class DaemonControlServiceTests(TestCase):
     def test_launch_daemon_starts_rundaemon_once(self):
         with TemporaryDirectory() as tmp:
@@ -44,7 +56,7 @@ class DaemonControlServiceTests(TestCase):
         self.assertIn("rundaemon", args[0])
         self.assertIn("--launcher-pid", args[0])
         self.assertNotIn("--handle", args[0])
-        self.assertTrue(kwargs["start_new_session"])
+        _assert_child_is_detached(self, kwargs)
 
     def test_launch_daemon_passes_handle_to_subprocess(self):
         with TemporaryDirectory() as tmp:
@@ -68,13 +80,53 @@ class DaemonControlServiceTests(TestCase):
             ) as mock_popen:
                 daemon_control.launch_daemon(handle="alice")
 
-        args, _ = mock_popen.call_args
+        args, kwargs = mock_popen.call_args
         self.assertIn("--handle", args[0])
         self.assertIn("manage.py", args[0])
         self.assertIn("rundaemon", args[0])
         handle_idx = args[0].index("--handle")
         self.assertEqual(args[0][handle_idx + 1], "alice")
         self.assertIn("--launcher-pid", args[0])
+        _assert_child_is_detached(self, kwargs)
+
+    def test_state_files_live_outside_project_dir(self):
+        """Daemon state must not be written into BASE_DIR or Django will reload."""
+        from django.conf import settings
+
+        base = Path(settings.BASE_DIR).resolve()
+        for path in (
+            daemon_control.PID_FILE,
+            daemon_control.LOCK_FILE,
+            daemon_control.LOG_FILE,
+            daemon_control.HEARTBEAT_FILE,
+        ):
+            resolved = Path(path).resolve()
+            try:
+                resolved.relative_to(base)
+            except ValueError:
+                continue
+            self.fail(
+                f"daemon state file {resolved} is inside BASE_DIR {base}; "
+                "this triggers runserver autoreload on every write"
+            )
+
+    def test_touch_daemon_heartbeat_throttles_writes(self):
+        with TemporaryDirectory() as tmp:
+            heartbeat = Path(tmp) / "daemon.heartbeat"
+            with patch.object(daemon_control, "HEARTBEAT_FILE", heartbeat):
+                daemon_control._last_heartbeat_write_at = 0.0
+                daemon_control.touch_daemon_heartbeat(force=True)
+                first_mtime = heartbeat.stat().st_mtime_ns
+
+                # Immediate second call should be skipped by the throttle.
+                daemon_control.touch_daemon_heartbeat()
+                second_mtime = heartbeat.stat().st_mtime_ns
+
+        self.assertEqual(
+            first_mtime,
+            second_mtime,
+            "throttled heartbeat should not rewrite file on rapid polls",
+        )
 
     def test_launch_daemon_does_not_spawn_duplicate_when_pid_running(self):
         with TemporaryDirectory() as tmp:
@@ -115,13 +167,15 @@ class DaemonControlServiceTests(TestCase):
             ), patch.object(
                 daemon_control, "_pid_is_running", side_effect=[True, False, False]
             ), patch.object(
-                daemon_control.os, "killpg"
-            ) as mock_killpg:
+                daemon_control,
+                "_terminate_process_tree",
+                return_value=True,
+            ) as mock_terminate:
                 status = daemon_control.stop_daemon(timeout_seconds=0.1)
 
         self.assertFalse(status.running)
         self.assertIsNone(status.pid)
-        mock_killpg.assert_called()
+        mock_terminate.assert_called()
 
     def test_pid_is_running_handles_generic_oserror(self):
         with patch.object(daemon_control.os, "kill", side_effect=OSError("winerror11")):

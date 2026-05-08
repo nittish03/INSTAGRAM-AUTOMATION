@@ -14,6 +14,7 @@ tests/fixtures/pages/**/*.html
 leadpilot.log
 .leadway_daemon.pid
 .leadway_daemon.lock
+.leadway_daemon.heartbeat
 logs/
 # Only ignore a top-level runtime models cache, not in-app `models/` packages
 /models/

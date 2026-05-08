@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import time
 from datetime import datetime, timezone as dt_timezone
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from django.conf import settings
@@ -21,10 +23,36 @@ except ImportError:  # pragma: no cover - Windows
     import msvcrt
 
 
-PID_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.pid"
-LOCK_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.lock"
-LOG_FILE = Path(settings.BASE_DIR) / "logs" / "daemon.log"
-HEARTBEAT_FILE = Path(settings.BASE_DIR) / ".leadway_daemon.heartbeat"
+IS_WINDOWS = platform.system().lower().startswith("win")
+
+
+@lru_cache(maxsize=1)
+def _state_dir() -> Path:
+    """Daemon state directory.
+
+    Important: state files MUST live OUTSIDE ``settings.BASE_DIR``. The Django
+    dev server (runserver) and project file watchers (Watchman, fsevents) treat
+    the project directory as a hot path; heartbeat/pid/log writes inside it
+    cause the dev server to restart, producing the dreaded
+    ``ECONNREFUSED 127.0.0.1:8000`` cascade in the frontend the moment the
+    daemon is launched.
+    """
+    override = os.environ.get("LEADWAY_STATE_DIR", "").strip()
+    base = Path(override).expanduser() if override else Path.home() / ".leadway"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+PID_FILE = _state_dir() / "daemon.pid"
+LOCK_FILE = _state_dir() / "daemon.lock"
+LOG_FILE = _state_dir() / "daemon.log"
+HEARTBEAT_FILE = _state_dir() / "daemon.heartbeat"
+
+
+# Throttle heartbeat writes so dashboard polling does not hammer the disk.
+# 5 seconds is well within the daemon's ``heartbeat_timeout_seconds`` default of 45s.
+_HEARTBEAT_THROTTLE_SECONDS = 5.0
+_last_heartbeat_write_at: float = 0.0
 
 
 @dataclass
@@ -76,6 +104,9 @@ def _launch_lock():
         if fcntl:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         else:  # Windows
+            # msvcrt.locking needs at least one byte at the current offset.
+            lock_file.write("\0")
+            lock_file.flush()
             lock_file.seek(0)
             msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
         try:
@@ -85,7 +116,10 @@ def _launch_lock():
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
             else:  # Windows
                 lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
 
 
 def _read_pid_file() -> dict:
@@ -114,11 +148,25 @@ def _remove_pid_file() -> None:
         pass
 
 
-def touch_daemon_heartbeat() -> None:
-    """Mark frontend/backend app heartbeat for daemon liveness checks."""
-    HEARTBEAT_FILE.write_text(
-        json.dumps({"at": timezone.now().isoformat()}),
-    )
+def touch_daemon_heartbeat(*, force: bool = False) -> None:
+    """Mark frontend/backend liveness for the daemon's auto-stop check.
+
+    Called on every dashboard poll, so we throttle disk writes to avoid
+    needless I/O pressure on the project directory.
+    """
+    global _last_heartbeat_write_at
+    now = time.monotonic()
+    if not force and (now - _last_heartbeat_write_at) < _HEARTBEAT_THROTTLE_SECONDS:
+        return
+    try:
+        HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT_FILE.write_text(
+            json.dumps({"at": timezone.now().isoformat()}),
+        )
+        _last_heartbeat_write_at = now
+    except OSError:
+        # Heartbeat is best-effort; do not break API responses if disk is full.
+        pass
 
 
 def read_daemon_heartbeat_age_seconds() -> float | None:
@@ -145,9 +193,8 @@ def _pid_is_running(pid: int | None) -> bool:
     except PermissionError:
         return True
     except OSError:
-        # Windows can raise generic OSError (e.g. WinError 11 / incorrect format)
-        # for stale/invalid PIDs. Treat as "not running" instead of bubbling
-        # up and breaking /api/daemon/status/.
+        # Windows raises generic OSError (e.g. WinError 11) for stale/invalid
+        # PIDs. Treat as "not running" instead of breaking /api/daemon/status/.
         return False
     return True
 
@@ -172,6 +219,29 @@ def daemon_status() -> DaemonStatus:
     )
 
 
+def _detach_popen_kwargs() -> dict:
+    """Return Popen kwargs that detach the child from this process.
+
+    On POSIX we use ``start_new_session=True`` so we can later signal the
+    daemon's whole process group via ``os.killpg``. On Windows we use
+    creation flags equivalent to ``setsid`` + detach: a new process group +
+    a detached process so the child does not inherit our console handles
+    (which on Windows would otherwise tie the daemon's lifecycle to the
+    dev server's terminal and crash both on launch).
+    """
+    if IS_WINDOWS:
+        creationflags = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+        return {
+            "creationflags": creationflags,
+            # Keep stdout/stderr handles open for the log file pipe.
+            "close_fds": False,
+        }
+    return {"start_new_session": True}
+
+
 def launch_daemon(handle: str | None = None) -> DaemonStatus:
     """Spawn ``manage.py rundaemon``, optionally pinning it to a Django user.
 
@@ -186,8 +256,8 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             return current
 
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        # Fresh daemon run should start with a clean log buffer so Control
-        # Center "Daemon Logs (Live)" only shows the current run.
+        # Fresh daemon run starts with a clean log buffer so the Control
+        # Center "Daemon Logs (Live)" tab only shows the current run.
         log_handle = LOG_FILE.open("w")
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
@@ -197,28 +267,63 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             cmd.extend(["--handle", handle])
         launcher_pid = os.getpid()
         cmd.extend(["--launcher-pid", str(launcher_pid)])
-        touch_daemon_heartbeat()
+        touch_daemon_heartbeat(force=True)
+
+        popen_kwargs = {
+            "cwd": settings.BASE_DIR,
+            "env": env,
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            **_detach_popen_kwargs(),
+        }
 
         try:
-            process = subprocess.Popen(
-                cmd,
-                cwd=settings.BASE_DIR,
-                env=env,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+            process = subprocess.Popen(cmd, **popen_kwargs)
         finally:
             log_handle.close()
         _write_pid_file(process.pid, launcher_pid=launcher_pid)
     return daemon_status()
 
 
+def _terminate_process_tree(pid: int, *, hard: bool = False) -> bool:
+    """Best-effort signal/kill of the daemon process and its children.
+
+    Returns True if the OS reported success at sending the signal/kill.
+    Cross-platform: uses ``taskkill /T`` on Windows and ``os.killpg`` on
+    POSIX.
+    """
+    if IS_WINDOWS:
+        cmd = ["taskkill", "/T", "/PID", str(pid)]
+        if hard:
+            cmd.insert(2, "/F")
+        try:
+            result = subprocess.run(cmd, capture_output=True, check=False)
+            return result.returncode == 0
+        except Exception:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                return True
+            except (ProcessLookupError, OSError):
+                return False
+
+    sig = signal.SIGKILL if hard else signal.SIGTERM
+    try:
+        os.killpg(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        try:
+            os.kill(pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+
 def stop_daemon(timeout_seconds: float = 8.0) -> DaemonStatus:
     """Stop the running daemon process group, if present.
 
-    The daemon is launched with ``start_new_session=True`` so we can terminate
-    the whole process group cleanly via ``os.killpg``.
+    Cross-platform: graceful TERM first, then hard KILL after timeout.
     """
     with _launch_lock():
         current = daemon_status()
@@ -226,20 +331,7 @@ def stop_daemon(timeout_seconds: float = 8.0) -> DaemonStatus:
             return current
 
         pid = current.pid
-        try:
-            # Prefer signaling the daemon process group so child processes
-            # (if any) don't outlive the parent worker.
-            os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            _remove_pid_file()
-            return daemon_status()
-        except Exception:
-            # Fallback: terminate just the root process.
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                _remove_pid_file()
-                return daemon_status()
+        _terminate_process_tree(pid, hard=False)
 
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -249,13 +341,7 @@ def stop_daemon(timeout_seconds: float = 8.0) -> DaemonStatus:
             time.sleep(0.2)
 
         # Hard kill if graceful shutdown timed out.
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except Exception:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        _terminate_process_tree(pid, hard=True)
 
         # Give OS a short moment to reap the process.
         time.sleep(0.2)
