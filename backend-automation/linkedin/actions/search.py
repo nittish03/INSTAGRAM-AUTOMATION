@@ -44,8 +44,13 @@ def visit_profile(session: "AccountSession", profile: Dict[str, Any]):
     if already_there:
         return
 
-    url = profile.get("url")
-    _go_to_profile(session, url, public_identifier)
+    # Try simulating a human search first
+    found_via_search = _simulate_human_search(session, profile)
+    
+    if not found_via_search:
+        # Fallback to direct URL navigation if search fails
+        url = profile.get("url")
+        _go_to_profile(session, url, public_identifier)
 
     # Discover and enrich new profiles visible on the page
     urls = extract_in_urls(session.page)
@@ -162,7 +167,9 @@ def _simulate_human_search(session: "AccountSession", profile: Dict[str, Any]) -
 
         if target_locator:
             logger.info("Target found in results → clicking")
-            return False
+            target_locator.click()
+            session.wait()
+            return True
 
         if session.page.get_by_text("No results found", exact=False).count() > 0:
             logger.info("No results found → stopping search")

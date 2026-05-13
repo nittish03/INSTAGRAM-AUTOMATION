@@ -321,15 +321,16 @@ class LinkedInProfile(models.Model):
         logger.warning("Rate limit: %s externally exhausted for today", action_type)
 
     def _daily_count(self, action_type: str) -> int:
-        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        now_local = timezone.localtime(timezone.now())
+        today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         return ActionLog.objects.filter(
             linkedin_profile=self, action_type=action_type,
             created_at__gte=today_start,
         ).count()
 
     def _weekly_count(self, action_type: str) -> int:
-        now = timezone.now()
-        monday = (now - timedelta(days=now.weekday())).replace(
+        now_local = timezone.localtime(timezone.now())
+        monday = (now_local - timedelta(days=now_local.weekday())).replace(
             hour=0, minute=0, second=0, microsecond=0,
         )
         return ActionLog.objects.filter(
