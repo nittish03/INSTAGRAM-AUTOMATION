@@ -54,7 +54,7 @@ REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 1 / 60,  # 1 minute
+    "check_pending_recheck_after_hours": 1,  # 1 hour
     "enrich_min_interval": 1,
     "min_action_interval": 120,
     "qualification_n_mc_samples": 100,
