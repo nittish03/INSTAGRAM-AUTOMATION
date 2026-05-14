@@ -25,6 +25,12 @@ def _assert_child_is_detached(test, kwargs):
     test.assertTrue(detached, "daemon child must be detached from launcher")
 
 
+def _assert_dashboard_heartbeat_enabled(test, cmd):
+    test.assertIn("--heartbeat-timeout-seconds", cmd)
+    timeout_idx = cmd.index("--heartbeat-timeout-seconds")
+    test.assertEqual(cmd[timeout_idx + 1], "45.0")
+
+
 class DaemonControlServiceTests(TestCase):
     def test_launch_daemon_starts_rundaemon_once(self):
         with TemporaryDirectory() as tmp:
@@ -55,6 +61,7 @@ class DaemonControlServiceTests(TestCase):
         self.assertIn("manage.py", args[0])
         self.assertIn("rundaemon", args[0])
         self.assertIn("--launcher-pid", args[0])
+        _assert_dashboard_heartbeat_enabled(self, args[0])
         self.assertNotIn("--handle", args[0])
         _assert_child_is_detached(self, kwargs)
 
@@ -87,6 +94,7 @@ class DaemonControlServiceTests(TestCase):
         handle_idx = args[0].index("--handle")
         self.assertEqual(args[0][handle_idx + 1], "alice")
         self.assertIn("--launcher-pid", args[0])
+        _assert_dashboard_heartbeat_enabled(self, args[0])
         _assert_child_is_detached(self, kwargs)
 
     def test_state_files_live_outside_project_dir(self):

@@ -226,7 +226,7 @@ def run_daemon(
     session,
     *,
     launcher_pid: int | None = None,
-    heartbeat_timeout_seconds: float = 45.0,
+    heartbeat_timeout_seconds: float = 0.0,
 ):
     from linkedin.models import Campaign
     from linkedin.services.daemon_control import read_daemon_heartbeat_age_seconds

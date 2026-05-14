@@ -38,10 +38,10 @@ class Command(BaseCommand):
             "--heartbeat-timeout-seconds",
             metavar="SECONDS",
             type=float,
-            default=45.0,
+            default=0.0,
             help=(
                 "Frontend/backend heartbeat timeout. Daemon exits when stale. "
-                "Set <=0 to disable heartbeat auto-stop."
+                "Defaults to disabled for direct CLI runs. Set >0 to enable."
             ),
         )
 
@@ -86,7 +86,7 @@ class Command(BaseCommand):
             run_daemon(
                 session,
                 launcher_pid=options.get("launcher_pid"),
-                heartbeat_timeout_seconds=options.get("heartbeat_timeout_seconds", 45.0),
+                heartbeat_timeout_seconds=options.get("heartbeat_timeout_seconds", 0.0),
             )
         finally:
             session.close()

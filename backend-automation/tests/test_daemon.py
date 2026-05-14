@@ -134,3 +134,51 @@ class DaemonHardeningTest(TestCase):
         from linkedin.daemon import _pid_alive
 
         self.assertFalse(_pid_alive(12345))
+
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_run_daemon_default_does_not_read_stale_heartbeat(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+    ):
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+
+        with patch(
+            "linkedin.services.daemon_control.read_daemon_heartbeat_age_seconds",
+            return_value=999.0,
+        ) as mock_read_heartbeat:
+            run_daemon(mock_session)
+
+        mock_read_heartbeat.assert_not_called()
+
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_run_daemon_explicit_heartbeat_timeout_stops_when_stale(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+    ):
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+
+        with patch(
+            "linkedin.services.daemon_control.read_daemon_heartbeat_age_seconds",
+            return_value=999.0,
+        ) as mock_read_heartbeat:
+            run_daemon(mock_session, heartbeat_timeout_seconds=45.0)
+
+        mock_read_heartbeat.assert_called_once()
+
+
+class RunDaemonCommandTests(TestCase):
+    def test_direct_cli_disables_heartbeat_timeout_by_default(self):
+        from linkedin.management.commands.rundaemon import Command
+
+        parser = Command().create_parser("manage.py", "rundaemon")
+        options = parser.parse_args([])
+
+        self.assertEqual(options.heartbeat_timeout_seconds, 0.0)

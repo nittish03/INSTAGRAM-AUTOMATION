@@ -50,8 +50,9 @@ HEARTBEAT_FILE = _state_dir() / "daemon.heartbeat"
 
 
 # Throttle heartbeat writes so dashboard polling does not hammer the disk.
-# 5 seconds is well within the daemon's ``heartbeat_timeout_seconds`` default of 45s.
+# 5 seconds is well within the dashboard launcher heartbeat timeout.
 _HEARTBEAT_THROTTLE_SECONDS = 5.0
+_DASHBOARD_HEARTBEAT_TIMEOUT_SECONDS = 45.0
 _last_heartbeat_write_at: float = 0.0
 
 
@@ -267,6 +268,12 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             cmd.extend(["--handle", handle])
         launcher_pid = os.getpid()
         cmd.extend(["--launcher-pid", str(launcher_pid)])
+        cmd.extend(
+            [
+                "--heartbeat-timeout-seconds",
+                str(_DASHBOARD_HEARTBEAT_TIMEOUT_SECONDS),
+            ]
+        )
         touch_daemon_heartbeat(force=True)
 
         popen_kwargs = {

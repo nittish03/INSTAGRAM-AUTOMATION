@@ -1,7 +1,23 @@
 # linkedin/conf.py
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+
+def _playwright_headless() -> bool:
+    """Whether Chromium runs headless (required on servers without a display).
+
+    Set ``PLAYWRIGHT_HEADLESS=1`` (or ``true`` / ``yes`` / ``on``) on Linux VPS /
+    containers. Set to ``0`` / ``false`` for a visible browser (local debugging).
+
+    When unset: ``headless`` defaults to ``True`` if ``ENV=production``, else
+    ``False`` so local dev keeps the current headed behavior.
+    """
+    raw = os.environ.get("PLAYWRIGHT_HEADLESS")
+    if raw is not None and str(raw).strip() != "":
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("ENV", "").lower() == "production"
 
 
 # ----------------------------------------------------------------------
@@ -26,6 +42,7 @@ MAX_DELAY = 8
 # ----------------------------------------------------------------------
 # Browser config
 # ----------------------------------------------------------------------
+PLAYWRIGHT_HEADLESS = _playwright_headless()
 BROWSER_SLOW_MO = 200
 BROWSER_DEFAULT_TIMEOUT_MS = 30_000
 BROWSER_LOGIN_TIMEOUT_MS = 40_000
