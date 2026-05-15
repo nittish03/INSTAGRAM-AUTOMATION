@@ -32,17 +32,7 @@ class Command(BaseCommand):
             metavar="PID",
             type=int,
             default=None,
-            help="Backend launcher process id; daemon exits if this pid is gone.",
-        )
-        parser.add_argument(
-            "--heartbeat-timeout-seconds",
-            metavar="SECONDS",
-            type=float,
-            default=0.0,
-            help=(
-                "Frontend/backend heartbeat timeout. Daemon exits when stale. "
-                "Defaults to disabled for direct CLI runs. Set >0 to enable."
-            ),
+            help="Deprecated compatibility option; daemon lifetime is explicit.",
         )
 
     def handle(self, *args, **options):
@@ -83,11 +73,7 @@ class Command(BaseCommand):
 
         from linkedin.daemon import run_daemon
         try:
-            run_daemon(
-                session,
-                launcher_pid=options.get("launcher_pid"),
-                heartbeat_timeout_seconds=options.get("heartbeat_timeout_seconds", 0.0),
-            )
+            run_daemon(session)
         finally:
             session.close()
 

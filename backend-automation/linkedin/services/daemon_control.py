@@ -32,8 +32,8 @@ def _state_dir() -> Path:
 
     Important: state files MUST live OUTSIDE ``settings.BASE_DIR``. The Django
     dev server (runserver) and project file watchers (Watchman, fsevents) treat
-    the project directory as a hot path; heartbeat/pid/log writes inside it
-    cause the dev server to restart, producing the dreaded
+    the project directory as a hot path; pid/log writes inside it cause the dev
+    server to restart, producing the dreaded
     ``ECONNREFUSED 127.0.0.1:8000`` cascade in the frontend the moment the
     daemon is launched.
     """
@@ -46,14 +46,6 @@ def _state_dir() -> Path:
 PID_FILE = _state_dir() / "daemon.pid"
 LOCK_FILE = _state_dir() / "daemon.lock"
 LOG_FILE = _state_dir() / "daemon.log"
-HEARTBEAT_FILE = _state_dir() / "daemon.heartbeat"
-
-
-# Throttle heartbeat writes so dashboard polling does not hammer the disk.
-# 5 seconds is well within the dashboard launcher heartbeat timeout.
-_HEARTBEAT_THROTTLE_SECONDS = 5.0
-_DASHBOARD_HEARTBEAT_TIMEOUT_SECONDS = 45.0
-_last_heartbeat_write_at: float = 0.0
 
 
 @dataclass
@@ -130,12 +122,11 @@ def _read_pid_file() -> dict:
         return {}
 
 
-def _write_pid_file(pid: int, *, launcher_pid: int | None = None) -> None:
+def _write_pid_file(pid: int) -> None:
     PID_FILE.write_text(
         json.dumps(
             {
                 "pid": pid,
-                "launcher_pid": launcher_pid,
                 "started_at": timezone.now().isoformat(),
             }
         )
@@ -147,41 +138,6 @@ def _remove_pid_file() -> None:
         PID_FILE.unlink()
     except FileNotFoundError:
         pass
-
-
-def touch_daemon_heartbeat(*, force: bool = False) -> None:
-    """Mark frontend/backend liveness for the daemon's auto-stop check.
-
-    Called on every dashboard poll, so we throttle disk writes to avoid
-    needless I/O pressure on the project directory.
-    """
-    global _last_heartbeat_write_at
-    now = time.monotonic()
-    if not force and (now - _last_heartbeat_write_at) < _HEARTBEAT_THROTTLE_SECONDS:
-        return
-    try:
-        HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        HEARTBEAT_FILE.write_text(
-            json.dumps({"at": timezone.now().isoformat()}),
-        )
-        _last_heartbeat_write_at = now
-    except OSError:
-        # Heartbeat is best-effort; do not break API responses if disk is full.
-        pass
-
-
-def read_daemon_heartbeat_age_seconds() -> float | None:
-    """Return heartbeat staleness in seconds, or None if no heartbeat exists."""
-    try:
-        payload = json.loads(HEARTBEAT_FILE.read_text())
-        raw = payload.get("at")
-        if not raw:
-            return None
-        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        now = datetime.now(ts.tzinfo or dt_timezone.utc)
-        return max((now - ts).total_seconds(), 0.0)
-    except Exception:
-        return None
 
 
 def _pid_is_running(pid: int | None) -> bool:
@@ -266,15 +222,6 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
         cmd = [sys.executable, "manage.py", "rundaemon"]
         if handle:
             cmd.extend(["--handle", handle])
-        launcher_pid = os.getpid()
-        cmd.extend(["--launcher-pid", str(launcher_pid)])
-        cmd.extend(
-            [
-                "--heartbeat-timeout-seconds",
-                str(_DASHBOARD_HEARTBEAT_TIMEOUT_SECONDS),
-            ]
-        )
-        touch_daemon_heartbeat(force=True)
 
         popen_kwargs = {
             "cwd": settings.BASE_DIR,
@@ -288,7 +235,7 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
             process = subprocess.Popen(cmd, **popen_kwargs)
         finally:
             log_handle.close()
-        _write_pid_file(process.pid, launcher_pid=launcher_pid)
+        _write_pid_file(process.pid)
     return daemon_status()
 
 

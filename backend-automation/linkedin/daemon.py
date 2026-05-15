@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import random
 import time
 import traceback
@@ -203,33 +202,8 @@ def heal_tasks(session):
     pending_count = Task.objects.pending().count()
     logger.info("Task queue healed: %d pending tasks", pending_count)
 
-
-def _pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        # Windows may raise OSError (e.g. WinError 87/11) for stale/invalid PIDs.
-        return False
-    except SystemError:
-        # Defensive Windows guard: os.kill can surface SystemError wrapping WinError.
-        return False
-    return True
-
-
-def run_daemon(
-    session,
-    *,
-    launcher_pid: int | None = None,
-    heartbeat_timeout_seconds: float = 0.0,
-):
+def run_daemon(session):
     from linkedin.models import Campaign
-    from linkedin.services.daemon_control import read_daemon_heartbeat_age_seconds
 
     cfg = CAMPAIGN_CONFIG
 
@@ -256,22 +230,6 @@ def run_daemon(
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
-        if launcher_pid and not _pid_alive(launcher_pid):
-            logger.info(
-                "Launcher process %s is gone - auto-stopping daemon.",
-                launcher_pid,
-            )
-            return
-        if heartbeat_timeout_seconds > 0:
-            age = read_daemon_heartbeat_age_seconds()
-            if age is not None and age > heartbeat_timeout_seconds:
-                logger.info(
-                    "Daemon heartbeat stale (%.1fs > %.1fs) - auto-stopping daemon.",
-                    age,
-                    heartbeat_timeout_seconds,
-                )
-                return
-
         _close_old_connections_for_daemon()
         pause = seconds_until_active()
         if pause > 0:

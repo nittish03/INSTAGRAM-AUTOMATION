@@ -299,9 +299,7 @@ def api_daemon_status(request):
     if not request.user.is_staff:
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
-    from linkedin.services.daemon_control import daemon_status, touch_daemon_heartbeat
-
-    touch_daemon_heartbeat()
+    from linkedin.services.daemon_control import daemon_status
 
     status = daemon_status()
     return JsonResponse(
@@ -325,10 +323,7 @@ def api_daemon_logs(request):
     from linkedin.services.daemon_control import (
         daemon_status,
         read_daemon_logs,
-        touch_daemon_heartbeat,
     )
-
-    touch_daemon_heartbeat()
 
     limit = _parse_int(request.GET.get("limit"), 300, 20, 2000)
     logs = read_daemon_logs(limit=limit)

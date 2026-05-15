@@ -123,62 +123,11 @@ class DaemonHardeningTest(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, Task.Status.PENDING)
 
-    @patch("linkedin.daemon.os.kill", side_effect=OSError("winerror87"))
-    def test_pid_alive_handles_windows_oserror(self, _mock_kill):
-        from linkedin.daemon import _pid_alive
-
-        self.assertFalse(_pid_alive(12345))
-
-    @patch("linkedin.daemon.os.kill", side_effect=SystemError("exception set"))
-    def test_pid_alive_handles_windows_systemerror(self, _mock_kill):
-        from linkedin.daemon import _pid_alive
-
-        self.assertFalse(_pid_alive(12345))
-
-    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
-    @patch("linkedin.daemon.heal_tasks")
-    @patch("linkedin.daemon._build_qualifiers", return_value={})
-    def test_run_daemon_default_does_not_read_stale_heartbeat(
-        self,
-        _mock_qualifiers,
-        _mock_heal_tasks,
-    ):
-        mock_session = MagicMock()
-        mock_session.campaigns = [self.campaign]
-
-        with patch(
-            "linkedin.services.daemon_control.read_daemon_heartbeat_age_seconds",
-            return_value=999.0,
-        ) as mock_read_heartbeat:
-            run_daemon(mock_session)
-
-        mock_read_heartbeat.assert_not_called()
-
-    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
-    @patch("linkedin.daemon.heal_tasks")
-    @patch("linkedin.daemon._build_qualifiers", return_value={})
-    def test_run_daemon_explicit_heartbeat_timeout_stops_when_stale(
-        self,
-        _mock_qualifiers,
-        _mock_heal_tasks,
-    ):
-        mock_session = MagicMock()
-        mock_session.campaigns = [self.campaign]
-
-        with patch(
-            "linkedin.services.daemon_control.read_daemon_heartbeat_age_seconds",
-            return_value=999.0,
-        ) as mock_read_heartbeat:
-            run_daemon(mock_session, heartbeat_timeout_seconds=45.0)
-
-        mock_read_heartbeat.assert_called_once()
-
-
 class RunDaemonCommandTests(TestCase):
-    def test_direct_cli_disables_heartbeat_timeout_by_default(self):
+    def test_launcher_pid_arg_is_accepted_for_compatibility(self):
         from linkedin.management.commands.rundaemon import Command
 
         parser = Command().create_parser("manage.py", "rundaemon")
-        options = parser.parse_args([])
+        options = parser.parse_args(["--launcher-pid", "12345"])
 
-        self.assertEqual(options.heartbeat_timeout_seconds, 0.0)
+        self.assertEqual(options.launcher_pid, 12345)

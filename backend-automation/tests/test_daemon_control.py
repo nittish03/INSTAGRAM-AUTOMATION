@@ -25,12 +25,6 @@ def _assert_child_is_detached(test, kwargs):
     test.assertTrue(detached, "daemon child must be detached from launcher")
 
 
-def _assert_dashboard_heartbeat_enabled(test, cmd):
-    test.assertIn("--heartbeat-timeout-seconds", cmd)
-    timeout_idx = cmd.index("--heartbeat-timeout-seconds")
-    test.assertEqual(cmd[timeout_idx + 1], "45.0")
-
-
 class DaemonControlServiceTests(TestCase):
     def test_launch_daemon_starts_rundaemon_once(self):
         with TemporaryDirectory() as tmp:
@@ -60,8 +54,8 @@ class DaemonControlServiceTests(TestCase):
         args, kwargs = mock_popen.call_args
         self.assertIn("manage.py", args[0])
         self.assertIn("rundaemon", args[0])
-        self.assertIn("--launcher-pid", args[0])
-        _assert_dashboard_heartbeat_enabled(self, args[0])
+        self.assertNotIn("--launcher-pid", args[0])
+        self.assertNotIn("--heartbeat-timeout-seconds", args[0])
         self.assertNotIn("--handle", args[0])
         _assert_child_is_detached(self, kwargs)
 
@@ -93,8 +87,8 @@ class DaemonControlServiceTests(TestCase):
         self.assertIn("rundaemon", args[0])
         handle_idx = args[0].index("--handle")
         self.assertEqual(args[0][handle_idx + 1], "alice")
-        self.assertIn("--launcher-pid", args[0])
-        _assert_dashboard_heartbeat_enabled(self, args[0])
+        self.assertNotIn("--launcher-pid", args[0])
+        self.assertNotIn("--heartbeat-timeout-seconds", args[0])
         _assert_child_is_detached(self, kwargs)
 
     def test_state_files_live_outside_project_dir(self):
@@ -106,7 +100,6 @@ class DaemonControlServiceTests(TestCase):
             daemon_control.PID_FILE,
             daemon_control.LOCK_FILE,
             daemon_control.LOG_FILE,
-            daemon_control.HEARTBEAT_FILE,
         ):
             resolved = Path(path).resolve()
             try:
@@ -117,24 +110,6 @@ class DaemonControlServiceTests(TestCase):
                 f"daemon state file {resolved} is inside BASE_DIR {base}; "
                 "this triggers runserver autoreload on every write"
             )
-
-    def test_touch_daemon_heartbeat_throttles_writes(self):
-        with TemporaryDirectory() as tmp:
-            heartbeat = Path(tmp) / "daemon.heartbeat"
-            with patch.object(daemon_control, "HEARTBEAT_FILE", heartbeat):
-                daemon_control._last_heartbeat_write_at = 0.0
-                daemon_control.touch_daemon_heartbeat(force=True)
-                first_mtime = heartbeat.stat().st_mtime_ns
-
-                # Immediate second call should be skipped by the throttle.
-                daemon_control.touch_daemon_heartbeat()
-                second_mtime = heartbeat.stat().st_mtime_ns
-
-        self.assertEqual(
-            first_mtime,
-            second_mtime,
-            "throttled heartbeat should not rewrite file on rapid polls",
-        )
 
     def test_launch_daemon_does_not_spawn_duplicate_when_pid_running(self):
         with TemporaryDirectory() as tmp:
