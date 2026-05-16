@@ -542,7 +542,9 @@ class Task(models.Model):
     def mark_running(self):
         self.status = self.Status.RUNNING
         self.started_at = timezone.now()
-        self.save(update_fields=["status", "started_at"])
+        self.ended_at = None
+        self.error = ""
+        self.save(update_fields=["status", "started_at", "ended_at", "error"])
 
     def mark_completed(self):
         self.status = self.Status.COMPLETED

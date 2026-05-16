@@ -418,19 +418,29 @@ def export_selected(lead_ids: list[int]) -> dict[str, int]:
     return {"exported": ok, "failed": failed}
 
 
-def followup_suggestions(limit: int = 200) -> list[dict[str, Any]]:
+def followup_suggestions(limit: int = 200, *, owner_id: int | None = None) -> list[dict[str, Any]]:
     connected = (
         Deal.objects.filter(state=ProfileState.CONNECTED.value)
         .select_related("lead", "campaign")
-        .order_by("-update_date")[:limit]
+        .order_by("-update_date")
     )
+    if owner_id is not None:
+        connected = connected.filter(campaign__users__id=owner_id)
+    connected = connected[:limit]
     lead_ct = ContentType.objects.get_for_model(Lead)
     items: list[dict[str, Any]] = []
     lead_ids = [d.lead_id for d in connected if d.lead_id]
     lead_public_ids = [d.lead.public_identifier for d in connected if d.lead and d.lead.public_identifier]
     draft_lead_ids = set(
-        ChatMessage.objects.filter(content_type=lead_ct, object_id__in=lead_ids, is_draft=True, is_approved=False).values_list(
-            "object_id", flat=True
+        ChatMessage.objects.filter(
+            content_type=lead_ct,
+            object_id__in=lead_ids,
+            owner_id=owner_id,
+            is_draft=True,
+            is_approved=False,
+        ).values_list(
+            "object_id",
+            flat=True,
         )
     )
     send_public_ids = set(
@@ -438,14 +448,18 @@ def followup_suggestions(limit: int = 200) -> list[dict[str, Any]]:
             task_type=Task.TaskType.SEND_MESSAGE,
             status__in=[Task.Status.PENDING, Task.Status.RUNNING],
             payload__public_id__in=lead_public_ids,
-        ).values_list("payload__public_id", flat=True)
+        )
+        .filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True))
+        .values_list("payload__public_id", flat=True)
     )
     followup_public_ids = set(
         Task.objects.filter(
             task_type=Task.TaskType.FOLLOW_UP,
             status__in=[Task.Status.PENDING, Task.Status.RUNNING],
             payload__public_id__in=lead_public_ids,
-        ).values_list("payload__public_id", flat=True)
+        )
+        .filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True))
+        .values_list("payload__public_id", flat=True)
     )
 
     for d in connected:
@@ -483,15 +497,23 @@ def followup_suggestions(limit: int = 200) -> list[dict[str, Any]]:
     return items
 
 
-def queue_followups_for_leads(lead_ids: list[int]) -> dict[str, int]:
+def queue_followups_for_leads(lead_ids: list[int], *, owner_id: int | None = None) -> dict[str, int]:
     enqueued = 0
     skipped = 0
     deals = Deal.objects.filter(lead_id__in=lead_ids, state=ProfileState.CONNECTED.value).select_related("lead", "campaign")
+    if owner_id is not None:
+        deals = deals.filter(campaign__users__id=owner_id)
     for d in deals:
         if not d.lead or not d.lead.public_identifier:
             skipped += 1
             continue
-        enqueue_follow_up(d.campaign_id, d.lead.public_identifier, delay_seconds=10, deal=d)
+        enqueue_follow_up(
+            d.campaign_id,
+            d.lead.public_identifier,
+            delay_seconds=10,
+            deal=d,
+            owner_id=owner_id,
+        )
         enqueued += 1
     return {"enqueued": enqueued, "skipped": skipped}
 

@@ -95,6 +95,9 @@ def handle_connect(task, session, qualifiers):
     cfg = CAMPAIGN_CONFIG
     campaign = session.campaign
     campaign_id = campaign.pk
+    owner_id = getattr(getattr(session, "django_user", None), "pk", None)
+    if not isinstance(owner_id, int):
+        owner_id = None
 
     if new_connection_invites_paused():
         raise TaskSkipped("New connection invite expansion is paused.")
@@ -156,7 +159,11 @@ def handle_connect(task, session, qualifiers):
                 },
             )
             set_profile_state(session, public_id, assessment.state.value)
-            enqueue_follow_up(campaign_id, public_id, deal=deal)
+            if deal and deal.lead_id:
+                from google_integration.sheet_sync import sync_lead_to_google_sheet
+
+                sync_lead_to_google_sheet(deal.lead)
+            enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
             _reschedule()
             return
 
@@ -172,7 +179,8 @@ def handle_connect(task, session, qualifiers):
             enqueue_check_pending(
                 campaign_id, public_id,
                 backoff_hours=cfg["check_pending_recheck_after_hours"],
-                deal=deal
+                deal=deal,
+                owner_id=owner_id,
             )
             _reschedule()
             return
@@ -233,6 +241,10 @@ def handle_connect(task, session, qualifiers):
                     },
                 )
             set_profile_state(session, public_id, new_state.value)
+            if new_state == ProfileState.CONNECTED and deal and deal.lead_id:
+                from google_integration.sheet_sync import sync_lead_to_google_sheet
+
+                sync_lead_to_google_sheet(deal.lead)
             if new_state == ProfileState.PENDING and deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
@@ -262,10 +274,11 @@ def handle_connect(task, session, qualifiers):
                 enqueue_check_pending(
                     campaign_id, public_id,
                     backoff_hours=cfg["check_pending_recheck_after_hours"],
-                    deal=deal
+                    deal=deal,
+                    owner_id=owner_id,
                 )
             elif new_state == ProfileState.CONNECTED:
-                enqueue_follow_up(campaign_id, public_id, deal=deal)
+                enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
 
     except ReachedConnectionLimit as e:
         logger.warning("Rate limited: %s", e)
@@ -322,29 +335,46 @@ def enqueue_check_pending(
     public_id: str,
     backoff_hours: float,
     deal=None,
+    owner_id: int | None = None,
 ):
     # Equal-jitter backoff: uniform spread across [half, backoff]
     half = backoff_hours / 2
     delay_hours = half + random.uniform(0, half)
+    payload = {
+        "campaign_id": campaign_id,
+        "public_id": public_id,
+        "backoff_hours": backoff_hours,
+    }
+    if owner_id is not None:
+        payload["owner_id"] = owner_id
+    dedup_keys = ["campaign_id", "public_id"]
+    if owner_id is not None:
+        dedup_keys.append("owner_id")
 
     _enqueue_task(
         task_type=Task.TaskType.CHECK_PENDING,
-        payload={
-            "campaign_id": campaign_id,
-            "public_id": public_id,
-            "backoff_hours": backoff_hours,
-        },
+        payload=payload,
         delay_seconds=delay_hours * 3600,
-        dedup_keys=["campaign_id", "public_id"],
+        dedup_keys=dedup_keys,
         deal=deal,
     )
     return delay_hours
 
 
-def enqueue_follow_up(campaign_id: int, public_id: str, delay_seconds: float = 10, deal=None):
+def enqueue_follow_up(
+    campaign_id: int,
+    public_id: str,
+    delay_seconds: float = 10,
+    deal=None,
+    owner_id: int | None = None,
+):
+    payload = {"campaign_id": campaign_id, "public_id": public_id}
+    if owner_id is not None:
+        payload["owner_id"] = owner_id
+
     _enqueue_task(
         task_type=Task.TaskType.FOLLOW_UP,
-        payload={"campaign_id": campaign_id, "public_id": public_id},
+        payload=payload,
         delay_seconds=delay_seconds,
         deal=deal,
     )
@@ -362,6 +392,7 @@ def enqueue_reply_check(
     window_seconds: float | None = None,
     delay_seconds: float | None = None,
     deal=None,
+    owner_id: int | None = None,
 ):
     from datetime import timedelta
 
@@ -379,13 +410,18 @@ def enqueue_reply_check(
         "interval_seconds": interval,
         "expires_at": (anchor + timedelta(seconds=window)).isoformat(),
     }
+    if owner_id is not None:
+        payload["owner_id"] = owner_id
     if sent_message_id is not None:
         payload["sent_message_id"] = sent_message_id
+    dedup_keys = ["campaign_id", "public_id", "sent_message_id"] if sent_message_id is not None else ["campaign_id", "public_id"]
+    if owner_id is not None:
+        dedup_keys.append("owner_id")
 
     _enqueue_task(
         task_type=Task.TaskType.REPLY_CHECK,
         payload=payload,
         delay_seconds=delay_seconds if delay_seconds is not None else interval,
-        dedup_keys=["campaign_id", "public_id", "sent_message_id"] if sent_message_id is not None else ["campaign_id", "public_id"],
+        dedup_keys=dedup_keys,
         deal=deal,
     )

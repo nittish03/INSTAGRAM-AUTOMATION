@@ -238,6 +238,46 @@ class TaskHardeningTest(TestCase):
         self.assertEqual(deal.state, ProfileState.FAILED)
         self.assertIn("Expired", deal.reason)
 
+    def test_check_pending_transient_profile_issue_keeps_pending(self):
+        from linkedin.exceptions import SkipProfile
+        from linkedin.tasks.check_pending import handle_check_pending
+
+        lead = Lead.objects.create(public_identifier="pending-glitch")
+        deal = Deal.objects.create(
+            lead=lead,
+            campaign=self.campaign,
+            state=ProfileState.PENDING.value,
+            backoff_hours=1,
+        )
+        task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            status=Task.Status.RUNNING,
+            payload={
+                "campaign_id": self.campaign.id,
+                "public_id": "pending-glitch",
+                "backoff_hours": 1,
+            },
+            scheduled_at=timezone.now(),
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+
+        with patch(
+            "linkedin.actions.status.get_connection_assessment",
+            side_effect=SkipProfile("Top Card section not found"),
+        ):
+            handle_check_pending(task, session, {})
+
+        deal.refresh_from_db()
+        self.assertEqual(deal.state, ProfileState.PENDING)
+        self.assertTrue(
+            Task.objects.filter(
+                task_type=Task.TaskType.CHECK_PENDING,
+                status=Task.Status.PENDING,
+                payload__public_id="pending-glitch",
+            ).exists()
+        )
+
     def test_send_message_missing_data(self):
         # [MED-06] send_message: ChatMessage or Deal missing
         from linkedin.tasks.send_message import handle_send_message
@@ -318,7 +358,11 @@ class TaskHardeningTest(TestCase):
         decision.action = "send_message"
         decision.message = "Hello again"
 
-        with patch('linkedin.agents.follow_up.run_follow_up_agent', return_value=decision):
+        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
+        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+            'linkedin.agents.follow_up.run_follow_up_agent',
+            return_value=decision,
+        ):
             handle_follow_up(task, session, {})
             self.assertEqual(ChatMessage.objects.filter(is_draft=True).count(), 1)
             self.assertEqual(ChatMessage.objects.filter(is_approved=True).count(), 0)
@@ -326,3 +370,125 @@ class TaskHardeningTest(TestCase):
             handle_follow_up(task, session, {})
             self.assertEqual(ChatMessage.objects.filter(is_draft=True).count(), 1)
             self.assertEqual(ChatMessage.objects.filter(is_approved=True).count(), 0)
+
+    def test_follow_up_quota_error_reschedules(self):
+        from linkedin.tasks.follow_up import handle_follow_up
+
+        lead = Lead.objects.create(public_identifier="quota_follow_up")
+        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        task = Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.RUNNING,
+            payload={"campaign_id": self.campaign.id, "public_id": "quota_follow_up"},
+            scheduled_at=timezone.now(),
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.linkedin_profile = self.profile
+        quota_error = Exception(
+            "429 RESOURCE_EXHAUSTED generate_content_free_tier_requests Please retry in 46.0s"
+        )
+
+        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
+        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+            "linkedin.agents.follow_up.run_follow_up_agent",
+            side_effect=quota_error,
+        ):
+            with self.assertRaisesRegex(TaskSkipped, "quota exhausted"):
+                handle_follow_up(task, session, {})
+
+        self.assertTrue(
+            Task.objects.filter(
+                task_type=Task.TaskType.FOLLOW_UP,
+                status=Task.Status.PENDING,
+                deal=deal,
+                payload__public_id="quota_follow_up",
+            ).exists()
+        )
+
+    def test_follow_up_does_not_draft_when_not_connected(self):
+        from chat.models import ChatMessage
+        from linkedin.tasks.follow_up import handle_follow_up
+
+        lead = Lead.objects.create(public_identifier="not_connected_follow_up")
+        deal = Deal.objects.create(
+            lead=lead,
+            campaign=self.campaign,
+            state=ProfileState.CONNECTED.value,
+            backoff_hours=1,
+        )
+        task = Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            payload={"campaign_id": self.campaign.id, "public_id": "not_connected_follow_up"},
+            scheduled_at=timezone.now(),
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.linkedin_profile = self.profile
+        assessment = MagicMock(state=ProfileState.QUALIFIED, source="ui_connect_visible", confidence=0.8)
+
+        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+            "linkedin.agents.follow_up.run_follow_up_agent",
+        ) as mock_agent:
+            with self.assertRaisesRegex(TaskSkipped, "requires a verified connected profile"):
+                handle_follow_up(task, session, {})
+
+        mock_agent.assert_not_called()
+        deal.refresh_from_db()
+        self.assertEqual(deal.state, ProfileState.QUALIFIED)
+        self.assertFalse(ChatMessage.objects.filter(object_id=lead.pk, is_draft=True).exists())
+
+    def test_follow_up_draft_dedup_is_scoped_to_linkedin_profile_owner(self):
+        from django.contrib.auth.models import User
+        from django.contrib.contenttypes.models import ContentType
+        from linkedin.tasks.follow_up import handle_follow_up
+        from chat.models import ChatMessage
+
+        lead = Lead.objects.create(public_identifier="owner_scoped_draft")
+        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        other_user = User.objects.create_user(username="other_draft_owner")
+        lead_ct = ContentType.objects.get_for_model(Lead)
+        ChatMessage.objects.create(
+            content_type=lead_ct,
+            object_id=lead.pk,
+            campaign=self.campaign,
+            owner=other_user,
+            content="Other account draft",
+            linkedin_urn="draft_other_owner",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+        task = Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            payload={
+                "campaign_id": self.campaign.id,
+                "public_id": "owner_scoped_draft",
+                "owner_id": self.user.pk,
+            },
+            scheduled_at=timezone.now(),
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.linkedin_profile = self.profile
+        session.django_user = self.user
+        decision = MagicMock(action="send_message", message="Owner-specific draft")
+
+        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
+        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+            "linkedin.agents.follow_up.run_follow_up_agent",
+            return_value=decision,
+        ):
+            handle_follow_up(task, session, {})
+
+        self.assertTrue(
+            ChatMessage.objects.filter(
+                content_type=lead_ct,
+                object_id=lead.pk,
+                campaign=self.campaign,
+                owner=self.user,
+                is_draft=True,
+                content="Owner-specific draft",
+            ).exists()
+        )
+        self.assertEqual(ChatMessage.objects.filter(is_draft=True).count(), 2)

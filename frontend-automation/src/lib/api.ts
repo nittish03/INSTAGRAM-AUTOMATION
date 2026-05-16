@@ -186,6 +186,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  deleteCampaign: (id: number) =>
+    request<{ deleted: boolean; id: number; name: string }>(`/api/campaigns/${id}`, {
+      method: "DELETE",
+    }),
   leads: (params: URLSearchParams) => request<{ items: Lead[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/leads?${params.toString()}`),
   deals: (params: URLSearchParams) => request<{ items: Deal[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/deals?${params.toString()}`),
   tasks: (params: URLSearchParams) => request<{ items: TaskItem[]; pagination: { page: number; pageSize: number; total: number } }>(`/api/tasks?${params.toString()}`),

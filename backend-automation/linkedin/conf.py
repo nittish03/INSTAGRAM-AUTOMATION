@@ -71,7 +71,7 @@ REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 1,  # 1 hour
+    "check_pending_recheck_after_hours": 1/2,  # 30 min
     "enrich_min_interval": 1,
     "min_action_interval": 120,
     "qualification_n_mc_samples": 100,
@@ -83,11 +83,6 @@ CAMPAIGN_CONFIG = {
     "reply_check_interval_seconds": 10 * 60,
     "reply_check_max_attempts": 12,
     "reply_check_window_seconds": 2 * 60 * 60,
-    # Optional: ``daemon_idle_sleep_cap_seconds`` — max seconds per idle loop iteration.
-    # Omit (default): one sleep for the full time until the next task (sleep timer).
-    # Positive number: wake periodically at most that often (for faster shutdown / checks).
-    # 0: short poll slices (~15s) instead of one long sleep.
-    "daemon_idle_sleep_cap_seconds": 30,
 }
 
 # ----------------------------------------------------------------------

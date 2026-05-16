@@ -99,6 +99,97 @@ class ReplyCheckTest(TestCase):
         self.assertIn("sent_at", reply_check.payload)
         self.assertIn("expires_at", reply_check.payload)
 
+    def test_send_message_uses_profile_ui_send_path(self):
+        from linkedin.tasks.send_message import handle_send_message
+
+        msg = ChatMessage.objects.create(
+            content_type=self.lead_ct,
+            object_id=self.lead.pk,
+            campaign=self.campaign,
+            content="Worth taking a look?",
+            linkedin_urn="draft_send_ui",
+            is_outgoing=True,
+            is_draft=False,
+            is_approved=True,
+            owner=self.user,
+        )
+        task = MagicMock(
+            payload={
+                "public_id": self.lead.public_identifier,
+                "campaign_id": self.campaign.pk,
+                "message_id": msg.pk,
+            }
+        )
+        with patch(
+            "linkedin.tasks.send_message.get_profile_dict_for_public_id",
+            return_value={"profile": self.lead.profile_data},
+        ), patch("linkedin.actions.message.send_raw_message", return_value=False) as mock_send:
+            with self.assertRaisesRegex(RuntimeError, "LinkedIn blocked"):
+                handle_send_message(task, self._session())
+
+        mock_send.assert_called_once()
+
+    def test_send_message_connects_and_requeues_when_profile_shows_connect(self):
+        from linkedin.exceptions import TaskSkipped
+        from linkedin.tasks.send_message import handle_send_message
+
+        msg = ChatMessage.objects.create(
+            content_type=self.lead_ct,
+            object_id=self.lead.pk,
+            campaign=self.campaign,
+            content="Worth taking a look?",
+            linkedin_urn="draft_send_after_connect",
+            is_outgoing=True,
+            is_draft=False,
+            is_approved=True,
+            owner=self.user,
+        )
+        task = Task.objects.create(
+            task_type=Task.TaskType.SEND_MESSAGE,
+            status=Task.Status.RUNNING,
+            payload={
+                "public_id": self.lead.public_identifier,
+                "campaign_id": self.campaign.pk,
+                "message_id": msg.pk,
+                "owner_id": self.user.pk,
+            },
+            scheduled_at=timezone.now(),
+        )
+
+        with patch(
+            "linkedin.tasks.send_message.get_profile_dict_for_public_id",
+            return_value={"profile": self.lead.profile_data},
+        ), patch(
+            "linkedin.actions.message.send_raw_message",
+            side_effect=TaskSkipped("LinkedIn still shows Connect; skipping message send"),
+        ), patch(
+            "linkedin.actions.connect.send_connection_request",
+            return_value=ProfileState.PENDING,
+        ) as mock_connect:
+            with self.assertRaisesRegex(TaskSkipped, "sent connection invite"):
+                handle_send_message(task, self._session())
+
+        mock_connect.assert_called_once()
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.state, ProfileState.PENDING)
+        self.assertTrue(
+            Task.objects.filter(
+                task_type=Task.TaskType.CHECK_PENDING,
+                status=Task.Status.PENDING,
+                payload__public_id=self.lead.public_identifier,
+            ).exists()
+        )
+        self.assertTrue(
+            Task.objects.filter(
+                task_type=Task.TaskType.SEND_MESSAGE,
+                status=Task.Status.PENDING,
+                payload__public_id=self.lead.public_identifier,
+                payload__message_id=msg.pk,
+            )
+            .exclude(pk=task.pk)
+            .exists()
+        )
+
     def test_reply_check_continues_when_new_invites_are_paused(self):
         from linkedin.tasks.reply_check import handle_reply_check
         cfg = SiteConfig.load()

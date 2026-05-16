@@ -64,12 +64,27 @@ class Command(BaseCommand):
 
         import signal
         def graceful_exit(sig, frame):
-            logger.info("Termination signal received. Closing session...")
+            signal_name = getattr(signal.Signals(sig), "name", str(sig))
+            logger.info(
+                "Manual interrupt received (%s, pid=%s, ppid=%s). Closing session...",
+                signal_name,
+                os.getpid(),
+                os.getppid(),
+            )
             session.close()
             sys.exit(0)
 
+        def ignore_sigterm(sig, frame):
+            signal_name = getattr(signal.Signals(sig), "name", str(sig))
+            logger.warning(
+                "Ignoring %s (pid=%s, ppid=%s); daemon keeps running until manual stop.",
+                signal_name,
+                os.getpid(),
+                os.getppid(),
+            )
+
         signal.signal(signal.SIGINT, graceful_exit)
-        signal.signal(signal.SIGTERM, graceful_exit)
+        signal.signal(signal.SIGTERM, ignore_sigterm)
 
         from linkedin.daemon import run_daemon
         try:

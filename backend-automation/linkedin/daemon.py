@@ -9,6 +9,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from django.db import close_old_connections, connections
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.utils import timezone
 from termcolor import colored
 
@@ -39,8 +40,14 @@ from linkedin.tasks.send_message import handle_send_message
 
 logger = logging.getLogger(__name__)
 
-# When ``daemon_idle_sleep_cap_seconds`` is 0, poll the DB at most this often (not sub-second).
-_IDLE_POLL_WHEN_CAP_ZERO_SECONDS = 15.0
+# Keep the daemon responsive without spinning CPU or hammering the database.
+_IDLE_POLL_INTERVAL_SECONDS = 15.0
+_OWNER_SCOPED_TASK_TYPES = {
+    Task.TaskType.CHECK_PENDING,
+    Task.TaskType.FOLLOW_UP,
+    Task.TaskType.SEND_MESSAGE,
+    Task.TaskType.REPLY_CHECK,
+}
 
 _HANDLERS = {
     Task.TaskType.CONNECT: handle_connect,
@@ -49,6 +56,77 @@ _HANDLERS = {
     Task.TaskType.SEND_MESSAGE: handle_send_message,
     Task.TaskType.REPLY_CHECK: handle_reply_check,
 }
+
+
+def _prioritize_claims(queryset):
+    """Run human-approved sends before background checks and draft generation."""
+    return queryset.annotate(
+        _daemon_priority=Case(
+            When(task_type=Task.TaskType.SEND_MESSAGE, then=Value(0)),
+            When(task_type=Task.TaskType.REPLY_CHECK, then=Value(1)),
+            When(task_type=Task.TaskType.FOLLOW_UP, then=Value(2)),
+            When(task_type=Task.TaskType.CHECK_PENDING, then=Value(3)),
+            When(task_type=Task.TaskType.CONNECT, then=Value(4)),
+            default=Value(9),
+            output_field=IntegerField(),
+        )
+    ).order_by("_daemon_priority", "scheduled_at", "id")
+
+
+def _set_task_owner(task: Task, owner_id: int) -> bool:
+    payload = dict(task.payload or {})
+    if payload.get("owner_id") == owner_id:
+        return False
+    payload["owner_id"] = owner_id
+    task.payload = payload
+    task.save(update_fields=["payload"])
+    return True
+
+
+def _backfill_owner_ids_for_scoped_tasks(campaign_ids: list[int]) -> int:
+    """Attach owner_id to old per-profile tasks before account-scoped claiming."""
+    from chat.models import ChatMessage
+    from linkedin.models import ActionLog
+
+    tasks = Task.objects.filter(
+        task_type__in=_OWNER_SCOPED_TASK_TYPES,
+        status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+        payload__campaign_id__in=campaign_ids,
+        payload__owner_id__isnull=True,
+    ).order_by("scheduled_at", "id")
+    changed = 0
+
+    for task in tasks:
+        payload = task.payload or {}
+        owner_id = None
+
+        message_id = payload.get("message_id")
+        if message_id:
+            owner_id = (
+                ChatMessage.objects.filter(pk=message_id)
+                .values_list("owner_id", flat=True)
+                .first()
+            )
+
+        public_id = payload.get("public_id")
+        campaign_id = payload.get("campaign_id")
+        if owner_id is None and public_id and campaign_id:
+            owner_id = (
+                ActionLog.objects.filter(
+                    campaign_id=campaign_id,
+                    target_public_id=public_id,
+                    status=ActionLog.Status.SUCCESS,
+                    linkedin_profile__user_id__isnull=False,
+                )
+                .order_by("-created_at", "-id")
+                .values_list("linkedin_profile__user_id", flat=True)
+                .first()
+            )
+
+        if owner_id is not None and _set_task_owner(task, int(owner_id)):
+            changed += 1
+
+    return changed
 
 
 def _close_old_connections_for_daemon():
@@ -136,9 +214,20 @@ def heal_tasks(session):
     from linkedin.enums import ProfileState
 
     cfg = CAMPAIGN_CONFIG
+    campaign_ids = [campaign.pk for campaign in session.campaigns]
+    session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
+    if not isinstance(session_user_id, int):
+        session_user_id = None
+
+    backfilled = _backfill_owner_ids_for_scoped_tasks(campaign_ids)
+    if backfilled:
+        logger.info("Backfilled owner_id on %d scoped task(s)", backfilled)
 
     # 1. Recover stale running tasks
-    stale_count = Task.objects.filter(status=Task.Status.RUNNING).update(
+    stale_count = Task.objects.filter(
+        status=Task.Status.RUNNING,
+        payload__campaign_id__in=campaign_ids,
+    ).update(
         status=Task.Status.PENDING,
     )
     if stale_count:
@@ -162,7 +251,13 @@ def heal_tasks(session):
             if not public_id:
                 continue
             backoff = deal.backoff_hours or cfg["check_pending_recheck_after_hours"]
-            enqueue_check_pending(campaign.pk, public_id, backoff_hours=backoff, deal=deal)
+            enqueue_check_pending(
+                campaign.pk,
+                public_id,
+                backoff_hours=backoff,
+                deal=deal,
+                owner_id=session_user_id,
+            )
 
     # 4. Follow_up tasks for CONNECTED profiles
     from chat.models import ChatMessage
@@ -184,27 +279,36 @@ def heal_tasks(session):
             has_pending_draft = ChatMessage.objects.filter(
                 content_type=ContentType.objects.get_for_model(deal.lead),
                 object_id=deal.lead.pk, 
-                is_draft=True
+                campaign=campaign,
+                owner_id=session_user_id,
+                is_draft=True,
+                is_approved=False,
             ).exists()
             
             has_send_task = Task.objects.filter(
                 task_type=Task.TaskType.SEND_MESSAGE,
                 status__in=[Task.Status.PENDING, Task.Status.RUNNING],
-                payload__public_id=public_id
+                payload__campaign_id=campaign.pk,
+                payload__public_id=public_id,
+                payload__owner_id=session_user_id,
             ).exists()
 
             if has_pending_draft or has_send_task:
                 continue
 
-            enqueue_follow_up(campaign.pk, public_id, delay_seconds=random.uniform(5, 60), deal=deal)
+            enqueue_follow_up(
+                campaign.pk,
+                public_id,
+                delay_seconds=random.uniform(5, 60),
+                deal=deal,
+                owner_id=session_user_id,
+            )
 
 
-    pending_count = Task.objects.pending().count()
+    pending_count = Task.objects.filter(payload__campaign_id__in=campaign_ids).pending().count()
     logger.info("Task queue healed: %d pending tasks", pending_count)
 
 def run_daemon(session):
-    from linkedin.models import Campaign
-
     cfg = CAMPAIGN_CONFIG
 
     qualifiers = _build_qualifiers(session.campaigns, cfg)
@@ -216,6 +320,16 @@ def run_daemon(session):
     if not campaigns:
         logger.error("No campaigns found - cannot start daemon")
         return
+    campaign_by_id = {campaign.pk: campaign for campaign in campaigns}
+    campaign_ids = list(campaign_by_id)
+    session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
+    if not isinstance(session_user_id, int):
+        session_user_id = None
+
+    task_scope = Task.objects.filter(payload__campaign_id__in=campaign_ids).filter(
+        ~Q(task_type__in=_OWNER_SCOPED_TASK_TYPES)
+        | Q(payload__owner_id=session_user_id)
+    )
 
     logger.info(
         colored("Daemon started", "green", attrs=["bold"])
@@ -223,79 +337,43 @@ def run_daemon(session):
         len(campaigns),
     )
 
-    # Throttle INFO while polling for a far-future ``scheduled_at`` (cap slicing).
-    _idle_info_interval_s = 300.0
-    last_idle_info_at = -_idle_info_interval_s
-
-    # Single-threaded: one task at a time, no concurrent enqueuing,
-    # so sleeping until the next scheduled_at is safe.
+    # Single-threaded: one task at a time. Keep polling forever until the
+    # operator stops the process. Pending tasks are processed immediately;
+    # ``scheduled_at`` is retained for audit/UI display but no longer gates work.
     while True:
         _close_old_connections_for_daemon()
         pause = seconds_until_active()
         if pause > 0:
             h, m = int(pause // 3600), int(pause % 3600 // 60)
-            logger.info("Outside active hours - sleeping %dh%02dm", h, m)
-            time.sleep(pause)
+            logger.info(
+                "Outside active hours for %dh%02dm - polling again in %.0fs",
+                h,
+                m,
+                _IDLE_POLL_INTERVAL_SECONDS,
+            )
+            time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
             continue
 
-        task = Task.objects.claim_next()
+        claim_scope = _prioritize_claims(task_scope.filter(status=Task.Status.PENDING))
+        if new_connection_invites_paused():
+            claim_scope = claim_scope.exclude(task_type=Task.TaskType.CONNECT)
+        task = claim_scope.first()
         if task is None:
-            wait = Task.objects.seconds_to_next()
-            if wait is None:
-                if (
-                    new_connection_invites_paused()
-                    and Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
-                ):
-                    logger.info("New connection invite expansion paused - polling until unpaused")
-                    time.sleep(_IDLE_POLL_WHEN_CAP_ZERO_SECONDS)
-                    continue
-                logger.info("Queue empty - nothing to do")
-                return
-            if wait > 0:
-                cap_raw = cfg.get("daemon_idle_sleep_cap_seconds")
-                if cap_raw is None:
-                    sleep_s = wait
-                else:
-                    cap = float(cap_raw)
-                    # cap==0: poll in modest slices (no multi-hour block sleep, no sub-second log/DB spam).
-                    per_iteration = cap if cap > 0 else _IDLE_POLL_WHEN_CAP_ZERO_SECONDS
-                    sleep_s = min(wait, per_iteration)
-                h, m = int(wait // 3600), int(wait % 3600 // 60)
-                hs, ms = int(sleep_s // 3600), int(sleep_s % 3600 // 60)
-                cap_display = cap_raw if cap_raw is not None else "full"
-                if sleep_s + 1e-6 >= wait:
-                    logger.info(
-                        "Next task in %dh%02dm - sleeping %dh%02dm (idle cap=%s)",
-                        h,
-                        m,
-                        hs,
-                        ms,
-                        cap_display,
-                    )
-                else:
-                    now_m = time.monotonic()
-                    if now_m - last_idle_info_at >= _idle_info_interval_s:
-                        last_idle_info_at = now_m
-                        logger.info(
-                            "Next task in %dh%02dm - polling until due (idle cap=%s, ~%.0fs slices)",
-                            h,
-                            m,
-                            cap_display,
-                            sleep_s,
-                        )
-                    else:
-                        logger.debug(
-                            "Next task in %dh%02dm - idle poll sleep %dh%02dm (idle cap=%s)",
-                            h,
-                            m,
-                            hs,
-                            ms,
-                            cap_display,
-                        )
-                time.sleep(sleep_s)
+            if (
+                new_connection_invites_paused()
+                and task_scope.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+            ):
+                logger.info("New connection invite expansion paused - polling until unpaused")
+                time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
+                continue
+            logger.info(
+                "Queue empty - polling again in %.0fs",
+                _IDLE_POLL_INTERVAL_SECONDS,
+            )
+            time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
             continue
 
-        campaign = Campaign.objects.filter(pk=task.payload.get("campaign_id")).first()
+        campaign = campaign_by_id.get(task.payload.get("campaign_id"))
         if not campaign:
             task.mark_failed(f"Campaign {task.payload.get('campaign_id')} not found")
             continue

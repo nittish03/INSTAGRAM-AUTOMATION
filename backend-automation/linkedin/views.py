@@ -76,7 +76,11 @@ def dashboard_callback(request, context):
     today = timezone.localdate()
     last_week = timezone.now() - timedelta(days=7)
 
-    drafts_awaiting = ChatMessage.objects.filter(is_draft=True, is_approved=False).count()
+    drafts_awaiting = ChatMessage.objects.filter(
+        owner=request.user,
+        is_draft=True,
+        is_approved=False,
+    ).count()
     try:
         drafts_url = (
             reverse("admin:chat_chatmessage_changelist")
@@ -251,7 +255,11 @@ def api_dashboard(request):
         today=Count("id", filter=Q(created_at__date=today)),
         week=Count("id", filter=Q(created_at__gte=last_week)),
     )
-    drafts_awaiting = ChatMessage.objects.filter(is_draft=True, is_approved=False).count()
+    drafts_awaiting = ChatMessage.objects.filter(
+        owner=request.user,
+        is_draft=True,
+        is_approved=False,
+    ).count()
 
     connected = deal_stats["connected"] or 0
     failed = deal_stats["failed"] or 0
@@ -497,16 +505,29 @@ def api_campaigns(request):
 
 
 @login_required
-@require_http_methods(["PATCH"])
+@require_http_methods(["PATCH", "DELETE"])
 def api_campaign_detail(request, campaign_id: int):
     """Edit an existing campaign — including ICP/product description."""
     import json as _json
+    from django.db import transaction
     from django.contrib.auth.models import User
 
     try:
         campaign = Campaign.objects.prefetch_related("users").get(pk=campaign_id)
     except Campaign.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Campaign not found"}, status=404)
+
+    if request.method == "DELETE":
+        name = campaign.name
+        model_path = campaign._get_model_path()
+        with transaction.atomic():
+            Task.objects.filter(payload__campaign_id=campaign.pk).delete()
+            campaign.delete()
+        try:
+            model_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to delete campaign model file %s", model_path)
+        return JsonResponse({"ok": True, "deleted": True, "id": campaign_id, "name": name})
 
     try:
         payload = _json.loads(request.body or b"{}")
@@ -727,7 +748,7 @@ def api_message_drafts(request):
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
     qs = (
-        ChatMessage.objects.filter(is_draft=True, is_approved=False)
+        ChatMessage.objects.filter(owner=request.user, is_draft=True, is_approved=False)
         .select_related("campaign", "owner")
         .order_by("-creation_date")
     )
@@ -1234,27 +1255,40 @@ def api_messaging_diagnostics(request):
 
     cfg = SiteConfig.load()
 
-    connected_qs = Deal.objects.filter(state=ProfileState.CONNECTED).select_related("lead")
+    connected_qs = Deal.objects.filter(
+        state=ProfileState.CONNECTED,
+        campaign__users=request.user,
+    ).select_related("lead", "campaign")
     connected_count = connected_qs.count()
 
     lead_ct = ContentType.objects.get_for_model(Lead)
-    drafts_total = ChatMessage.objects.filter(content_type=lead_ct, is_draft=True).count()
+    drafts_total = ChatMessage.objects.filter(content_type=lead_ct, owner=request.user, is_draft=True).count()
     drafts_unapproved = ChatMessage.objects.filter(
-        content_type=lead_ct, is_draft=True, is_approved=False,
+        content_type=lead_ct, owner=request.user, is_draft=True, is_approved=False,
     ).count()
 
     pending_followups = Task.objects.filter(
-        task_type=Task.TaskType.FOLLOW_UP, status=Task.Status.PENDING,
+        task_type=Task.TaskType.FOLLOW_UP,
+        status=Task.Status.PENDING,
+        payload__owner_id=request.user.pk,
     ).count()
     failed_followups = Task.objects.filter(
-        task_type=Task.TaskType.FOLLOW_UP, status=Task.Status.FAILED,
+        task_type=Task.TaskType.FOLLOW_UP,
+        status=Task.Status.FAILED,
+        payload__owner_id=request.user.pk,
     ).count()
     pending_sends = Task.objects.filter(
-        task_type=Task.TaskType.SEND_MESSAGE, status=Task.Status.PENDING,
+        task_type=Task.TaskType.SEND_MESSAGE,
+        status=Task.Status.PENDING,
+        payload__owner_id=request.user.pk,
     ).count()
 
     last_failed = (
-        Task.objects.filter(task_type=Task.TaskType.FOLLOW_UP, status=Task.Status.FAILED)
+        Task.objects.filter(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.FAILED,
+            payload__owner_id=request.user.pk,
+        )
         .order_by("-ended_at", "-created_at")
         .values("id", "error", "ended_at")
         .first()
@@ -1266,11 +1300,15 @@ def api_messaging_diagnostics(request):
         if not lead or not lead.public_identifier:
             continue
         has_draft = ChatMessage.objects.filter(
-            content_type=lead_ct, object_id=lead.pk, is_draft=True,
+            content_type=lead_ct,
+            object_id=lead.pk,
+            owner=request.user,
+            is_draft=True,
         ).exists()
         has_followup = Task.objects.filter(
             task_type=Task.TaskType.FOLLOW_UP,
             status=Task.Status.PENDING,
+            payload__owner_id=request.user.pk,
             payload__public_id=lead.public_identifier,
         ).exists()
         if not has_draft and not has_followup:
@@ -1318,7 +1356,10 @@ def api_messaging_heal(request):
     from linkedin.enums import ProfileState
     from linkedin.tasks.connect import enqueue_follow_up
 
-    deals = Deal.objects.filter(state=ProfileState.CONNECTED).select_related("lead", "campaign")
+    deals = Deal.objects.filter(
+        state=ProfileState.CONNECTED,
+        campaign__users=request.user,
+    ).select_related("lead", "campaign")
     enqueued = 0
     skipped = 0
 
@@ -1330,16 +1371,21 @@ def api_messaging_heal(request):
 
         lead_ct = ContentType.objects.get_for_model(lead.__class__)
         has_draft = ChatMessage.objects.filter(
-            content_type=lead_ct, object_id=lead.pk, is_draft=True,
+            content_type=lead_ct,
+            object_id=lead.pk,
+            owner=request.user,
+            is_draft=True,
         ).exists()
         has_pending_followup = Task.objects.filter(
             task_type=Task.TaskType.FOLLOW_UP,
             status=Task.Status.PENDING,
+            payload__owner_id=request.user.pk,
             payload__public_id=lead.public_identifier,
         ).exists()
         has_send_task = Task.objects.filter(
             task_type=Task.TaskType.SEND_MESSAGE,
             status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+            payload__owner_id=request.user.pk,
             payload__public_id=lead.public_identifier,
         ).exists()
 
@@ -1352,6 +1398,7 @@ def api_messaging_heal(request):
             lead.public_identifier,
             delay_seconds=_random.uniform(5, 30),
             deal=deal,
+            owner_id=request.user.pk,
         )
         enqueued += 1
 
@@ -1720,6 +1767,7 @@ def api_google_auth_exchange(request):
 @require_http_methods(["POST"])
 def api_message_drafts_approve(request):
     import json
+    from django.db import transaction
     from django.utils import timezone
 
     if not request.user.is_staff:
@@ -1734,31 +1782,48 @@ def api_message_drafts_approve(request):
     if not isinstance(ids, list) or not ids:
         return JsonResponse({"ok": False, "error": "ids[] is required"}, status=400)
 
-    drafts = ChatMessage.objects.filter(pk__in=ids, is_draft=True, is_approved=False)
+    drafts = ChatMessage.objects.filter(
+        pk__in=ids,
+        owner=request.user,
+        is_draft=True,
+        is_approved=False,
+    )
     approved = 0
     for draft in drafts:
-        draft.is_approved = True
-        draft.is_draft = False
-        draft.save(update_fields=["is_approved", "is_draft"])
-
         public_id = ""
         campaign_id = draft.campaign_id
         deal = None
         obj = draft.content_object
-        if obj and obj.__class__.__name__ == "Lead":
+        if obj and obj.__class__.__name__ == "Deal":
+            deal = obj
+            public_id = obj.lead.public_identifier
+            campaign_id = campaign_id or obj.campaign_id
+        elif obj and obj.__class__.__name__ == "Lead":
             public_id = obj.public_identifier
             deal = obj.deal_set.filter(campaign_id=campaign_id).first() if campaign_id else obj.deal_set.first()
             if deal and not campaign_id:
                 campaign_id = deal.campaign_id
 
-        if public_id and campaign_id:
-            Task.objects.create(
-                task_type=Task.TaskType.SEND_MESSAGE,
-                status=Task.Status.PENDING,
-                scheduled_at=timezone.now(),
-                deal=deal,
-                payload={"message_id": draft.pk, "public_id": public_id, "campaign_id": campaign_id},
-            )
+        if public_id and campaign_id and draft.owner_id:
+            with transaction.atomic():
+                draft.is_approved = True
+                draft.is_draft = False
+                if not draft.campaign_id:
+                    draft.campaign_id = campaign_id
+                draft.save(update_fields=["is_approved", "is_draft", "campaign"])
+
+                Task.objects.create(
+                    task_type=Task.TaskType.SEND_MESSAGE,
+                    status=Task.Status.PENDING,
+                    scheduled_at=timezone.now(),
+                    deal=deal,
+                    payload={
+                        "message_id": draft.pk,
+                        "public_id": public_id,
+                        "campaign_id": campaign_id,
+                        "owner_id": draft.owner_id,
+                    },
+                )
             approved += 1
 
     return JsonResponse({"ok": True, "approved": approved})
@@ -1774,7 +1839,12 @@ def api_message_draft_detail(request, draft_id: int):
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
     try:
-        draft = ChatMessage.objects.get(pk=draft_id, is_draft=True, is_approved=False)
+        draft = ChatMessage.objects.get(
+            pk=draft_id,
+            owner=request.user,
+            is_draft=True,
+            is_approved=False,
+        )
     except ChatMessage.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Draft not found or already approved"}, status=404)
 
@@ -1824,6 +1894,7 @@ def api_message_draft_regenerate(request, draft_id: int):
     try:
         draft = ChatMessage.objects.select_related("campaign", "owner").get(
             pk=draft_id,
+            owner=request.user,
             is_draft=True,
             is_approved=False,
         )
@@ -1986,7 +2057,7 @@ def api_export_selected(request):
 @require_GET
 def api_followup_suggestions(request):
     limit = _parse_int(request.GET.get("limit"), 200, 1, 500)
-    return JsonResponse({"ok": True, "items": followup_suggestions(limit=limit)})
+    return JsonResponse({"ok": True, "items": followup_suggestions(limit=limit, owner_id=request.user.pk)})
 
 
 @login_required
@@ -2010,7 +2081,7 @@ def api_followups_queue(request):
         return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
     if safe.enabled and len(parsed_ids) > safe.max_bulk_approve:
         return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_approve})"}, status=400)
-    return JsonResponse({"ok": True, **queue_followups_for_leads(parsed_ids)})
+    return JsonResponse({"ok": True, **queue_followups_for_leads(parsed_ids, owner_id=request.user.pk)})
 
 
 @login_required

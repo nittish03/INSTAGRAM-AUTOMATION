@@ -27,7 +27,12 @@ def sync_conversation(session, public_identifier: str, *, include_drafts: bool =
     _sync_from_api(session, public_identifier, lead, ct)
 
     # Optimized (MED-01): Pass objects directly to avoid redundant lookup
-    return _read_from_db(lead, ct, include_drafts=include_drafts)
+    return _read_from_db(
+        lead,
+        ct,
+        owner=session.django_user,
+        include_drafts=include_drafts,
+    )
 
 
 def _sync_from_api(session, public_identifier: str, lead, ct):
@@ -41,6 +46,9 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
 
     session.ensure_browser()
     api = PlaywrightLinkedinAPI(session=session)
+    campaign = getattr(session, "campaign", None)
+    if not isinstance(getattr(campaign, "pk", None), int):
+        campaign = None
 
     target_urn = lead.get_urn(session)
     mailbox_urn = session.self_profile["urn"]
@@ -81,6 +89,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
             placeholder = ChatMessage.objects.filter(
                 content_type=ct,
                 object_id=lead.pk,
+                owner=session.django_user,
                 is_outgoing=True,
                 linkedin_urn__startswith="sent_",
                 content=parsed["text"],
@@ -102,6 +111,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
                 "content": parsed["text"],
                 "is_outgoing": is_outgoing,
                 "owner": session.django_user,
+                "campaign": campaign,
                 **({"creation_date": parsed["delivered_at"]} if parsed["delivered_at"] else {}),
             },
         )
@@ -111,14 +121,16 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
     logger.debug("sync: processed %d messages for %s", len(elements), public_identifier)
 
 
-def _read_from_db(lead, ct, *, include_drafts: bool = True) -> list[dict]:
+def _read_from_db(lead, ct, *, owner, include_drafts: bool = True) -> list[dict]:
     """Read all ChatMessages for a lead, sorted chronologically."""
     from chat.models import ChatMessage
 
     lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "them"
 
     messages = ChatMessage.objects.filter(
-        content_type=ct, object_id=lead.pk,
+        content_type=ct,
+        object_id=lead.pk,
+        owner=owner,
     ).select_related("owner").order_by("creation_date")
     if not include_drafts:
         messages = messages.filter(is_draft=False).exclude(linkedin_urn__startswith="draft_")

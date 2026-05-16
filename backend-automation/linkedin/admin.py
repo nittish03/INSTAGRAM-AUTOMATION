@@ -448,15 +448,12 @@ class ChatMessageAdmin(ModelAdmin):
     @admin.action(description="Approve and Send Message(s)")
     def approve_and_send(self, request, queryset):
         from linkedin.models import Task
+        from django.db import transaction
         from django.utils import timezone
         
-        drafts = queryset.filter(is_draft=True)
+        drafts = queryset.filter(is_draft=True, is_approved=False)
         count = 0
         for draft in drafts:
-            draft.is_approved = True
-            draft.is_draft = False
-            draft.save(update_fields=["is_approved", "is_draft"])
-            
             public_id = None
             campaign_id = None
             deal = None
@@ -476,18 +473,24 @@ class ChatMessageAdmin(ModelAdmin):
             if draft.campaign:
                 campaign_id = draft.campaign.pk
             
-            if public_id and campaign_id:
-                Task.objects.create(
-                    task_type="send_message",
-                    status="pending",
-                    scheduled_at=timezone.now(),
-                    deal=deal,
-                    payload={
-                        "message_id": draft.pk,
-                        "public_id": public_id,
-                        "campaign_id": campaign_id,
-                    }
-                )
+            if public_id and campaign_id and draft.owner_id:
+                with transaction.atomic():
+                    draft.is_approved = True
+                    draft.is_draft = False
+                    draft.save(update_fields=["is_approved", "is_draft"])
+
+                    Task.objects.create(
+                        task_type=Task.TaskType.SEND_MESSAGE,
+                        status=Task.Status.PENDING,
+                        scheduled_at=timezone.now(),
+                        deal=deal,
+                        payload={
+                            "message_id": draft.pk,
+                            "public_id": public_id,
+                            "campaign_id": campaign_id,
+                            "owner_id": draft.owner_id,
+                        }
+                    )
                 count += 1
         
         self.message_user(request, f"Successfully approved {count} messages. Background tasks queued for dispatch.")

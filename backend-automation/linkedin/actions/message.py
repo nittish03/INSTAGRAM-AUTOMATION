@@ -1,14 +1,17 @@
 # linkedin/actions/message.py
 import json
 import logging
+import time
 from typing import Dict, Any
 
 from playwright.sync_api import Error as PlaywrightError, Locator
-from linkedin.browser.nav import goto_page, human_type, dump_page_html
+from linkedin.actions.connect import SELECTORS as CONNECT_SELECTORS
+from linkedin.browser.nav import goto_page, human_type, dump_page_html, find_top_card
+from linkedin.exceptions import TaskSkipped
 
 logger = logging.getLogger(__name__)
 
-LINKEDIN_MESSAGING_URL = "https://www.linkedin.com/messaging/thread/new/"
+LINKEDIN_MESSAGING_URL = "https://www.linkedin.com/messaging/"
 
 # Selector fallback chains: semantic/ARIA first, then class-based.
 # LinkedIn A/B tests UI variants per account and renames classes often.
@@ -38,9 +41,18 @@ SELECTOR_CHAINS = {
         'div[contenteditable="true"]:visible',
     ],
     "send_button": [
+        'button[aria-label="Send"]:visible',
+        'button.msg-form__send-button:visible',
         'button[type="submit"][class*="msg-form"]:visible',
         'form button[type="submit"]:visible',
         'button[type="submit"]:visible',
+    ],
+    # ── Messaging inbox compose ──
+    "new_message_button": [
+        'button.msg-conversations-container__compose-btn:visible',
+        'button[aria-label*="Compose"]:visible',
+        'button[aria-label*="New message"]:visible',
+        'button:has(svg[data-test-icon="compose-medium"]):visible',
     ],
     # ── New thread: recipient search ──
     "connections_input": [
@@ -113,41 +125,144 @@ def _open_compose_popup(session, page) -> bool:
         return False
 
 
-def _type_message(session, page, message: str):
-    """Type a message into the compose popup input area."""
-    input_area = _find(page, "message_input").first
+def _ensure_profile_is_messageable(session) -> None:
+    """Skip sending when LinkedIn still shows this profile is not messageable."""
     try:
-        input_area.fill(message, timeout=10000)
-        logger.debug("Message typed cleanly")
+        top_card = find_top_card(session)
+    except Exception as exc:
+        raise TaskSkipped(f"Cannot verify profile messageability: {exc}") from exc
+
+    pending = top_card.locator('[aria-label*="Pending"]:visible')
+    if pending.count() > 0:
+        raise TaskSkipped("LinkedIn still shows Pending; skipping message send")
+
+    connect = top_card.locator(CONNECT_SELECTORS["invite_to_connect"])
+    if connect.count() > 0:
+        raise TaskSkipped("LinkedIn still shows Connect; skipping message send")
+
+    more = top_card.locator(CONNECT_SELECTORS["more_button"])
+    if more.count() > 0:
+        try:
+            more.first.click(timeout=5_000)
+            session.wait()
+            connect_option = session.page.locator(CONNECT_SELECTORS["connect_option"])
+            if connect_option.count() > 0:
+                raise TaskSkipped("LinkedIn still shows Connect in More menu; skipping message send")
+            session.page.keyboard.press("Escape")
+        except TaskSkipped:
+            raise
+        except Exception as exc:
+            logger.debug("Could not inspect More menu before message send: %s", exc)
+
+
+def _type_message(session, page, message: str, input_area: Locator | None = None) -> Locator:
+    """Type a message into the compose popup input area."""
+    input_area = input_area or _find(page, "message_input").first
+    try:
+        input_area.focus(timeout=5000)
+        input_area.press("ControlOrMeta+A")
+        input_area.press("Backspace")
+        human_type(input_area, message, min_delay=5, max_delay=20)
+        logger.debug("Message typed with keyboard events")
     except Exception:
-        logger.debug("fill() failed → using clipboard paste")
-        input_area.click()
+        logger.debug("keyboard typing failed → using clipboard paste")
+        input_area.focus(timeout=5000)
         page.evaluate(f"() => navigator.clipboard.writeText({json.dumps(message)})")
         session.wait()
-        input_area.press("ControlOrMeta+V")
+        page.keyboard.press("ControlOrMeta+V")
         session.wait()
+    return input_area
 
 
-def _click_send_and_verify(session, page) -> bool:
+def _find_scoped_send_button(page, input_area: Locator, timeout: int = 5000) -> Locator:
+    """Find the Send button for the same LinkedIn compose form as input_area."""
+    scopes = [
+        input_area.locator("xpath=ancestor::form[1]"),
+        input_area.locator("xpath=ancestor::*[contains(@class, 'msg-form')][1]"),
+    ]
+    for scope in scopes:
+        try:
+            scope.first.wait_for(state="attached", timeout=1000)
+        except (PlaywrightError, TimeoutError):
+            continue
+        for sel in SELECTOR_CHAINS["send_button"]:
+            loc = scope.locator(sel)
+            try:
+                loc.first.wait_for(state="attached", timeout=timeout)
+                logger.debug("Selector hit for scoped send_button: %s", sel)
+                return loc.first
+            except (PlaywrightError, TimeoutError):
+                continue
+
+    logger.debug("No scoped send button found; falling back to page-level send button")
+    return _find(page, "send_button", timeout=timeout).first
+
+
+def _log_disabled_send_diagnostics(send_btn: Locator, input_area: Locator) -> None:
+    try:
+        button_html = send_btn.evaluate("el => el.outerHTML")
+    except Exception as exc:
+        button_html = f"<unavailable: {exc}>"
+    try:
+        input_text = input_area.inner_text(timeout=1000).strip()
+    except Exception as exc:
+        input_text = f"<unavailable: {exc}>"
+    logger.error(
+        "Send button stayed disabled → send failed (input_len=%s, button=%s)",
+        len(input_text),
+        button_html[:500],
+    )
+
+
+def _click_send_and_verify(session, page, input_area: Locator) -> bool:
     """Click the send button and verify the message was actually sent.
 
     After clicking send, the input should clear. If text remains,
     the send failed silently.
     """
-    send_btn = _find(page, "send_button").first
-    send_btn.click(force=True)
-    session.wait(4, 5)
+    for attempt in range(2):
+        send_btn = _find_scoped_send_button(page, input_area)
+        deadline = time.monotonic() + 10
+        while not send_btn.is_enabled(timeout=1000):
+            if time.monotonic() >= deadline:
+                _log_disabled_send_diagnostics(send_btn, input_area)
+                return False
+            session.wait(0.5, 1)
+        send_btn.scroll_into_view_if_needed(timeout=2000)
+        send_btn.click(delay=200)
+        session.wait(4, 5)
 
-    try:
-        remaining = _find(page, "message_input", timeout=2000).first
-        text = remaining.inner_text(timeout=2000).strip()
-        if text:
-            logger.error("Message input still has text after send → send failed")
+        try:
+            text = input_area.inner_text(timeout=2000).strip()
+            if not text:
+                return True
+            if attempt == 0:
+                logger.warning("Message input still has text after send click → retrying send")
+                continue
+            logger.error("Message input still has text after send retry → send failed")
             return False
-    except (PlaywrightError, TimeoutError):
-        pass  # input gone → popup closed → success
+        except (PlaywrightError, TimeoutError):
+            pass  # input gone → popup closed → success
+            return True
 
     return True
+
+
+def _discard_compose_draft(page) -> None:
+    """Clear any text typed into LinkedIn so failed sends do not remain as drafts."""
+    try:
+        input_area = _find(page, "message_input", timeout=2000).first
+        input_area.focus(timeout=2000)
+        input_area.press("ControlOrMeta+A")
+        input_area.press("Backspace")
+        logger.debug("Cleared LinkedIn compose text after failed send")
+    except Exception as exc:
+        logger.debug("Could not clear LinkedIn compose text: %s", exc)
+
+    try:
+        page.keyboard.press("Escape")
+    except Exception as exc:
+        logger.debug("Could not close LinkedIn compose popup: %s", exc)
 
 
 # ── Public entry point ────────────────────────────────────────────
@@ -159,21 +274,13 @@ def send_raw_message(session, profile: Dict[str, Any], message: str) -> bool:
     from linkedin.url_utils import public_id_to_url
 
     public_identifier = profile.get("public_identifier")
-    _go_to_profile(session, public_id_to_url(public_identifier), public_identifier)
 
+    _go_to_profile(session, public_id_to_url(public_identifier), public_identifier)
     if _send_msg_pop_up(session, profile, message):
         return True
     dump_page_html(session, profile, category="message_popup")
 
-    logger.warning(
-        "Skipping name-search messaging fallback for %s to avoid same-name cross messaging",
-        public_identifier,
-    )
-
-    if _send_message_via_api(session, profile, message):
-        return True
-
-    logger.error("All send methods failed for %s", public_identifier)
+    logger.error("Profile UI send failed for %s", public_identifier)
     return False
 
 
@@ -187,14 +294,16 @@ def _send_msg_pop_up(session, profile: Dict[str, Any], message: str) -> bool:
     public_identifier = profile.get("public_identifier")
 
     try:
+        _ensure_profile_is_messageable(session)
+
         if not _open_compose_popup(session, page):
             return False
 
         session.wait()
-        _type_message(session, page, message)
+        input_area = _type_message(session, page, message)
 
-        if not _click_send_and_verify(session, page):
-            page.keyboard.press("Escape")
+        if not _click_send_and_verify(session, page, input_area):
+            _discard_compose_draft(page)
             session.wait()
             return False
 
@@ -206,11 +315,12 @@ def _send_msg_pop_up(session, profile: Dict[str, Any], message: str) -> bool:
 
     except (PlaywrightError, TimeoutError) as e:
         logger.error("Failed to send message to %s → %s", public_identifier, e)
+        _discard_compose_draft(page)
         return False
 
 
 def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
-    """Navigate to /messaging/thread/new/, search by name, compose, send."""
+    """Use LinkedIn Messaging's normal compose flow: New message → recipient → Send."""
     public_identifier = profile.get("public_identifier")
     full_name = profile.get("full_name") or \
         f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
@@ -226,6 +336,9 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
             error_message="Error opening messaging",
         )
 
+        _find(session.page, "new_message_button").first.click(delay=200)
+        session.wait(1, 2)
+
         conn_input = _find(session.page, "connections_input").first
         conn_input.fill("")
         session.wait(0.5, 1)
@@ -233,26 +346,37 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
         human_type(conn_input, full_name, min_delay=10, max_delay=50)
         session.wait(2, 3)
 
-        # Verify the first search result matches the target name exactly
-        item = _find(session.page, "search_result_row").first
-        dt = item.locator("dt").first
-        name_in_result = dt.inner_text(timeout=5_000).split("•")[0].strip()
-        if name_in_result.lower() != full_name.lower():
+        rows = _find(session.page, "search_result_row")
+        item = None
+        name_in_result = ""
+        for i in range(min(rows.count(), 5)):
+            row = rows.nth(i)
+            row_text = row.inner_text(timeout=5_000)
+            row_name = row_text.split("•")[0].split("\n")[0].strip()
+            if row_name.lower() == full_name.lower() or full_name.lower() in row_text.lower():
+                item = row
+                name_in_result = row_name or row_text.strip()
+                break
+        if item is None:
             logger.error(
-                "Recipient mismatch for %s: expected '%s' but got '%s' — aborting",
-                public_identifier, full_name, name_in_result,
+                "Recipient not found in messaging compose for %s: expected '%s'",
+                public_identifier, full_name,
             )
             return False
 
         item.scroll_into_view_if_needed()
         item.click(delay=200)
         session.wait(1, 2)
+        logger.debug("Selected messaging recipient for %s → %s", public_identifier, name_in_result)
 
-        human_type(_find(session.page, "compose_input").first, message, min_delay=10, max_delay=50)
+        input_area = _find(session.page, "compose_input").first
+        input_area = _type_message(session, session.page, message, input_area=input_area)
 
-        _find(session.page, "compose_send").first.click(delay=200)
-        session.wait(0.5, 1)
-        logger.info("Message sent to %s (direct thread)", public_identifier)
+        if not _click_send_and_verify(session, session.page, input_area):
+            _discard_compose_draft(session.page)
+            return False
+
+        logger.info("Message sent to %s (messaging compose)", public_identifier)
         return True
     except (PlaywrightError, TimeoutError) as e:
         logger.error("Failed to send message to %s (direct thread) → %s", public_identifier, e)

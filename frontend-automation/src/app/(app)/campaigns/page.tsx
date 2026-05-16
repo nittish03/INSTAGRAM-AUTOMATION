@@ -56,6 +56,7 @@ export default function CampaignsPage() {
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(!cachedCampaigns);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [mode, setMode] = useState<ModalMode>({ type: "closed" });
   const [form, setForm] = useState<FormState>(blankForm);
 
@@ -158,6 +159,27 @@ export default function CampaignsPage() {
     }
   }
 
+  async function deleteCampaign(c: Campaign) {
+    const confirmed = window.confirm(
+      `Delete campaign "${c.name}"? This also removes its queued tasks and related deals.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(c.id);
+    setError("");
+    setInfo("");
+    try {
+      await api.deleteCampaign(c.id);
+      setInfo(`Campaign "${c.name}" deleted.`);
+      pageCache.clear(CAMPAIGNS_KEY);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete campaign");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const isEdit = mode.type === "edit";
   const isOpen = mode.type !== "closed";
 
@@ -256,9 +278,18 @@ export default function CampaignsPage() {
                         )}
                       </td>
                       <td className="td">
-                        <button className="btn-secondary" onClick={() => openEdit(c)}>
-                          Edit
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button className="btn-secondary" onClick={() => openEdit(c)}>
+                            Edit
+                          </button>
+                          <button
+                            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-200 transition hover:border-rose-400 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => void deleteCampaign(c)}
+                            disabled={deletingId === c.id}
+                          >
+                            {deletingId === c.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

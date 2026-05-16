@@ -79,7 +79,7 @@ class DraftRegenerationTest(TestCase):
             owner=self.user,
         )
 
-        messages = _read_from_db(self.lead, self.lead_ct, include_drafts=False)
+        messages = _read_from_db(self.lead, self.lead_ct, owner=self.user, include_drafts=False)
 
         self.assertEqual([m["text"] for m in messages], ["Already sent"])
 

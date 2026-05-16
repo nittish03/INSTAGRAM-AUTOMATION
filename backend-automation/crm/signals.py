@@ -48,17 +48,30 @@ def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
     )
     if not deal or not deal.lead or not deal.lead.public_identifier:
         return
+    campaign_users = list(deal.campaign.users.order_by("id")[:2])
+    if len(campaign_users) != 1:
+        logger.debug(
+            "follow_up signal skipped for %s (deal=%s): campaign owner is ambiguous",
+            deal.lead.public_identifier,
+            deal.pk,
+        )
+        return
+    owner_id = campaign_users[0].pk
 
     lead_ct = ContentType.objects.get_for_model(deal.lead.__class__)
     has_pending_draft = ChatMessage.objects.filter(
         content_type=lead_ct,
         object_id=deal.lead.pk,
+        campaign=deal.campaign,
+        owner_id=owner_id,
         is_draft=True,
     ).exists()
     has_send_task = Task.objects.filter(
         task_type=Task.TaskType.SEND_MESSAGE,
         status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+        payload__campaign_id=deal.campaign_id,
         payload__public_id=deal.lead.public_identifier,
+        payload__owner_id=owner_id,
     ).exists()
     if has_pending_draft or has_send_task:
         return
@@ -68,6 +81,7 @@ def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
         deal.lead.public_identifier,
         delay_seconds=random.uniform(5, 60),
         deal=deal,
+        owner_id=owner_id,
     )
     logger.info(
         "follow_up enqueued via signal for %s (deal=%s)",

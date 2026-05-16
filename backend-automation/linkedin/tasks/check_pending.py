@@ -30,6 +30,9 @@ def handle_check_pending(task, session, qualifiers):
 
     campaign_id = payload["campaign_id"]
     backoff_hours = payload.get("backoff_hours", 24)
+    owner_id = getattr(getattr(session, "django_user", None), "pk", None)
+    if not isinstance(owner_id, int):
+        owner_id = None
 
     logger.info(
         "[%s] %s %s",
@@ -58,8 +61,22 @@ def handle_check_pending(task, session, qualifiers):
     try:
         assessment = get_connection_assessment(session, profile)
     except SkipProfile as e:
-        logger.warning("Skipping %s: %s", public_id, e)
-        set_profile_state(session, public_id, ProfileState.FAILED.value)
+        logger.warning(
+            "Could not verify pending status for %s (%s) — keeping Pending and rescheduling",
+            public_id,
+            e,
+        )
+        new_backoff = min(backoff_hours * 2, 6)
+        with transaction.atomic():
+            deal.backoff_hours = new_backoff
+            deal.save(update_fields=["backoff_hours"])
+        enqueue_check_pending(
+            campaign_id,
+            public_id,
+            backoff_hours=new_backoff,
+            deal=deal,
+            owner_id=owner_id,
+        )
         return
 
     if assessment.state == ProfileState.CONNECTED and deal:
@@ -80,7 +97,11 @@ def handle_check_pending(task, session, qualifiers):
     set_profile_state(session, public_id, assessment.state.value)
 
     if assessment.state == ProfileState.CONNECTED:
-        enqueue_follow_up(campaign_id, public_id, deal=deal)
+        if deal and deal.lead_id:
+            from google_integration.sheet_sync import sync_lead_to_google_sheet
+
+            sync_lead_to_google_sheet(deal.lead)
+        enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
     elif assessment.state == ProfileState.PENDING:
         if deal and deal.lead_id:
             from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
@@ -94,7 +115,13 @@ def handle_check_pending(task, session, qualifiers):
             if deal:
                 deal.backoff_hours = new_backoff
                 deal.save(update_fields=["backoff_hours"])
-        delay_hours = enqueue_check_pending(campaign_id, public_id, backoff_hours=new_backoff, deal=deal)
+        delay_hours = enqueue_check_pending(
+            campaign_id,
+            public_id,
+            backoff_hours=new_backoff,
+            deal=deal,
+            owner_id=owner_id,
+        )
         logger.info(
             "%s still pending — scheduled in %.1fh (backoff %.1fh → %.1fh)",
             public_id, delay_hours, backoff_hours, new_backoff,

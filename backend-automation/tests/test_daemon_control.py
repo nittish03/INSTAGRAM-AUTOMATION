@@ -255,3 +255,87 @@ class DaemonControlApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["daemon"]["running"])
         mock_stop.assert_called_once()
+
+    def test_approve_draft_send_task_records_owner(self):
+        from chat.models import ChatMessage
+        from crm.models import Lead
+        from django.contrib.contenttypes.models import ContentType
+        from linkedin.models import Campaign, Task
+
+        self.client.login(username="daemon_staff", password="testpass123")
+        campaign = Campaign.objects.create(name="Owner Scoped Campaign")
+        lead = Lead.objects.create(public_identifier="owner-scope")
+        draft = ChatMessage.objects.create(
+            content_type=ContentType.objects.get_for_model(Lead),
+            object_id=lead.pk,
+            campaign=campaign,
+            owner=self.staff,
+            content="Approved message",
+            linkedin_urn="draft_owner_scope",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+
+        response = self.client.post(
+            "/api/messages/drafts/approve/",
+            data=json.dumps({"ids": [draft.pk]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task = Task.objects.get(task_type=Task.TaskType.SEND_MESSAGE, payload__message_id=draft.pk)
+        self.assertEqual(task.payload["owner_id"], self.staff.pk)
+
+    def test_approve_draft_does_not_cross_owner_boundary(self):
+        from chat.models import ChatMessage
+        from crm.models import Lead
+        from django.contrib.auth.models import User
+        from django.contrib.contenttypes.models import ContentType
+        from linkedin.models import Campaign, Task
+
+        other_user = User.objects.create_user(username="other_draft_staff", password="testpass123", is_staff=True)
+        self.client.login(username="daemon_staff", password="testpass123")
+        campaign = Campaign.objects.create(name="Other Owner Campaign")
+        lead = Lead.objects.create(public_identifier="other-owner-scope")
+        draft = ChatMessage.objects.create(
+            content_type=ContentType.objects.get_for_model(Lead),
+            object_id=lead.pk,
+            campaign=campaign,
+            owner=other_user,
+            content="Other owner's message",
+            linkedin_urn="draft_other_owner_scope",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+
+        response = self.client.post(
+            "/api/messages/drafts/approve/",
+            data=json.dumps({"ids": [draft.pk]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["approved"], 0)
+        draft.refresh_from_db()
+        self.assertTrue(draft.is_draft)
+        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.SEND_MESSAGE, payload__message_id=draft.pk).exists())
+
+    def test_delete_campaign_removes_campaign_tasks(self):
+        from django.utils import timezone
+        from linkedin.models import Campaign, Task
+
+        self.client.login(username="daemon_staff", password="testpass123")
+        campaign = Campaign.objects.create(name="Delete Me")
+        task = Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            scheduled_at=timezone.now(),
+            payload={"campaign_id": campaign.pk},
+        )
+
+        response = self.client.delete(f"/api/campaigns/{campaign.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Campaign.objects.filter(pk=campaign.pk).exists())
+        self.assertFalse(Task.objects.filter(pk=task.pk).exists())

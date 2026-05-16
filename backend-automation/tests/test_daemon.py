@@ -123,6 +123,113 @@ class DaemonHardeningTest(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, Task.Status.PENDING)
 
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon._HANDLERS")
+    @patch("linkedin.daemon.failure_diagnostics")
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_daemon_only_claims_tasks_for_session_campaigns(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+        _mock_diag,
+        mock_handlers,
+    ):
+        other_campaign = Campaign.objects.create(name="Other Campaign")
+        other_user = User.objects.create_user(username="other_daemon_user")
+        other_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() - datetime.timedelta(minutes=2),
+            payload={"campaign_id": other_campaign.pk, "public_id": "other"},
+        )
+        ownerless_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() - datetime.timedelta(minutes=2),
+            payload={"campaign_id": self.campaign.pk, "public_id": "ownerless"},
+        )
+        wrong_owner_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() - datetime.timedelta(minutes=2),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": "wrong-owner",
+                "owner_id": other_user.pk,
+            },
+        )
+        own_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() - datetime.timedelta(minutes=1),
+            payload={"campaign_id": self.campaign.pk, "public_id": "own", "owner_id": self.user.pk},
+        )
+
+        mock_handlers.get.return_value = MagicMock()
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+        mock_session.django_user = self.user
+
+        with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
+            try:
+                run_daemon(mock_session)
+            except KeyboardInterrupt:
+                pass
+
+        own_task.refresh_from_db()
+        other_task.refresh_from_db()
+        ownerless_task.refresh_from_db()
+        wrong_owner_task.refresh_from_db()
+        self.assertEqual(own_task.status, Task.Status.COMPLETED)
+        self.assertEqual(other_task.status, Task.Status.PENDING)
+        self.assertEqual(ownerless_task.status, Task.Status.PENDING)
+        self.assertEqual(wrong_owner_task.status, Task.Status.PENDING)
+
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon._HANDLERS")
+    @patch("linkedin.daemon.failure_diagnostics")
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_daemon_prioritizes_send_message_over_background_tasks(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+        _mock_diag,
+        mock_handlers,
+    ):
+        older_check = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() - datetime.timedelta(hours=2),
+            payload={"campaign_id": self.campaign.pk, "public_id": "check", "owner_id": self.user.pk},
+        )
+        send_task = Task.objects.create(
+            task_type=Task.TaskType.SEND_MESSAGE,
+            scheduled_at=timezone.now(),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": "send",
+                "message_id": 123,
+                "owner_id": self.user.pk,
+            },
+        )
+        claimed = []
+
+        def handler(task, *_args):
+            claimed.append(task.pk)
+
+        mock_handlers.get.return_value = handler
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+        mock_session.django_user = self.user
+
+        with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
+            try:
+                run_daemon(mock_session)
+            except KeyboardInterrupt:
+                pass
+
+        self.assertGreaterEqual(len(claimed), 2)
+        self.assertEqual(claimed[0], send_task.pk)
+        self.assertEqual(claimed[1], older_check.pk)
+
+
 class RunDaemonCommandTests(TestCase):
     def test_launcher_pid_arg_is_accepted_for_compatibility(self):
         from linkedin.management.commands.rundaemon import Command
