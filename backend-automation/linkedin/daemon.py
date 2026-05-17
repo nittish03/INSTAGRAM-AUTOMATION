@@ -338,8 +338,8 @@ def run_daemon(session):
     )
 
     # Single-threaded: one task at a time. Keep polling forever until the
-    # operator stops the process. Pending tasks are processed immediately;
-    # ``scheduled_at`` is retained for audit/UI display but no longer gates work.
+    # operator stops the process. Only due tasks run; future tasks stay queued
+    # while the daemon polls at a short interval instead of sleeping until then.
     while True:
         _close_old_connections_for_daemon()
         pause = seconds_until_active()
@@ -354,7 +354,9 @@ def run_daemon(session):
             time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
             continue
 
-        claim_scope = _prioritize_claims(task_scope.filter(status=Task.Status.PENDING))
+        claim_scope = _prioritize_claims(
+            task_scope.filter(status=Task.Status.PENDING, scheduled_at__lte=timezone.now())
+        )
         if new_connection_invites_paused():
             claim_scope = claim_scope.exclude(task_type=Task.TaskType.CONNECT)
         task = claim_scope.first()

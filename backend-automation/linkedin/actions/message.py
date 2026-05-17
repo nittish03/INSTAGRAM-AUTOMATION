@@ -21,6 +21,8 @@ SELECTOR_CHAINS = {
     "message_button": [
         'button[aria-label*="Message"]:visible',
         'button:has-text("Message"):visible',
+        'a[href*="/messaging/compose/"]:has-text("Message"):visible',
+        'a[href*="/messaging/compose/"][href*="NON_SELF_PROFILE_VIEW"]:visible',
     ],
     "overflow_action": [
         'button[id$="profile-overflow-action"]:visible',
@@ -47,6 +49,11 @@ SELECTOR_CHAINS = {
         'form button[type="submit"]:visible',
         'button[type="submit"]:visible',
     ],
+    "message_overlay": [
+        'div.msg-overlay-conversation-bubble:visible',
+        'div[class*="msg-overlay"]:has(div[role="textbox"]:visible):visible',
+        'section:has(div[role="textbox"][aria-label*="Write a message"]:visible):visible',
+    ],
     # ── Messaging inbox compose ──
     "new_message_button": [
         'button.msg-conversations-container__compose-btn:visible',
@@ -64,7 +71,16 @@ SELECTOR_CHAINS = {
     "search_result_row": [
         'ul[role="listbox"] li[role="option"]',
         'div[class*="msg-connections-typeahead__search-result-row"]',
+        'div[class*="msg-connections-typeahead"] li',
+        'div[role="option"]:visible',
         'li[class*="search-result"]',
+    ],
+    "recipient_chip": [
+        'span[class*="msg-chip__text"]:visible',
+        'span[class*="msg-connections-typeahead__recipient"]:visible',
+        'li[class*="msg-connections-typeahead__recipient"]:visible',
+        '[class*="msg-connections-typeahead"] [class*="artdeco-pill"]:visible',
+        '[aria-label*="Remove recipient"]:visible',
     ],
     # ── Thread: compose area ──
     "compose_input": [
@@ -101,28 +117,52 @@ def _find(page, key: str, timeout: int = 5000) -> Locator:
     raise PlaywrightError(f"No selector matched for '{key}'. Tried: {tried}")
 
 
-def _open_compose_popup(session, page) -> bool:
-    """Open the messaging compose popup on the current profile page.
+def _visible_count(page_or_scope, selectors: list[str]) -> int:
+    return sum(page_or_scope.locator(selector).count() for selector in selectors)
 
-    Tries the direct Message button first, then More → Message.
-    Returns True if the popup was opened.
-    """
+
+def _latest_message_overlay(page, before_count: int = 0) -> Locator:
+    overlays = page.locator(", ".join(SELECTOR_CHAINS["message_overlay"]))
     try:
-        direct = _find(page, "message_button", timeout=3000)
-        direct.first.click()
-        logger.debug("Opened compose popup (direct button)")
-        return True
-    except PlaywrightError:
+        overlays.nth(max(before_count, 0)).wait_for(state="visible", timeout=10_000)
+    except (PlaywrightError, TimeoutError):
         pass
+    count = overlays.count()
+    if count > 0:
+        index = min(max(before_count, 0), count - 1)
+        return overlays.nth(index)
+    return page.locator("body")
 
+
+def _find_profile_message_button(session, timeout: int = 8000) -> Locator:
+    """Find the visible Message button in the current profile's top card."""
+    top_card = find_top_card(session)
+    for selector in SELECTOR_CHAINS["message_button"]:
+        loc = top_card.locator(selector)
+        try:
+            loc.first.wait_for(state="visible", timeout=timeout)
+            logger.debug("Selector hit for profile message_button: %s", selector)
+            return loc.first
+        except (PlaywrightError, TimeoutError):
+            continue
+    tried = ", ".join(SELECTOR_CHAINS["message_button"])
+    raise PlaywrightError(f"No profile Message button matched. Tried: {tried}")
+
+
+def _open_compose_popup(session, page) -> Locator | None:
+    """Open the direct message popup from the current profile's top card."""
     try:
-        _find(page, "overflow_action").first.click()
-        session.wait()
-        _find(page, "message_option").first.click()
-        logger.debug("Opened compose popup (More → Message)")
-        return True
-    except PlaywrightError:
-        return False
+        existing_overlays = _visible_count(page, SELECTOR_CHAINS["message_overlay"])
+        direct = _find_profile_message_button(session)
+        direct.scroll_into_view_if_needed(timeout=5000)
+        direct.click(delay=200)
+        overlay = _latest_message_overlay(page, before_count=existing_overlays)
+        _find(overlay, "message_input", timeout=10_000)
+        logger.debug("Opened compose popup from profile Message button")
+        return overlay
+    except (PlaywrightError, TimeoutError) as exc:
+        logger.error("Direct profile Message button did not open a message input: %s", exc)
+        return None
 
 
 def _ensure_profile_is_messageable(session) -> None:
@@ -136,6 +176,10 @@ def _ensure_profile_is_messageable(session) -> None:
     if pending.count() > 0:
         raise TaskSkipped("LinkedIn still shows Pending; skipping message send")
 
+    direct_message = top_card.locator(", ".join(SELECTOR_CHAINS["message_button"]))
+    if direct_message.count() > 0:
+        return
+
     connect = top_card.locator(CONNECT_SELECTORS["invite_to_connect"])
     if connect.count() > 0:
         raise TaskSkipped("LinkedIn still shows Connect; skipping message send")
@@ -145,8 +189,22 @@ def _ensure_profile_is_messageable(session) -> None:
         try:
             more.first.click(timeout=5_000)
             session.wait()
-            connect_option = session.page.locator(CONNECT_SELECTORS["connect_option"])
-            if connect_option.count() > 0:
+            menu = session.page.locator(
+                'div[role="menu"]:visible, div.artdeco-dropdown__content:visible'
+            )
+            menu_scope = menu.first if menu.count() > 0 else session.page
+            message_option_selectors = [
+                'a[href*="/messaging/"]:visible',
+                '[role="menuitem"]:has-text("Message"):visible',
+                'li:has-text("Message"):visible',
+                *SELECTOR_CHAINS["message_option"],
+            ]
+            message_option_count = sum(
+                menu_scope.locator(selector).count()
+                for selector in message_option_selectors
+            )
+            connect_option = menu_scope.locator(CONNECT_SELECTORS["connect_option"])
+            if connect_option.count() > 0 and message_option_count == 0:
                 raise TaskSkipped("LinkedIn still shows Connect in More menu; skipping message send")
             session.page.keyboard.press("Escape")
         except TaskSkipped:
@@ -163,15 +221,59 @@ def _type_message(session, page, message: str, input_area: Locator | None = None
         input_area.press("ControlOrMeta+A")
         input_area.press("Backspace")
         human_type(input_area, message, min_delay=5, max_delay=20)
+        _dispatch_compose_input_events(input_area)
         logger.debug("Message typed with keyboard events")
+    except Exception as type_exc:
+        logger.debug("keyboard typing failed → using fill/paste fallback: %s", type_exc)
+        try:
+            input_area.focus(timeout=5000)
+            input_area.fill("", timeout=5000)
+            input_area.fill(message, timeout=5000)
+            _dispatch_compose_input_events(input_area)
+            logger.debug("Message filled into contenteditable compose input")
+        except Exception:
+            logger.debug("contenteditable fill failed → using clipboard paste")
+            _replace_compose_text_with_paste(session, page, input_area, message)
+    return input_area
+
+
+def _dispatch_compose_input_events(input_area: Locator) -> None:
+    """Tell LinkedIn's React compose form that contenteditable text changed."""
+    try:
+        input_area.evaluate(
+            """el => {
+                const text = el.innerText || el.textContent || "";
+                el.dispatchEvent(new InputEvent("beforeinput", {
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: "insertText",
+                    data: text
+                }));
+                el.dispatchEvent(new InputEvent("input", {
+                    bubbles: true,
+                    inputType: "insertText",
+                    data: text
+                }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+            }"""
+        )
+    except Exception as exc:
+        logger.debug("Could not dispatch compose input events: %s", exc)
+
+
+def _replace_compose_text_with_paste(session, page, input_area: Locator, message: str) -> None:
+    input_area.focus(timeout=5000)
+    try:
+        input_area.fill("", timeout=5000)
+        input_area.fill(message, timeout=5000)
     except Exception:
-        logger.debug("keyboard typing failed → using clipboard paste")
-        input_area.focus(timeout=5000)
+        input_area.press("ControlOrMeta+A")
+        input_area.press("Backspace")
         page.evaluate(f"() => navigator.clipboard.writeText({json.dumps(message)})")
         session.wait()
         page.keyboard.press("ControlOrMeta+V")
         session.wait()
-    return input_area
+    _dispatch_compose_input_events(input_area)
 
 
 def _find_scoped_send_button(page, input_area: Locator, timeout: int = 5000) -> Locator:
@@ -214,7 +316,30 @@ def _log_disabled_send_diagnostics(send_btn: Locator, input_area: Locator) -> No
     )
 
 
-def _click_send_and_verify(session, page, input_area: Locator) -> bool:
+def _input_cleared_after_send(input_area: Locator) -> bool:
+    try:
+        text = input_area.inner_text(timeout=2000).strip()
+        return not text
+    except (PlaywrightError, TimeoutError):
+        return True
+
+
+def _try_keyboard_send_shortcuts(session, page, input_area: Locator) -> bool:
+    """Use LinkedIn's compose shortcuts when the visible button stays disabled."""
+    for shortcut in ("Control+Enter", "Meta+Enter", "Enter"):
+        try:
+            input_area.focus(timeout=2000)
+            page.keyboard.press(shortcut)
+            session.wait(3, 4)
+            if _input_cleared_after_send(input_area):
+                logger.info("Message sent using keyboard shortcut %s", shortcut)
+                return True
+        except Exception as exc:
+            logger.debug("Keyboard send shortcut %s failed: %s", shortcut, exc)
+    return False
+
+
+def _click_send_and_verify(session, page, input_area: Locator, message: str) -> bool:
     """Click the send button and verify the message was actually sent.
 
     After clicking send, the input should clear. If text remains,
@@ -225,9 +350,21 @@ def _click_send_and_verify(session, page, input_area: Locator) -> bool:
         deadline = time.monotonic() + 10
         while not send_btn.is_enabled(timeout=1000):
             if time.monotonic() >= deadline:
+                if attempt == 0:
+                    logger.warning("Send button stayed disabled after typing → retrying compose via paste")
+                    _replace_compose_text_with_paste(session, page, input_area, message)
+                    session.wait(1, 2)
+                    break
+                logger.warning("Send button stayed disabled after paste → trying keyboard send shortcuts")
+                if _try_keyboard_send_shortcuts(session, page, input_area):
+                    return True
                 _log_disabled_send_diagnostics(send_btn, input_area)
                 return False
             session.wait(0.5, 1)
+        else:
+            pass
+        if not send_btn.is_enabled(timeout=1000):
+            continue
         send_btn.scroll_into_view_if_needed(timeout=2000)
         send_btn.click(delay=200)
         session.wait(4, 5)
@@ -280,6 +417,9 @@ def send_raw_message(session, profile: Dict[str, Any], message: str) -> bool:
         return True
     dump_page_html(session, profile, category="message_popup")
 
+    if _send_message_via_api(session, profile, message):
+        return True
+
     logger.error("Profile UI send failed for %s", public_identifier)
     return False
 
@@ -296,13 +436,14 @@ def _send_msg_pop_up(session, profile: Dict[str, Any], message: str) -> bool:
     try:
         _ensure_profile_is_messageable(session)
 
-        if not _open_compose_popup(session, page):
+        compose_scope = _open_compose_popup(session, page)
+        if compose_scope is None:
             return False
 
         session.wait()
-        input_area = _type_message(session, page, message)
+        input_area = _type_message(session, compose_scope, message)
 
-        if not _click_send_and_verify(session, page, input_area):
+        if not _click_send_and_verify(session, page, input_area, message):
             _discard_compose_draft(page)
             session.wait()
             return False
@@ -372,7 +513,7 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
         input_area = _find(session.page, "compose_input").first
         input_area = _type_message(session, session.page, message, input_area=input_area)
 
-        if not _click_send_and_verify(session, session.page, input_area):
+        if not _click_send_and_verify(session, session.page, input_area, message):
             _discard_compose_draft(session.page)
             return False
 

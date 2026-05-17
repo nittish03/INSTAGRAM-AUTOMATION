@@ -134,6 +134,8 @@ class TaskHardeningTest(TestCase):
             lead=connected_lead,
             campaign=self.campaign,
             state=ProfileState.CONNECTED.value,
+            connection_assessment_source="api_degree_1",
+            connection_assessment_confidence=0.95,
         )
         running_task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
@@ -430,13 +432,87 @@ class TaskHardeningTest(TestCase):
         with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
             "linkedin.agents.follow_up.run_follow_up_agent",
         ) as mock_agent:
-            with self.assertRaisesRegex(TaskSkipped, "requires a verified connected profile"):
+            with self.assertRaisesRegex(TaskSkipped, "requires an API-verified connected profile"):
                 handle_follow_up(task, session, {})
 
         mock_agent.assert_not_called()
         deal.refresh_from_db()
         self.assertEqual(deal.state, ProfileState.QUALIFIED)
         self.assertFalse(ChatMessage.objects.filter(object_id=lead.pk, is_draft=True).exists())
+
+    def test_message_drafts_api_only_shows_connected_deal_drafts(self):
+        import json
+        from django.contrib.contenttypes.models import ContentType
+        from django.test import RequestFactory
+        from linkedin.views import api_message_drafts, api_message_drafts_approve
+        from chat.models import ChatMessage
+
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        lead_ct = ContentType.objects.get_for_model(Lead)
+        connected_lead = Lead.objects.create(
+            public_identifier="connected-draft",
+            linkedin_url="https://www.linkedin.com/in/connected-draft/",
+        )
+        pending_lead = Lead.objects.create(
+            public_identifier="pending-draft",
+            linkedin_url="https://www.linkedin.com/in/pending-draft/",
+        )
+        connected_deal = Deal.objects.create(
+            lead=connected_lead,
+            campaign=self.campaign,
+            state=ProfileState.CONNECTED.value,
+            connection_assessment_source="api_degree_1",
+            connection_assessment_confidence=0.95,
+        )
+        Deal.objects.create(
+            lead=pending_lead,
+            campaign=self.campaign,
+            state=ProfileState.PENDING.value,
+        )
+        connected_draft = ChatMessage.objects.create(
+            content_type=lead_ct,
+            object_id=connected_lead.pk,
+            campaign=self.campaign,
+            owner=self.user,
+            content="Connected draft",
+            linkedin_urn="draft_connected_visible",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+        pending_draft = ChatMessage.objects.create(
+            content_type=lead_ct,
+            object_id=pending_lead.pk,
+            campaign=self.campaign,
+            owner=self.user,
+            content="Pending draft",
+            linkedin_urn="draft_pending_hidden",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+        rf = RequestFactory()
+
+        list_request = rf.get("/api/messages/drafts/")
+        list_request.user = self.user
+        response = api_message_drafts(list_request)
+        payload = json.loads(response.content)
+        self.assertEqual([item["id"] for item in payload["items"]], [connected_draft.pk])
+
+        approve_request = rf.post(
+            "/api/messages/drafts/approve/",
+            data=json.dumps({"ids": [connected_draft.pk, pending_draft.pk]}),
+            content_type="application/json",
+        )
+        approve_request.user = self.user
+        response = api_message_drafts_approve(approve_request)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["approved"], 1)
+        pending_draft.refresh_from_db()
+        self.assertTrue(pending_draft.is_draft)
+        self.assertFalse(pending_draft.is_approved)
+        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.SEND_MESSAGE, deal=connected_deal).exists())
 
     def test_follow_up_draft_dedup_is_scoped_to_linkedin_profile_owner(self):
         from django.contrib.auth.models import User

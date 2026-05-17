@@ -61,6 +61,31 @@ def _latest_conversation_message_payload(content_type_id: int, object_id: int, o
     )
     return _message_context_payload(latest_message)
 
+
+def _connected_unapproved_draft_qs(user):
+    """Drafts visible/approvable in the app: only leads connected in this campaign."""
+    from django.contrib.contenttypes.models import ContentType
+    from django.db.models import Exists, OuterRef
+
+    lead_ct = ContentType.objects.get_for_model(Lead)
+    connected_deal = Deal.objects.filter(
+        lead_id=OuterRef("object_id"),
+        campaign_id=OuterRef("campaign_id"),
+        state=ProfileState.CONNECTED.value,
+        connection_assessment_source="api_degree_1",
+    )
+    return (
+        ChatMessage.objects.filter(
+            owner=user,
+            content_type=lead_ct,
+            is_draft=True,
+            is_approved=False,
+        )
+        .annotate(_has_connected_deal=Exists(connected_deal))
+        .filter(_has_connected_deal=True)
+    )
+
+
 def dashboard_callback(request, context):
     """
     Enhanced Leadway Dashboard Callback.
@@ -76,11 +101,7 @@ def dashboard_callback(request, context):
     today = timezone.localdate()
     last_week = timezone.now() - timedelta(days=7)
 
-    drafts_awaiting = ChatMessage.objects.filter(
-        owner=request.user,
-        is_draft=True,
-        is_approved=False,
-    ).count()
+    drafts_awaiting = _connected_unapproved_draft_qs(request.user).count()
     try:
         drafts_url = (
             reverse("admin:chat_chatmessage_changelist")
@@ -255,11 +276,7 @@ def api_dashboard(request):
         today=Count("id", filter=Q(created_at__date=today)),
         week=Count("id", filter=Q(created_at__gte=last_week)),
     )
-    drafts_awaiting = ChatMessage.objects.filter(
-        owner=request.user,
-        is_draft=True,
-        is_approved=False,
-    ).count()
+    drafts_awaiting = _connected_unapproved_draft_qs(request.user).count()
 
     connected = deal_stats["connected"] or 0
     failed = deal_stats["failed"] or 0
@@ -748,7 +765,7 @@ def api_message_drafts(request):
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
     qs = (
-        ChatMessage.objects.filter(owner=request.user, is_draft=True, is_approved=False)
+        _connected_unapproved_draft_qs(request.user)
         .select_related("campaign", "owner")
         .order_by("-creation_date")
     )
@@ -1782,12 +1799,7 @@ def api_message_drafts_approve(request):
     if not isinstance(ids, list) or not ids:
         return JsonResponse({"ok": False, "error": "ids[] is required"}, status=400)
 
-    drafts = ChatMessage.objects.filter(
-        pk__in=ids,
-        owner=request.user,
-        is_draft=True,
-        is_approved=False,
-    )
+    drafts = _connected_unapproved_draft_qs(request.user).filter(pk__in=ids)
     approved = 0
     for draft in drafts:
         public_id = ""

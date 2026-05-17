@@ -118,10 +118,16 @@ def _ensure_header_row(account, sid: str, tab: str) -> None:
         update_values(account, sid, f"{tab}!A1:J1", [SHEET_HEADER])
 
 
-def _next_row_index(account, sid: str, tab: str) -> int:
-    """Lowest 1-based row index with no data in column A (minimum 2 to skip header)."""
-    col_a = get_values(account, sid, f"{tab}!A:A")
-    return max(len(col_a) + 1, 2)
+def _row_has_data(row: list[str] | None) -> bool:
+    return any(str(cell or "").strip() for cell in (row or []))
+
+
+def _next_empty_row_index(rows: list[list[str]]) -> int:
+    """First empty 1-based A:J row, ignoring Google's append-table heuristics."""
+    for idx, row in enumerate(rows[1:], start=2):
+        if not _row_has_data(row):
+            return idx
+    return max(len(rows) + 1, 2)
 
 
 def _normalize_linkedin_cell(raw: str) -> str:
@@ -321,7 +327,14 @@ def _sync_lead_status_to_google_sheet(
             row[7] = existing_row[7]
 
         if row_idx is None:
-            append_rows(account, sid, f"{tab}!A:J", [row])
+            rows = get_values(account, sid, f"{tab}!A:J", value_render_option="FORMULA")
+            row_idx = _next_empty_row_index(rows)
+            update_values(
+                account,
+                sid,
+                f"{tab}!A{row_idx}:J{row_idx}",
+                [row],
+            )
         else:
             update_values(
                 account,
@@ -338,6 +351,9 @@ def _sync_lead_status_to_google_sheet(
         LeadModel.objects.filter(pk=lead.pk, sheet_exported_at__isnull=True).update(
             sheet_exported_at=timezone.now()
         )
+    else:
+        LeadModel = lead.__class__
+        LeadModel.objects.filter(pk=lead.pk).update(sheet_exported_at=None)
     logger.info(
         "Google Sheet sync: upserted lead pk=%s (%s) as %s [%s]",
         lead.pk,
@@ -359,12 +375,42 @@ def sync_pending_lead_to_google_sheet(
     has_pending_deal = lead.deal_set.filter(state=ProfileState.PENDING).exists()
     if not has_pending_deal:
         return False
+    if lead.deal_set.filter(
+        state=ProfileState.CONNECTED,
+        connection_assessment_source="api_degree_1",
+    ).exists():
+        return False
 
     return _sync_lead_status_to_google_sheet(
         lead,
         status_label=ProfileState.PENDING.value,
         reason_code=reason_code,
-        skip_if_existing_statuses={ProfileState.PENDING.value, ProfileState.CONNECTED.value},
+        skip_if_existing_statuses={ProfileState.PENDING.value},
+    )
+
+
+def sync_qualified_lead_to_google_sheet(
+    lead: "Lead",
+    *,
+    reason_code: str = "qualified_or_stale_connection",
+) -> bool:
+    """Ensure a non-connected lead is not left as Connected in the sheet."""
+    from linkedin.enums import ProfileState
+
+    has_qualified_deal = lead.deal_set.filter(state=ProfileState.QUALIFIED).exists()
+    if not has_qualified_deal:
+        return False
+    if lead.deal_set.filter(
+        state=ProfileState.CONNECTED,
+        connection_assessment_source="api_degree_1",
+    ).exists():
+        return False
+
+    return _sync_lead_status_to_google_sheet(
+        lead,
+        status_label=ProfileState.QUALIFIED.value,
+        reason_code=reason_code,
+        skip_if_existing_statuses={ProfileState.QUALIFIED.value},
     )
 
 
@@ -391,8 +437,6 @@ def sync_lead_to_google_sheet(
         return False
 
     if not lead.linkedin_url:
-        return False
-    if lead.profile_data is None:
         return False
 
     has_connected_deal = lead.deal_set.filter(state=ProfileState.CONNECTED).exists()

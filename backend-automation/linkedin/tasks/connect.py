@@ -143,7 +143,11 @@ def handle_connect(task, session, qualifiers):
     try:
         assessment = get_connection_assessment(session, profile)
 
-        if assessment.state == ProfileState.CONNECTED:
+        verified_connected = (
+            assessment.state == ProfileState.CONNECTED
+            and assessment.source == "api_degree_1"
+        )
+        if verified_connected:
             if deal:
                 update_deal_inference(deal, assessment.source, assessment.confidence)
             emit_outreach_event(
@@ -167,8 +171,16 @@ def handle_connect(task, session, qualifiers):
             _reschedule()
             return
 
-        if assessment.state == ProfileState.PENDING:
-            set_profile_state(session, public_id, assessment.state.value)
+        if assessment.state in (ProfileState.PENDING, ProfileState.CONNECTED):
+            if assessment.state == ProfileState.CONNECTED:
+                logger.info(
+                    "%s looked connected via %s but is not API degree-1 yet — keeping Pending",
+                    public_id,
+                    assessment.source,
+                )
+                if deal:
+                    update_deal_inference(deal, assessment.source, assessment.confidence)
+            set_profile_state(session, public_id, ProfileState.PENDING.value)
             if deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
@@ -214,6 +226,13 @@ def handle_connect(task, session, qualifiers):
                     metadata={"reason": "no_connect_button", "attempt": attempts},
                 )
                 set_profile_state(session, public_id, new_state.value)
+                if deal and deal.lead_id:
+                    from google_integration.sheet_sync import sync_qualified_lead_to_google_sheet
+
+                    sync_qualified_lead_to_google_sheet(
+                        deal.lead,
+                        reason_code="connect_no_button",
+                    )
                 logger.debug("%s: connect attempt %d/%d — no button found", public_id, attempts, MAX_CONNECT_ATTEMPTS)
         else:
             if new_state == ProfileState.PENDING and deal:
@@ -225,27 +244,48 @@ def handle_connect(task, session, qualifiers):
                     public_id=public_id,
                     metadata={"via": "send_connection_request"},
                 )
+            verified_post_connect = False
             if new_state == ProfileState.CONNECTED and deal:
                 post = get_connection_assessment(session, profile)
-                update_deal_inference(deal, post.source, post.confidence)
-                emit_outreach_event(
-                    OutreachEvent.EventType.CONNECTION_DETECTED,
-                    deal=deal,
-                    lead=deal.lead,
-                    campaign=session.campaign,
-                    public_id=public_id,
-                    metadata={
-                        "source": post.source,
-                        "confidence": post.confidence,
-                        "via": "post_connect_send",
-                    },
+                verified_post_connect = (
+                    post.state == ProfileState.CONNECTED
+                    and post.source == "api_degree_1"
                 )
-            set_profile_state(session, public_id, new_state.value)
-            if new_state == ProfileState.CONNECTED and deal and deal.lead_id:
+                update_deal_inference(deal, post.source, post.confidence)
+                if verified_post_connect:
+                    emit_outreach_event(
+                        OutreachEvent.EventType.CONNECTION_DETECTED,
+                        deal=deal,
+                        lead=deal.lead,
+                        campaign=session.campaign,
+                        public_id=public_id,
+                        metadata={
+                            "source": post.source,
+                            "confidence": post.confidence,
+                            "via": "post_connect_send",
+                        },
+                    )
+                else:
+                    logger.info(
+                        "%s connect result looked connected via %s but is not API degree-1 yet — keeping Pending",
+                        public_id,
+                        post.source,
+                    )
+
+            state_to_store = (
+                ProfileState.CONNECTED
+                if new_state == ProfileState.CONNECTED and verified_post_connect
+                else new_state
+            )
+            if new_state == ProfileState.CONNECTED and not verified_post_connect:
+                state_to_store = ProfileState.PENDING
+
+            set_profile_state(session, public_id, state_to_store.value)
+            if state_to_store == ProfileState.CONNECTED and deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_lead_to_google_sheet
 
                 sync_lead_to_google_sheet(deal.lead)
-            if new_state == ProfileState.PENDING and deal and deal.lead_id:
+            if state_to_store == ProfileState.PENDING and deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
                 sync_pending_lead_to_google_sheet(
@@ -258,9 +298,9 @@ def handle_connect(task, session, qualifiers):
                 session.campaign,
                 target_name=name,
                 target_public_id=public_id,
-                status="success" if new_state in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed"
+                status="success" if state_to_store in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed"
             )
-            if new_state not in (ProfileState.PENDING, ProfileState.CONNECTED):
+            if state_to_store not in (ProfileState.PENDING, ProfileState.CONNECTED):
                 emit_outreach_event(
                     OutreachEvent.EventType.INVITE_FAILED,
                     deal=deal,
@@ -270,14 +310,14 @@ def handle_connect(task, session, qualifiers):
                     metadata={"reason": "connect_action_unsuccessful", "state": new_state.value},
                 )
 
-            if new_state == ProfileState.PENDING:
+            if state_to_store == ProfileState.PENDING:
                 enqueue_check_pending(
                     campaign_id, public_id,
                     backoff_hours=cfg["check_pending_recheck_after_hours"],
                     deal=deal,
                     owner_id=owner_id,
                 )
-            elif new_state == ProfileState.CONNECTED:
+            elif state_to_store == ProfileState.CONNECTED:
                 enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
 
     except ReachedConnectionLimit as e:

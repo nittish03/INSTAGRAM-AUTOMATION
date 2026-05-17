@@ -130,7 +130,7 @@ def lead_sheet_export_verification(lead) -> tuple[bool, str, str]:
     if latest.created_at < last_invite_at:
         return False, "detection_before_last_invite", ""
 
-    if conf >= min_after and src in ("api_degree_1", "ui_message_button"):
+    if conf >= min_after and src == "api_degree_1":
         return True, "verified_after_invite", "Accepted (post-invite)"
 
     return False, "insufficient_confidence_or_source", ""

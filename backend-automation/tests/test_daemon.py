@@ -229,6 +229,37 @@ class DaemonHardeningTest(TestCase):
         self.assertEqual(claimed[0], send_task.pk)
         self.assertEqual(claimed[1], older_check.pk)
 
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch("linkedin.daemon._HANDLERS")
+    @patch("linkedin.daemon.failure_diagnostics")
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_daemon_does_not_claim_future_scheduled_tasks(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+        _mock_diag,
+        mock_handlers,
+    ):
+        future_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now() + datetime.timedelta(hours=2),
+            payload={"campaign_id": self.campaign.pk, "public_id": "future", "owner_id": self.user.pk},
+        )
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+        mock_session.django_user = self.user
+
+        with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
+            try:
+                run_daemon(mock_session)
+            except KeyboardInterrupt:
+                pass
+
+        mock_handlers.get.assert_not_called()
+        future_task.refresh_from_db()
+        self.assertEqual(future_task.status, Task.Status.PENDING)
+
 
 class RunDaemonCommandTests(TestCase):
     def test_launcher_pid_arg_is_accepted_for_compatibility(self):

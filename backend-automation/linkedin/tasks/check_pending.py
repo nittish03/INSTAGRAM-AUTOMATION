@@ -79,7 +79,18 @@ def handle_check_pending(task, session, qualifiers):
         )
         return
 
-    if assessment.state == ProfileState.CONNECTED and deal:
+    verified_connected = (
+        assessment.state == ProfileState.CONNECTED
+        and assessment.source == "api_degree_1"
+    )
+    if assessment.state == ProfileState.CONNECTED and not verified_connected:
+        logger.info(
+            "%s looked connected via %s but is not API degree-1 yet — keeping Pending",
+            public_id,
+            assessment.source,
+        )
+
+    if verified_connected and deal:
         update_deal_inference(deal, assessment.source, assessment.confidence)
         emit_outreach_event(
             OutreachEvent.EventType.CONNECTION_DETECTED,
@@ -94,15 +105,19 @@ def handle_check_pending(task, session, qualifiers):
             },
         )
 
-    set_profile_state(session, public_id, assessment.state.value)
+    state_to_store = ProfileState.CONNECTED if verified_connected else assessment.state
+    if assessment.state == ProfileState.CONNECTED and not verified_connected:
+        state_to_store = ProfileState.PENDING
 
-    if assessment.state == ProfileState.CONNECTED:
+    set_profile_state(session, public_id, state_to_store.value)
+
+    if verified_connected:
         if deal and deal.lead_id:
             from google_integration.sheet_sync import sync_lead_to_google_sheet
 
             sync_lead_to_google_sheet(deal.lead)
         enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
-    elif assessment.state == ProfileState.PENDING:
+    elif state_to_store == ProfileState.PENDING:
         if deal and deal.lead_id:
             from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
@@ -125,4 +140,11 @@ def handle_check_pending(task, session, qualifiers):
         logger.info(
             "%s still pending — scheduled in %.1fh (backoff %.1fh → %.1fh)",
             public_id, delay_hours, backoff_hours, new_backoff,
+        )
+    elif state_to_store == ProfileState.QUALIFIED and deal and deal.lead_id:
+        from google_integration.sheet_sync import sync_qualified_lead_to_google_sheet
+
+        sync_qualified_lead_to_google_sheet(
+            deal.lead,
+            reason_code="check_pending_not_connected",
         )

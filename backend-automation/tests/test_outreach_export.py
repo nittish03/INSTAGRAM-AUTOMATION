@@ -16,6 +16,7 @@ from google_integration.sheet_sync import (
     normalize_sheet_status,
     sync_lead_to_google_sheet,
     sync_pending_lead_to_google_sheet,
+    sync_qualified_lead_to_google_sheet,
 )
 from linkedin.enums import ProfileState
 from linkedin.models import Campaign, OutreachEvent, SiteConfig
@@ -93,7 +94,7 @@ class OutreachExportGateTests(TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "no_invite_for_non_api_path")
 
-    def test_ui_after_invite_eligible(self):
+    def test_ui_after_invite_not_export_grade(self):
         emit_outreach_event(
             OutreachEvent.EventType.INVITE_SENT,
             lead=self.lead,
@@ -109,8 +110,8 @@ class OutreachExportGateTests(TestCase):
             metadata={"source": "ui_message_button", "confidence": 0.62},
         )
         ok, reason, _ = lead_sheet_export_verification(self.lead)
-        self.assertTrue(ok)
-        self.assertEqual(reason, "verified_after_invite")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "insufficient_confidence_or_source")
 
     @patch("google_integration.sheet_sync.append_rows")
     @patch("google_integration.sheet_sync.update_values")
@@ -141,9 +142,46 @@ class OutreachExportGateTests(TestCase):
             metadata={"source": "api_degree_1", "confidence": 0.95},
         )
         self.assertTrue(sync_lead_to_google_sheet(self.lead))
-        self.assertTrue(mock_append.called)
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
+        self.assertFalse(mock_append.called)
         self.lead.refresh_from_db()
         self.assertIsNotNone(self.lead.sheet_exported_at)
+
+    @patch("google_integration.sheet_sync.append_rows")
+    @patch("google_integration.sheet_sync.update_values")
+    @patch("google_integration.sheet_sync.get_values")
+    @patch("google_integration.sheet_sync.resolve_google_sync_user")
+    def test_verified_connected_sync_allows_missing_profile_data(
+        self, mock_resolve, mock_get_values, mock_update, mock_append
+    ):
+        GoogleAccount.objects.create(
+            user=self.user,
+            refresh_token="not-empty",
+            google_email="a@b.com",
+        )
+        self.cfg.google_sheet_sync_enabled = True
+        self.cfg.google_sheet_id = "test_sheet_id"
+        self.cfg.google_sheet_sync_user = self.user
+        self.cfg.save()
+        self.lead.profile_data = None
+        self.lead.save(update_fields=["profile_data"])
+        emit_outreach_event(
+            OutreachEvent.EventType.CONNECTION_DETECTED,
+            lead=self.lead,
+            deal=self.deal,
+            campaign=self.campaign,
+            metadata={"source": "api_degree_1", "confidence": 0.95},
+        )
+
+        mock_resolve.return_value = self.user
+        mock_get_values.return_value = []
+
+        self.assertTrue(sync_lead_to_google_sheet(self.lead))
+        written_row = mock_update.call_args.args[3][0]
+        self.assertEqual(written_row[0], "A B")
+        self.assertEqual(written_row[1], "Co")
+        self.assertEqual(written_row[5], "Connected")
+        self.assertFalse(mock_append.called)
 
     @patch("google_integration.sheet_sync.append_rows")
     @patch("google_integration.sheet_sync.update_values")
@@ -168,10 +206,12 @@ class OutreachExportGateTests(TestCase):
         mock_get_values.return_value = []
 
         self.assertTrue(sync_pending_lead_to_google_sheet(self.lead, reason_code="invite_sent"))
-        written_row = mock_append.call_args.args[3][0]
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
+        written_row = mock_update.call_args.args[3][0]
         self.assertEqual(written_row[4], "FALSE")
         self.assertEqual(written_row[5], "Pending")
         self.assertEqual(written_row[6], "Follow up-1")
+        self.assertFalse(mock_append.called)
         self.lead.refresh_from_db()
         self.assertIsNone(self.lead.sheet_exported_at)
 
@@ -278,9 +318,87 @@ class OutreachExportGateTests(TestCase):
         mock_get_values.side_effect = [[SHEET_HEADER], [SHEET_HEADER], [SHEET_HEADER]]
 
         self.assertTrue(sync_pending_lead_to_google_sheet(self.lead, reason_code="check_pending_ui_pending"))
-        self.assertEqual(mock_append.call_args.args[2], "Sheet1!A:J")
-        written_row = mock_append.call_args.args[3][0]
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
+        written_row = mock_update.call_args.args[3][0]
         self.assertEqual(written_row[5], "Pending")
+        self.assertFalse(mock_append.called)
+
+    @patch("google_integration.sheet_sync.append_rows")
+    @patch("google_integration.sheet_sync.update_values")
+    @patch("google_integration.sheet_sync.get_values")
+    @patch("google_integration.sheet_sync.resolve_google_sync_user")
+    def test_pending_sync_overwrites_stale_connected_sheet_row(
+        self, mock_resolve, mock_get_values, mock_update, mock_append
+    ):
+        GoogleAccount.objects.create(
+            user=self.user,
+            refresh_token="not-empty",
+            google_email="a@b.com",
+        )
+        self.cfg.google_sheet_sync_enabled = True
+        self.cfg.google_sheet_id = "test_sheet_id"
+        self.cfg.google_sheet_sync_user = self.user
+        self.cfg.save()
+        self.deal.state = ProfileState.PENDING.value
+        self.deal.save(update_fields=["state"])
+        self.lead.sheet_exported_at = timezone.now()
+        self.lead.save(update_fields=["sheet_exported_at"])
+
+        mock_resolve.return_value = self.user
+        mock_get_values.side_effect = [
+            [SHEET_HEADER],
+            [
+                SHEET_HEADER,
+                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Connected", "Follow up-2"],
+            ],
+        ]
+
+        self.assertTrue(sync_pending_lead_to_google_sheet(self.lead, reason_code="downgrade_pending"))
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
+        written_row = mock_update.call_args.args[3][0]
+        self.assertEqual(written_row[5], "Pending")
+        self.assertEqual(written_row[6], "Follow up-1")
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.sheet_exported_at)
+        self.assertFalse(mock_append.called)
+
+    @patch("google_integration.sheet_sync.append_rows")
+    @patch("google_integration.sheet_sync.update_values")
+    @patch("google_integration.sheet_sync.get_values")
+    @patch("google_integration.sheet_sync.resolve_google_sync_user")
+    def test_qualified_sync_overwrites_stale_connected_sheet_row(
+        self, mock_resolve, mock_get_values, mock_update, mock_append
+    ):
+        GoogleAccount.objects.create(
+            user=self.user,
+            refresh_token="not-empty",
+            google_email="a@b.com",
+        )
+        self.cfg.google_sheet_sync_enabled = True
+        self.cfg.google_sheet_id = "test_sheet_id"
+        self.cfg.google_sheet_sync_user = self.user
+        self.cfg.save()
+        self.deal.state = ProfileState.QUALIFIED.value
+        self.deal.save(update_fields=["state"])
+        self.lead.sheet_exported_at = timezone.now()
+        self.lead.save(update_fields=["sheet_exported_at"])
+
+        mock_resolve.return_value = self.user
+        mock_get_values.side_effect = [
+            [SHEET_HEADER],
+            [
+                SHEET_HEADER,
+                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Connected", "Follow up-2"],
+            ],
+        ]
+
+        self.assertTrue(sync_qualified_lead_to_google_sheet(self.lead, reason_code="downgrade_qualified"))
+        written_row = mock_update.call_args.args[3][0]
+        self.assertEqual(written_row[5], "Qualified")
+        self.assertEqual(written_row[6], "Follow up")
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.sheet_exported_at)
+        self.assertFalse(mock_append.called)
 
     @patch("google_integration.sheet_sync.append_rows")
     @patch("google_integration.sheet_sync.update_values")
@@ -362,5 +480,42 @@ class OutreachExportGateTests(TestCase):
         ]
 
         self.assertTrue(sync_lead_to_google_sheet(self.lead))
-        self.assertFalse(mock_update.called)
-        self.assertEqual(mock_append.call_args.args[2], "Sheet1!A:J")
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A3:J3")
+        self.assertFalse(mock_append.called)
+
+    @patch("google_integration.sheet_sync.append_rows")
+    @patch("google_integration.sheet_sync.update_values")
+    @patch("google_integration.sheet_sync.get_values")
+    @patch("google_integration.sheet_sync.resolve_google_sync_user")
+    def test_new_row_sync_fills_first_empty_gap_before_later_rows(
+        self, mock_resolve, mock_get_values, mock_update, mock_append
+    ):
+        GoogleAccount.objects.create(
+            user=self.user,
+            refresh_token="not-empty",
+            google_email="a@b.com",
+        )
+        self.cfg.google_sheet_sync_enabled = True
+        self.cfg.google_sheet_id = "test_sheet_id"
+        self.cfg.google_sheet_sync_user = self.user
+        self.cfg.save()
+        emit_outreach_event(
+            OutreachEvent.EventType.CONNECTION_DETECTED,
+            lead=self.lead,
+            deal=self.deal,
+            campaign=self.campaign,
+            metadata={"source": "api_degree_1", "confidence": 0.95},
+        )
+
+        rows_with_gap = [
+            SHEET_HEADER,
+            ["Existing", "Co", "Dev", "https://www.linkedin.com/in/existing/", "TRUE", "Connected"],
+            [],
+            ["Later", "Co", "Dev", "https://www.linkedin.com/in/later/", "TRUE", "Connected"],
+        ]
+        mock_resolve.return_value = self.user
+        mock_get_values.side_effect = [[SHEET_HEADER], rows_with_gap, rows_with_gap]
+
+        self.assertTrue(sync_lead_to_google_sheet(self.lead))
+        self.assertEqual(mock_update.call_args.args[2], "Sheet1!A3:J3")
+        self.assertFalse(mock_append.called)

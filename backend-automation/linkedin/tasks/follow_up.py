@@ -83,9 +83,18 @@ def handle_follow_up(task, session, qualifiers):
 
     assessment = get_connection_assessment(session, profile)
     update_deal_inference(deal, assessment.source, assessment.confidence)
-    if assessment.state != ProfileState.CONNECTED:
-        set_profile_state(session, public_id, assessment.state.value)
-        if assessment.state == ProfileState.PENDING:
+    verified_connected = (
+        assessment.state == ProfileState.CONNECTED
+        and assessment.source == "api_degree_1"
+    )
+    if not verified_connected:
+        state_to_store = (
+            ProfileState.PENDING
+            if assessment.state == ProfileState.CONNECTED
+            else assessment.state
+        )
+        set_profile_state(session, public_id, state_to_store.value)
+        if state_to_store == ProfileState.PENDING:
             enqueue_check_pending(
                 campaign_id,
                 public_id,
@@ -94,7 +103,7 @@ def handle_follow_up(task, session, qualifiers):
                 owner_id=owner_id,
             )
         raise TaskSkipped(
-            "follow_up requires a verified connected profile before drafting "
+            "follow_up requires an API-verified connected profile before drafting "
             f"(source={assessment.source}, state={assessment.state.value})"
         )
 

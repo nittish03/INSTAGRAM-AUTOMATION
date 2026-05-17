@@ -18,7 +18,21 @@ def goto_page(session,
               error_message: str = "",
               ):
     page = session.page
-    action()
+    try:
+        action()
+    except PlaywrightTimeoutError as exc:
+        # LinkedIn profile/search pages can keep slow resources pending long after
+        # the browser has reached the right URL. Treat this as a soft timeout and
+        # validate the URL below instead of failing the task immediately.
+        current = unquote((session.page or page).url if (session.page or page) else "")
+        if expected_url_pattern not in current:
+            raise
+        logger.warning(
+            "Navigation action timed out after reaching %s; continuing",
+            current,
+        )
+
+    page = session.page
     if not page:
         return
 

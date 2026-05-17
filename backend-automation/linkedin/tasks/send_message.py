@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 
 from termcolor import colored
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from linkedin.db.deals import get_profile_dict_for_public_id
 from linkedin.exceptions import TaskSkipped
@@ -106,7 +107,27 @@ def handle_send_message(task, session, qualifiers=None):
             raise TaskSkipped("LinkedIn shows Connect but connect limit is reached; approved message requeued") from skip_exc
 
         new_state = send_connection_request(session=session, profile=profile)
-        set_profile_state(session, public_id, new_state.value)
+        verified_connected = False
+        if new_state == ProfileState.CONNECTED:
+            from linkedin.actions.status import get_connection_assessment
+            from linkedin.outreach_tracking import update_deal_inference
+
+            post = get_connection_assessment(session, profile)
+            verified_connected = (
+                post.state == ProfileState.CONNECTED
+                and post.source == "api_degree_1"
+            )
+            if deal:
+                update_deal_inference(deal, post.source, post.confidence)
+        state_to_store = (
+            ProfileState.CONNECTED
+            if new_state == ProfileState.CONNECTED and verified_connected
+            else new_state
+        )
+        if new_state == ProfileState.CONNECTED and not verified_connected:
+            state_to_store = ProfileState.PENDING
+
+        set_profile_state(session, public_id, state_to_store.value)
 
         name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
         session.linkedin_profile.record_action(
@@ -114,11 +135,11 @@ def handle_send_message(task, session, qualifiers=None):
             session.campaign,
             target_name=name,
             target_public_id=public_id,
-            status="success" if new_state in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed",
+            status="success" if state_to_store in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed",
             note="Auto-connect before sending approved message",
         )
 
-        if new_state == ProfileState.PENDING:
+        if state_to_store == ProfileState.PENDING:
             if deal:
                 emit_outreach_event(
                     OutreachEvent.EventType.INVITE_SENT,
@@ -136,7 +157,7 @@ def handle_send_message(task, session, qualifiers=None):
             _requeue_approved_send(retry_delay, "Connection invite sent before approved message could be delivered")
             raise TaskSkipped("LinkedIn showed Connect; sent connection invite and requeued approved message") from skip_exc
 
-        if new_state == ProfileState.CONNECTED:
+        if state_to_store == ProfileState.CONNECTED:
             _requeue_approved_send(60, "Connected during send_message; retrying approved message")
             raise TaskSkipped("Connected during send_message; approved message requeued") from skip_exc
 
@@ -152,6 +173,15 @@ def handle_send_message(task, session, qualifiers=None):
         logger.info("[%s] Dispatching approved message for %s via profile UI...", session.campaign, public_id)
         return send_raw_message(session, profile, msg.content)
 
+    def _is_transient_playwright_timeout(exc: Exception) -> bool:
+        text = str(exc)
+        return (
+            isinstance(exc, PlaywrightTimeoutError)
+            or "Timeout" in exc.__class__.__name__
+            or "Timeout" in text
+            or "Page.goto" in text
+        )
+
     try:
         sent = _send_once()
     except TaskSkipped as exc:
@@ -162,13 +192,22 @@ def handle_send_message(task, session, qualifiers=None):
             or "Target page, context or browser has been closed" in str(exc)
         )
         if not is_closed_page:
+            if _is_transient_playwright_timeout(exc):
+                _requeue_approved_send(10 * 60, f"Transient LinkedIn timeout during send: {exc}")
+                raise TaskSkipped(
+                    "LinkedIn timed out during approved message send; message requeued"
+                ) from exc
             raise
         logger.warning("Browser closed during send for %s - relaunching once", public_id)
         session.close()
         sent = _send_once()
     
     if not sent:
-        raise RuntimeError("LinkedIn blocked the message delivery (UI failed).")
+        _requeue_approved_send(
+            30 * 60,
+            "Profile Message popup send failed; approved message retained for retry",
+        )
+        raise TaskSkipped("LinkedIn profile Message popup send failed; approved message requeued")
 
     # Assuming success, remove draft suffix if it exists, record rate limit actions
     sent_at = timezone.now()

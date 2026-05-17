@@ -6,6 +6,8 @@ import random
 import time
 from functools import cached_property
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from linkedin.conf import MIN_DELAY, MAX_DELAY
 
 logger = logging.getLogger(__name__)
@@ -70,7 +72,10 @@ class AccountSession:
     def wait(self, min_delay=MIN_DELAY, max_delay=MAX_DELAY):
         random_sleep(min_delay, max_delay)
         if self.page and not self.page.is_closed():
-            self.page.wait_for_load_state("load")
+            try:
+                self.page.wait_for_load_state("load", timeout=10_000)
+            except PlaywrightTimeoutError:
+                logger.debug("Page load state timed out on %s; continuing", self.page.url)
 
 
     def _maybe_refresh_cookies(self):
