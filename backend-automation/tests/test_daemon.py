@@ -2,7 +2,7 @@ import os
 import datetime
 from django.test import TestCase
 from django.contrib.auth.models import User
-from linkedin.models import LinkedInProfile, SiteConfig, Task, Campaign
+from linkedin.models import ActionLog, LinkedInProfile, SiteConfig, Task, Campaign
 from linkedin.daemon import run_daemon
 from linkedin.exceptions import TaskSkipped
 from django.utils import timezone
@@ -228,6 +228,62 @@ class DaemonHardeningTest(TestCase):
         self.assertGreaterEqual(len(claimed), 2)
         self.assertEqual(claimed[0], send_task.pk)
         self.assertEqual(claimed[1], older_check.pk)
+
+    @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
+    @patch.dict("linkedin.daemon.CAMPAIGN_CONFIG", {"min_action_interval": 3600, "daemon_max_runtime_seconds": 0})
+    @patch("linkedin.daemon._HANDLERS")
+    @patch("linkedin.daemon.failure_diagnostics")
+    @patch("linkedin.daemon.heal_tasks")
+    @patch("linkedin.daemon._build_qualifiers", return_value={})
+    def test_daemon_holds_outreach_tasks_during_recent_action_cooldown(
+        self,
+        _mock_qualifiers,
+        _mock_heal_tasks,
+        _mock_diag,
+        mock_handlers,
+    ):
+        ActionLog.objects.create(
+            linkedin_profile=self.profile,
+            campaign=self.campaign,
+            action_type=ActionLog.ActionType.FOLLOW_UP,
+            target_public_id="recent-send",
+            status=ActionLog.Status.SUCCESS,
+        )
+        send_task = Task.objects.create(
+            task_type=Task.TaskType.SEND_MESSAGE,
+            scheduled_at=timezone.now(),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": "send",
+                "message_id": 123,
+                "owner_id": self.user.pk,
+            },
+        )
+        check_task = Task.objects.create(
+            task_type=Task.TaskType.CHECK_PENDING,
+            scheduled_at=timezone.now(),
+            payload={"campaign_id": self.campaign.pk, "public_id": "check", "owner_id": self.user.pk},
+        )
+        claimed = []
+
+        def handler(task, *_args):
+            claimed.append(task.pk)
+
+        mock_handlers.get.return_value = handler
+        mock_session = MagicMock()
+        mock_session.campaigns = [self.campaign]
+        mock_session.django_user = self.user
+        mock_session.linkedin_profile = self.profile
+
+        with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
+            try:
+                run_daemon(mock_session)
+            except KeyboardInterrupt:
+                pass
+
+        self.assertEqual(claimed, [check_task.pk])
+        send_task.refresh_from_db()
+        self.assertEqual(send_task.status, Task.Status.PENDING)
 
     @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
     @patch("linkedin.daemon._HANDLERS")

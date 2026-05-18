@@ -52,6 +52,7 @@ class ReplyCheckTest(TestCase):
         return session
 
     def test_send_message_schedules_capped_reply_check_and_normal_follow_up(self):
+        from linkedin.conf import CAMPAIGN_CONFIG
         from linkedin.tasks.send_message import handle_send_message
         cfg = SiteConfig.load()
         cfg.pause_new_connection_invites = True
@@ -93,8 +94,8 @@ class ReplyCheckTest(TestCase):
             payload__public_id=self.lead.public_identifier,
         )
         self.assertEqual(reply_check.payload["attempt"], 1)
-        self.assertEqual(reply_check.payload["max_attempts"], 12)
-        self.assertEqual(reply_check.payload["interval_seconds"], 10 * 60)
+        self.assertEqual(reply_check.payload["max_attempts"], CAMPAIGN_CONFIG["reply_check_max_attempts"])
+        self.assertEqual(reply_check.payload["interval_seconds"], CAMPAIGN_CONFIG["reply_check_interval_seconds"])
         self.assertEqual(reply_check.payload["sent_message_id"], msg.pk)
         self.assertIn("sent_at", reply_check.payload)
         self.assertIn("expires_at", reply_check.payload)

@@ -48,6 +48,10 @@ _OWNER_SCOPED_TASK_TYPES = {
     Task.TaskType.SEND_MESSAGE,
     Task.TaskType.REPLY_CHECK,
 }
+_OUTREACH_TASK_TYPES = {
+    Task.TaskType.CONNECT,
+    Task.TaskType.SEND_MESSAGE,
+}
 
 _HANDLERS = {
     Task.TaskType.CONNECT: handle_connect,
@@ -71,6 +75,39 @@ def _prioritize_claims(queryset):
             output_field=IntegerField(),
         )
     ).order_by("_daemon_priority", "scheduled_at", "id")
+
+
+def _recent_outreach_cooldown_seconds(session, cfg) -> float:
+    """Return remaining cooldown after a real outward LinkedIn action."""
+    min_interval = float(cfg.get("min_action_interval") or 0)
+    if min_interval <= 0:
+        return 0.0
+
+    profile = getattr(session, "linkedin_profile", None)
+    profile_pk = getattr(profile, "pk", None)
+    if not isinstance(profile_pk, int):
+        return 0.0
+
+    from linkedin.models import ActionLog
+
+    latest = (
+        ActionLog.objects.filter(
+            linkedin_profile_id=profile_pk,
+            status=ActionLog.Status.SUCCESS,
+            action_type__in=[
+                ActionLog.ActionType.CONNECT,
+                ActionLog.ActionType.FOLLOW_UP,
+            ],
+        )
+        .order_by("-created_at")
+        .values_list("created_at", flat=True)
+        .first()
+    )
+    if latest is None:
+        return 0.0
+
+    elapsed = (timezone.now() - latest).total_seconds()
+    return max(min_interval - elapsed, 0.0)
 
 
 def _set_task_owner(task: Task, owner_id: int) -> bool:
@@ -310,6 +347,8 @@ def heal_tasks(session):
 
 def run_daemon(session):
     cfg = CAMPAIGN_CONFIG
+    started_monotonic = time.monotonic()
+    max_runtime = float(cfg.get("daemon_max_runtime_seconds") or 0)
 
     qualifiers = _build_qualifiers(session.campaigns, cfg)
 
@@ -342,6 +381,13 @@ def run_daemon(session):
     # while the daemon polls at a short interval instead of sleeping until then.
     while True:
         _close_old_connections_for_daemon()
+        if max_runtime > 0 and time.monotonic() - started_monotonic >= max_runtime:
+            logger.warning(
+                "Daemon runtime cap reached after %.0f minutes - stopping for a long rest",
+                max_runtime / 60,
+            )
+            return
+
         pause = seconds_until_active()
         if pause > 0:
             h, m = int(pause // 3600), int(pause % 3600 // 60)
@@ -354,13 +400,27 @@ def run_daemon(session):
             time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
             continue
 
-        claim_scope = _prioritize_claims(
-            task_scope.filter(status=Task.Status.PENDING, scheduled_at__lte=timezone.now())
-        )
+        due_scope = task_scope.filter(status=Task.Status.PENDING, scheduled_at__lte=timezone.now())
+        cooldown = _recent_outreach_cooldown_seconds(session, cfg)
+        if cooldown > 0:
+            due_scope = due_scope.exclude(task_type__in=_OUTREACH_TASK_TYPES)
+
+        claim_scope = _prioritize_claims(due_scope)
         if new_connection_invites_paused():
             claim_scope = claim_scope.exclude(task_type=Task.TaskType.CONNECT)
         task = claim_scope.first()
         if task is None:
+            if cooldown > 0 and task_scope.filter(
+                task_type__in=_OUTREACH_TASK_TYPES,
+                status=Task.Status.PENDING,
+                scheduled_at__lte=timezone.now(),
+            ).exists():
+                logger.info(
+                    "Recent outreach action - holding sends/connects for %.0f more minutes",
+                    cooldown / 60,
+                )
+                time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
+                continue
             if (
                 new_connection_invites_paused()
                 and task_scope.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()

@@ -36,53 +36,54 @@ FIXTURE_PROFILES_DIR = FIXTURE_DIR / "profiles"
 FIXTURE_PAGES_DIR = FIXTURE_DIR / "pages"
 DUMP_PAGES = False
 
-MIN_DELAY = 5
-MAX_DELAY = 8
+MIN_DELAY = 20
+MAX_DELAY = 45
 
 # ----------------------------------------------------------------------
 # Browser config
 # ----------------------------------------------------------------------
 PLAYWRIGHT_HEADLESS = _playwright_headless()
-BROWSER_SLOW_MO = 200
+BROWSER_SLOW_MO = 350
 BROWSER_DEFAULT_TIMEOUT_MS = 30_000
 BROWSER_LOGIN_TIMEOUT_MS = 40_000
 BROWSER_NAV_TIMEOUT_MS = 10_000
-HUMAN_TYPE_MIN_DELAY_MS = 50
-HUMAN_TYPE_MAX_DELAY_MS = 200
+HUMAN_TYPE_MIN_DELAY_MS = 120
+HUMAN_TYPE_MAX_DELAY_MS = 380
 
 # ----------------------------------------------------------------------
 # Onboarding defaults (shown to user during interactive setup)
 # ----------------------------------------------------------------------
-DEFAULT_CONNECT_DAILY_LIMIT = 20
-DEFAULT_CONNECT_WEEKLY_LIMIT = 80
-DEFAULT_FOLLOW_UP_DAILY_LIMIT = 100
+DEFAULT_CONNECT_DAILY_LIMIT = 3
+DEFAULT_CONNECT_WEEKLY_LIMIT = 12
+DEFAULT_FOLLOW_UP_DAILY_LIMIT = 8
 
 # ----------------------------------------------------------------------
 # Active-hours schedule (daemon pauses outside this window)
 # Set to False to run 24/7.
 # ----------------------------------------------------------------------
-ENABLE_ACTIVE_HOURS = False
-ACTIVE_START_HOUR = 9    # inclusive, local time
-ACTIVE_END_HOUR = 18    # exclusive, local time
-ACTIVE_TIMEZONE = "UTC"
+ENABLE_ACTIVE_HOURS = True
+ACTIVE_START_HOUR = 10   # inclusive, local time
+ACTIVE_END_HOUR = 16     # exclusive, local time
+ACTIVE_TIMEZONE = "Asia/Kolkata"
 REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
 
 # ----------------------------------------------------------------------
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 1/2,  # 30 min
+    "check_pending_recheck_after_hours": 12,
     "enrich_min_interval": 1,
-    "min_action_interval": 120,
+    "min_action_interval": 45 * 60,
+    "daemon_max_runtime_seconds": 45 * 60,
     "qualification_n_mc_samples": 100,
     "min_ready_to_connect_prob": 0.9,
     "min_positive_pool_prob": 0.20,
     "embedding_model": "BAAI/bge-small-en-v1.5",
-    "connect_delay_seconds": 0,
-    "connect_no_candidate_delay_seconds": 0,
-    "reply_check_interval_seconds": 10 * 60,
-    "reply_check_max_attempts": 12,
-    "reply_check_window_seconds": 2 * 60 * 60,
+    "connect_delay_seconds": 6 * 60 * 60,
+    "connect_no_candidate_delay_seconds": 3 * 60 * 60,
+    "reply_check_interval_seconds": 30 * 60,
+    "reply_check_max_attempts": 8,
+    "reply_check_window_seconds": 4 * 60 * 60,
 }
 
 # ----------------------------------------------------------------------
