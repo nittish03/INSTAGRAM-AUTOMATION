@@ -344,8 +344,8 @@ def recovery_items(limit: int = 200) -> list[dict[str, Any]]:
     return items
 
 
-def retry_task(task: Task) -> Task:
-    cfg = SiteConfig.load()
+def retry_task(task: Task, *, user=None) -> Task:
+    cfg = SiteConfig.load(user)
     if (
         task.task_type == Task.TaskType.CONNECT
         and bool(getattr(cfg, "pause_new_connection_invites", False))
@@ -370,10 +370,13 @@ def retry_task(task: Task) -> Task:
     )
 
 
-def export_preview(limit: int = 250) -> dict[str, Any]:
+def export_preview(limit: int = 250, *, user=None) -> dict[str, Any]:
     from linkedin.outreach_tracking import lead_sheet_export_verification
 
-    connected_deals = Deal.objects.filter(state=ProfileState.CONNECTED.value).select_related("lead", "campaign").order_by("-update_date")[:limit]
+    connected_deals = Deal.objects.filter(state=ProfileState.CONNECTED.value).select_related("lead", "campaign")
+    if user is not None:
+        connected_deals = connected_deals.filter(campaign__users=user)
+    connected_deals = connected_deals.order_by("-update_date")[:limit]
     exportable: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for d in connected_deals:
@@ -381,7 +384,7 @@ def export_preview(limit: int = 250) -> dict[str, Any]:
         if not lead:
             continue
         reason = ""
-        ok_export, verify_reason, _ = lead_sheet_export_verification(lead)
+        ok_export, verify_reason, _ = lead_sheet_export_verification(lead, config_user=user)
         if lead.sheet_exported_at:
             reason = "already_exported"
         elif not lead.profile_data:
@@ -407,11 +410,11 @@ def export_preview(limit: int = 250) -> dict[str, Any]:
     return {"exportable": exportable, "skipped": skipped}
 
 
-def export_selected(lead_ids: list[int]) -> dict[str, int]:
+def export_selected(lead_ids: list[int], *, user=None) -> dict[str, int]:
     ok = 0
     failed = 0
     for lead in Lead.objects.filter(pk__in=lead_ids):
-        if sync_lead_to_google_sheet(lead):
+        if sync_lead_to_google_sheet(lead, config_user=user):
             ok += 1
         else:
             failed += 1
@@ -498,6 +501,16 @@ def followup_suggestions(limit: int = 200, *, owner_id: int | None = None) -> li
 
 
 def queue_followups_for_leads(lead_ids: list[int], *, owner_id: int | None = None) -> dict[str, int]:
+    linkedin_profile_id = None
+    if owner_id is not None:
+        from linkedin.models import LinkedInProfile
+
+        linkedin_profile_id = (
+            LinkedInProfile.objects.filter(user_id=owner_id, active=True)
+            .order_by("-created_at", "id")
+            .values_list("id", flat=True)
+            .first()
+        )
     enqueued = 0
     skipped = 0
     deals = Deal.objects.filter(lead_id__in=lead_ids, state=ProfileState.CONNECTED.value).select_related("lead", "campaign")
@@ -513,13 +526,14 @@ def queue_followups_for_leads(lead_ids: list[int], *, owner_id: int | None = Non
             delay_seconds=10,
             deal=d,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
         )
         enqueued += 1
     return {"enqueued": enqueued, "skipped": skipped}
 
 
-def get_safe_mode_settings() -> SafeModeSettings:
-    cfg = SiteConfig.load()
+def get_safe_mode_settings(user=None) -> SafeModeSettings:
+    cfg = SiteConfig.load(user)
     return SafeModeSettings(
         enabled=bool(getattr(cfg, "safe_mode_enabled", True)),
         global_pause_outreach=bool(getattr(cfg, "global_pause_outreach", False)),
@@ -529,8 +543,8 @@ def get_safe_mode_settings() -> SafeModeSettings:
     )
 
 
-def set_safe_mode_settings(payload: dict[str, Any]) -> SafeModeSettings:
-    cfg = SiteConfig.load()
+def set_safe_mode_settings(payload: dict[str, Any], *, user=None) -> SafeModeSettings:
+    cfg = SiteConfig.load(user)
     try:
         max_bulk_approve = int(payload.get("maxBulkApprove", cfg.max_bulk_approve))
         max_bulk_export = int(payload.get("maxBulkExport", cfg.max_bulk_export))
@@ -553,4 +567,4 @@ def set_safe_mode_settings(payload: dict[str, Any]) -> SafeModeSettings:
             "max_bulk_export",
         ]
     )
-    return get_safe_mode_settings()
+    return get_safe_mode_settings(user)

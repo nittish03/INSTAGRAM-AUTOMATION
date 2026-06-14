@@ -5,7 +5,14 @@ from urllib.parse import unquote, urlparse, urljoin
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from linkedin.conf import BROWSER_NAV_TIMEOUT_MS, DUMP_PAGES, FIXTURE_PAGES_DIR, HUMAN_TYPE_MIN_DELAY_MS, HUMAN_TYPE_MAX_DELAY_MS
+from linkedin.conf import (
+    BROWSER_NAV_TIMEOUT_MS,
+    DUMP_PAGES,
+    FIXTURE_PAGES_DIR,
+    HUMAN_TYPE_MAX_DELAY_MS,
+    HUMAN_TYPE_MIN_DELAY_MS,
+    bot_time_limits_enabled,
+)
 from linkedin.exceptions import SkipProfile
 
 logger = logging.getLogger(__name__)
@@ -97,7 +104,8 @@ def find_top_card(session):
 
 def human_type(locator, text: str, min_delay: int = HUMAN_TYPE_MIN_DELAY_MS, max_delay: int = HUMAN_TYPE_MAX_DELAY_MS):
     """Type text with randomized per-keystroke delay to mimic human input."""
-    locator.type(text, delay=random.randint(min_delay, max_delay))
+    delay = random.randint(min_delay, max_delay) if bot_time_limits_enabled() else 0
+    locator.type(text, delay=delay)
 
 
 def dump_page_html(session: "AccountSession", profile: dict, category: str = "connect"):

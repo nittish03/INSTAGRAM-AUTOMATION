@@ -179,6 +179,7 @@ export type SiteConfig = {
   googleSheetId: string;
   googleSheetTab: string;
   googleSheetSyncUserId: number | null;
+  scope?: "user" | "global";
 };
 
 export type SiteConfigResponse = {

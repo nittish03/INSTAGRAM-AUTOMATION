@@ -169,6 +169,9 @@ class DaemonControlApiTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(username="daemon_staff", password="testpass123", is_staff=True)
         self.viewer = User.objects.create_user(username="daemon_viewer", password="testpass123")
+        from linkedin.models import LinkedInProfile
+
+        self.staff_profile = LinkedInProfile.objects.create(user=self.staff, active=True)
 
     def test_launch_requires_staff(self):
         self.client.login(username="daemon_viewer", password="testpass123")
@@ -258,18 +261,27 @@ class DaemonControlApiTests(TestCase):
 
     def test_approve_draft_send_task_records_owner(self):
         from chat.models import ChatMessage
-        from crm.models import Lead
+        from crm.models import Deal, Lead
         from django.contrib.contenttypes.models import ContentType
         from linkedin.models import Campaign, Task
+        from linkedin.enums import ProfileState
 
         self.client.login(username="daemon_staff", password="testpass123")
         campaign = Campaign.objects.create(name="Owner Scoped Campaign")
+        campaign.users.add(self.staff)
         lead = Lead.objects.create(public_identifier="owner-scope")
+        Deal.objects.create(
+            lead=lead,
+            campaign=campaign,
+            state=ProfileState.CONNECTED.value,
+            connection_assessment_source="api_degree_1",
+        )
         draft = ChatMessage.objects.create(
             content_type=ContentType.objects.get_for_model(Lead),
             object_id=lead.pk,
             campaign=campaign,
             owner=self.staff,
+            linkedin_profile=self.staff_profile,
             content="Approved message",
             linkedin_urn="draft_owner_scope",
             is_outgoing=True,
@@ -292,9 +304,10 @@ class DaemonControlApiTests(TestCase):
         from crm.models import Lead
         from django.contrib.auth.models import User
         from django.contrib.contenttypes.models import ContentType
-        from linkedin.models import Campaign, Task
+        from linkedin.models import Campaign, LinkedInProfile, Task
 
         other_user = User.objects.create_user(username="other_draft_staff", password="testpass123", is_staff=True)
+        other_profile = LinkedInProfile.objects.create(user=other_user, active=True)
         self.client.login(username="daemon_staff", password="testpass123")
         campaign = Campaign.objects.create(name="Other Owner Campaign")
         lead = Lead.objects.create(public_identifier="other-owner-scope")
@@ -303,6 +316,7 @@ class DaemonControlApiTests(TestCase):
             object_id=lead.pk,
             campaign=campaign,
             owner=other_user,
+            linkedin_profile=other_profile,
             content="Other owner's message",
             linkedin_urn="draft_other_owner_scope",
             is_outgoing=True,

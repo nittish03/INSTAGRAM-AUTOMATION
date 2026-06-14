@@ -44,7 +44,10 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
 
         ok = 0
         for lead in eligible:
-            if lead_sheet_export_verification(lead)[0] and sync_lead_to_google_sheet(lead):
+            if lead_sheet_export_verification(lead, config_user=request.user)[0] and sync_lead_to_google_sheet(
+                lead,
+                config_user=request.user,
+            ):
                 ok += 1
         self.message_user(
             request,
@@ -67,7 +70,7 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
 
         ok = 0
         for lead in eligible:
-            if sync_lead_to_google_sheet(lead, bypass_verification=True):
+            if sync_lead_to_google_sheet(lead, bypass_verification=True, config_user=request.user):
                 ok += 1
         self.message_user(
             request,

@@ -32,6 +32,14 @@ class ChatMessage(models.Model):
         verbose_name=_("Owner"),
         related_name="%(app_label)s_%(class)s_owner_related",
     )
+    linkedin_profile = models.ForeignKey(
+        "linkedin.LinkedInProfile",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        verbose_name=_("LinkedIn Profile"),
+    )
     creation_date = models.DateTimeField(
         default=timezone.now,
         verbose_name=_("Creation date")

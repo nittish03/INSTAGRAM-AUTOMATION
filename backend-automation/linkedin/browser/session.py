@@ -8,7 +8,7 @@ from functools import cached_property
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from linkedin.conf import MIN_DELAY, MAX_DELAY
+from linkedin.conf import MIN_DELAY, MAX_DELAY, bot_time_limits_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,8 @@ _AUTH_COOKIE_NAME = "li_at"
 
 
 def random_sleep(min_val, max_val):
+    if not bot_time_limits_enabled():
+        return
     delay = random.uniform(min_val, max_val)
     logger.debug(f"Pause: {delay:.2f}s")
     time.sleep(delay)

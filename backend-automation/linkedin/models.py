@@ -6,9 +6,12 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import models
+from django.db.models import Max
 from django.utils import timezone
 from cryptography.fernet import Fernet, InvalidToken
 from simple_history.models import HistoricalRecords
+
+from linkedin.conf import bot_time_limits_enabled
 
 logger = logging.getLogger(__name__)
 _decrypt_invalid_token_logged = False
@@ -67,7 +70,11 @@ _RATE_LIMIT_FIELDS = {
 
 
 class SiteConfig(models.Model):
-    """Singleton model for global site configuration (LLM keys, etc.)."""
+    """Site/user configuration.
+
+    ``user=None`` is the legacy global fallback. Staff-facing app pages load a
+    per-user row so LLM and Google Sheet settings do not leak across accounts.
+    """
 
     LLM_PROVIDER_CHOICES = (
         ("openai", "OpenAI Compatible"),
@@ -75,6 +82,13 @@ class SiteConfig(models.Model):
         ("gemini", "Google Gemini"),
     )
 
+    user = models.OneToOneField(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="site_config",
+    )
     llm_api_key = models.CharField(max_length=500, blank=True, default="")
     llm_provider = models.CharField(
         max_length=20,
@@ -148,7 +162,7 @@ class SiteConfig(models.Model):
         verbose_name_plural = "Site Configuration"
 
     def __str__(self):
-        return "Site Configuration"
+        return f"Site Configuration ({self.user})" if self.user_id else "Site Configuration"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -167,15 +181,48 @@ class SiteConfig(models.Model):
         plain_key = self.llm_api_key
         if self.llm_api_key and not self.llm_api_key.startswith('gAAAA'):
             self.llm_api_key = encrypt_value(self.llm_api_key)
-        self.pk = 1
+        if self.user_id is None:
+            self.pk = 1
         super().save(*args, **kwargs)
         self.llm_api_key = plain_key
 
     @classmethod
-    def load(cls) -> "SiteConfig":
+    def load(cls, user: User | int | None = None) -> "SiteConfig":
+        global_cfg, _ = cls.objects.get_or_create(pk=1, defaults={"user": None})
+        if user is not None:
+            user_id = user if isinstance(user, int) else getattr(user, "pk", None)
+            if user_id is not None:
+                obj = cls.objects.filter(user_id=user_id).first()
+                if obj is None:
+                    obj = cls(
+                        pk=(cls.objects.aggregate(max_pk=Max("pk"))["max_pk"] or 0) + 1,
+                        user_id=user_id,
+                    )
+                    copy_fields = [
+                        "llm_api_key",
+                        "llm_provider",
+                        "ai_model",
+                        "llm_api_base",
+                        "azure_deployment",
+                        "azure_api_version",
+                        "google_sheet_sync_enabled",
+                        "google_sheet_id",
+                        "google_sheet_tab",
+                        "google_sheet_sync_user",
+                        "safe_mode_enabled",
+                        "global_pause_outreach",
+                        "pause_new_connection_invites",
+                        "max_bulk_approve",
+                        "max_bulk_export",
+                        "sheet_export_min_confidence_api",
+                        "sheet_export_min_confidence_after_invite",
+                    ]
+                    for field in copy_fields:
+                        setattr(obj, field, getattr(global_cfg, field))
+                    obj.save(force_insert=True)
+                return obj
 
-        obj, _ = cls.objects.get_or_create(pk=1)
-        return obj
+        return global_cfg
 
 
 class Campaign(models.Model):
@@ -277,6 +324,9 @@ class LinkedInProfile(models.Model):
 
     def can_execute(self, action_type: str) -> bool:
         """Check if the action is allowed under daily/weekly rate limits."""
+        if not bot_time_limits_enabled():
+            return True
+
         # Reset exhaustion flag on a new day
         exhausted_date = self._exhausted.get(action_type)
         if exhausted_date is not None and exhausted_date != date.today():

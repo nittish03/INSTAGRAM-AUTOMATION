@@ -13,7 +13,7 @@ from typing import Callable
 from django.utils import timezone
 from termcolor import colored
 
-from linkedin.conf import CAMPAIGN_CONFIG
+from linkedin.conf import CAMPAIGN_CONFIG, bot_delay_seconds, bot_time_limits_enabled
 from linkedin.db.deals import increment_connect_attempts, set_profile_state
 from linkedin.db.leads import disqualify_lead
 from linkedin.models import ActionLog, Task
@@ -41,6 +41,8 @@ class ConnectStrategy:
 
     def compute_delay(self, elapsed: float) -> float:
         """Delay until next connect, scaled by elapsed execution time for freemium campaigns."""
+        if not bot_time_limits_enabled():
+            return 0.0
         if self.action_fraction >= 1.0:
             return self.delay
         return max(self.delay, elapsed * (1 - self.action_fraction) / self.action_fraction)
@@ -98,6 +100,9 @@ def handle_connect(task, session, qualifiers):
     owner_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(owner_id, int):
         owner_id = None
+    linkedin_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    if not isinstance(linkedin_profile_id, int):
+        linkedin_profile_id = None
 
     if new_connection_invites_paused():
         raise TaskSkipped("New connection invite expansion is paused.")
@@ -105,14 +110,18 @@ def handle_connect(task, session, qualifiers):
     strategy = strategy_for(campaign, qualifiers)
 
     # --- FIRST: rate limit check (cheapest gate) ---
-    if not session.linkedin_profile.can_execute(ActionLog.ActionType.CONNECT):
+    if bot_time_limits_enabled() and not session.linkedin_profile.can_execute(ActionLog.ActionType.CONNECT):
         enqueue_connect(campaign_id, delay_seconds=_seconds_until_tomorrow())
         raise TaskSkipped("Daily/Weekly connection limit reached.")
 
     # --- THEN: find candidate ---
     candidate = strategy.find_candidate(session)
     if candidate is None:
-        enqueue_connect(campaign_id, delay_seconds=cfg["connect_no_candidate_delay_seconds"])
+        enqueue_connect(
+            campaign_id,
+            delay_seconds=cfg["connect_no_candidate_delay_seconds"],
+            apply_time_limits=False,
+        )
         return
 
     public_id = candidate.get("public_identifier") or candidate.get("public_id")
@@ -166,8 +175,14 @@ def handle_connect(task, session, qualifiers):
             if deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_lead_to_google_sheet
 
-                sync_lead_to_google_sheet(deal.lead)
-            enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
+                sync_lead_to_google_sheet(deal.lead, config_user=owner_id)
+            enqueue_follow_up(
+                campaign_id,
+                public_id,
+                deal=deal,
+                owner_id=owner_id,
+                linkedin_profile_id=linkedin_profile_id,
+            )
             _reschedule()
             return
 
@@ -187,12 +202,14 @@ def handle_connect(task, session, qualifiers):
                 sync_pending_lead_to_google_sheet(
                     deal.lead,
                     reason_code="pre_connect_pending_detected",
+                    config_user=owner_id,
                 )
             enqueue_check_pending(
                 campaign_id, public_id,
                 backoff_hours=cfg["check_pending_recheck_after_hours"],
                 deal=deal,
                 owner_id=owner_id,
+                linkedin_profile_id=linkedin_profile_id,
             )
             _reschedule()
             return
@@ -232,6 +249,7 @@ def handle_connect(task, session, qualifiers):
                     sync_qualified_lead_to_google_sheet(
                         deal.lead,
                         reason_code="connect_no_button",
+                        config_user=owner_id,
                     )
                 logger.debug("%s: connect attempt %d/%d — no button found", public_id, attempts, MAX_CONNECT_ATTEMPTS)
         else:
@@ -284,13 +302,14 @@ def handle_connect(task, session, qualifiers):
             if state_to_store == ProfileState.CONNECTED and deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_lead_to_google_sheet
 
-                sync_lead_to_google_sheet(deal.lead)
+                sync_lead_to_google_sheet(deal.lead, config_user=owner_id)
             if state_to_store == ProfileState.PENDING and deal and deal.lead_id:
                 from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
                 sync_pending_lead_to_google_sheet(
                     deal.lead,
                     reason_code="invite_sent",
+                    config_user=owner_id,
                 )
             name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
             session.linkedin_profile.record_action(
@@ -316,14 +335,26 @@ def handle_connect(task, session, qualifiers):
                     backoff_hours=cfg["check_pending_recheck_after_hours"],
                     deal=deal,
                     owner_id=owner_id,
+                    linkedin_profile_id=linkedin_profile_id,
                 )
             elif state_to_store == ProfileState.CONNECTED:
-                enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
+                enqueue_follow_up(
+                    campaign_id,
+                    public_id,
+                    deal=deal,
+                    owner_id=owner_id,
+                    linkedin_profile_id=linkedin_profile_id,
+                )
 
     except ReachedConnectionLimit as e:
         logger.warning("Rate limited: %s", e)
         session.linkedin_profile.mark_exhausted(ActionLog.ActionType.CONNECT)
-        enqueue_connect(campaign_id, delay_seconds=_seconds_until_tomorrow(), deal=deal)
+        enqueue_connect(
+            campaign_id,
+            delay_seconds=_seconds_until_tomorrow(),
+            deal=deal,
+            apply_time_limits=False,
+        )
         raise TaskSkipped(f"Connection limit: {e}")
     except SkipProfile as e:
         logger.warning("Skipping %s: %s", public_id, e)
@@ -357,7 +388,13 @@ def _enqueue_task(task_type, payload, delay_seconds=10, dedup_keys=None, deal=No
         )
 
 
-def enqueue_connect(campaign_id: int, delay_seconds: float = 10, deal=None):
+def enqueue_connect(
+    campaign_id: int,
+    delay_seconds: float = 10,
+    deal=None,
+    *,
+    apply_time_limits: bool = True,
+):
     if new_connection_invites_paused():
         logger.info("connect enqueue skipped for campaign %s: new connection invite expansion is paused", campaign_id)
         return
@@ -365,7 +402,7 @@ def enqueue_connect(campaign_id: int, delay_seconds: float = 10, deal=None):
     _enqueue_task(
         task_type=Task.TaskType.CONNECT,
         payload={"campaign_id": campaign_id},
-        delay_seconds=delay_seconds,
+        delay_seconds=bot_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
         deal=deal,
     )
 
@@ -376,6 +413,7 @@ def enqueue_check_pending(
     backoff_hours: float,
     deal=None,
     owner_id: int | None = None,
+    linkedin_profile_id: int | None = None,
 ):
     # Equal-jitter backoff: uniform spread across [half, backoff]
     half = backoff_hours / 2
@@ -387,9 +425,13 @@ def enqueue_check_pending(
     }
     if owner_id is not None:
         payload["owner_id"] = owner_id
+    if linkedin_profile_id is not None:
+        payload["linkedin_profile_id"] = linkedin_profile_id
     dedup_keys = ["campaign_id", "public_id"]
     if owner_id is not None:
         dedup_keys.append("owner_id")
+    if linkedin_profile_id is not None:
+        dedup_keys.append("linkedin_profile_id")
 
     _enqueue_task(
         task_type=Task.TaskType.CHECK_PENDING,
@@ -407,15 +449,20 @@ def enqueue_follow_up(
     delay_seconds: float = 10,
     deal=None,
     owner_id: int | None = None,
+    linkedin_profile_id: int | None = None,
+    *,
+    apply_time_limits: bool = True,
 ):
     payload = {"campaign_id": campaign_id, "public_id": public_id}
     if owner_id is not None:
         payload["owner_id"] = owner_id
+    if linkedin_profile_id is not None:
+        payload["linkedin_profile_id"] = linkedin_profile_id
 
     _enqueue_task(
         task_type=Task.TaskType.FOLLOW_UP,
         payload=payload,
-        delay_seconds=delay_seconds,
+        delay_seconds=bot_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
         deal=deal,
     )
 
@@ -433,6 +480,7 @@ def enqueue_reply_check(
     delay_seconds: float | None = None,
     deal=None,
     owner_id: int | None = None,
+    linkedin_profile_id: int | None = None,
 ):
     from datetime import timedelta
 
@@ -452,11 +500,15 @@ def enqueue_reply_check(
     }
     if owner_id is not None:
         payload["owner_id"] = owner_id
+    if linkedin_profile_id is not None:
+        payload["linkedin_profile_id"] = linkedin_profile_id
     if sent_message_id is not None:
         payload["sent_message_id"] = sent_message_id
     dedup_keys = ["campaign_id", "public_id", "sent_message_id"] if sent_message_id is not None else ["campaign_id", "public_id"]
     if owner_id is not None:
         dedup_keys.append("owner_id")
+    if linkedin_profile_id is not None:
+        dedup_keys.append("linkedin_profile_id")
 
     _enqueue_task(
         task_type=Task.TaskType.REPLY_CHECK,

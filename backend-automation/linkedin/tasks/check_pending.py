@@ -8,6 +8,7 @@ from termcolor import colored
 
 from django.db import transaction
 
+from linkedin.conf import bot_time_limits_enabled
 from linkedin.db.deals import deal_to_profile_dict, set_profile_state
 from linkedin.enums import ProfileState
 from linkedin.exceptions import SkipProfile
@@ -33,6 +34,9 @@ def handle_check_pending(task, session, qualifiers):
     owner_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(owner_id, int):
         owner_id = None
+    linkedin_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    if not isinstance(linkedin_profile_id, int):
+        linkedin_profile_id = None
 
     logger.info(
         "[%s] %s %s",
@@ -53,7 +57,7 @@ def handle_check_pending(task, session, qualifiers):
     # Age limit: auto-fail if PENDING for > 30 days
     from datetime import timedelta
     from django.utils import timezone
-    if deal.creation_date < timezone.now() - timedelta(days=30):
+    if bot_time_limits_enabled() and deal.creation_date < timezone.now() - timedelta(days=30):
         logger.info("[%s] Deal for %s expired (> 30 days PENDING) — marking FAILED", session.campaign, public_id)
         set_profile_state(session, public_id, ProfileState.FAILED.value, reason="Expired: PENDING for > 30 days")
         return
@@ -76,6 +80,7 @@ def handle_check_pending(task, session, qualifiers):
             backoff_hours=new_backoff,
             deal=deal,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
         )
         return
 
@@ -115,8 +120,14 @@ def handle_check_pending(task, session, qualifiers):
         if deal and deal.lead_id:
             from google_integration.sheet_sync import sync_lead_to_google_sheet
 
-            sync_lead_to_google_sheet(deal.lead)
-        enqueue_follow_up(campaign_id, public_id, deal=deal, owner_id=owner_id)
+            sync_lead_to_google_sheet(deal.lead, config_user=owner_id)
+        enqueue_follow_up(
+            campaign_id,
+            public_id,
+            deal=deal,
+            owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
+        )
     elif state_to_store == ProfileState.PENDING:
         if deal and deal.lead_id:
             from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
@@ -124,6 +135,7 @@ def handle_check_pending(task, session, qualifiers):
             sync_pending_lead_to_google_sheet(
                 deal.lead,
                 reason_code="check_pending_ui_pending",
+                config_user=owner_id,
             )
         new_backoff = min(backoff_hours * 2, 6)
         with transaction.atomic():
@@ -136,6 +148,7 @@ def handle_check_pending(task, session, qualifiers):
             backoff_hours=new_backoff,
             deal=deal,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
         )
         logger.info(
             "%s still pending — scheduled in %.1fh (backoff %.1fh → %.1fh)",
@@ -147,4 +160,5 @@ def handle_check_pending(task, session, qualifiers):
         sync_qualified_lead_to_google_sheet(
             deal.lead,
             reason_code="check_pending_not_connected",
+            config_user=owner_id,
         )

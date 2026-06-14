@@ -35,10 +35,12 @@ def handle_send_message(task, session, qualifiers=None):
         session.campaign, colored("\u25b6 send_message", "blue", attrs=["bold"]), public_id,
     )
 
+    linkedin_profile = getattr(session, "linkedin_profile", None)
+    linkedin_profile_id = linkedin_profile.pk if getattr(linkedin_profile, "pk", None) is not None else None
     try:
-        msg = ChatMessage.objects.get(pk=message_id)
+        msg = ChatMessage.objects.get(pk=message_id, linkedin_profile=linkedin_profile)
     except ChatMessage.DoesNotExist:
-        error_msg = f"send_message: ChatMessage {message_id} no longer exists — aborting"
+        error_msg = f"send_message: ChatMessage {message_id} is not available for this LinkedIn profile — aborting"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
@@ -60,16 +62,21 @@ def handle_send_message(task, session, qualifiers=None):
         }
         if owner_id is not None:
             payload["owner_id"] = owner_id
+        if linkedin_profile_id is not None:
+            payload["linkedin_profile_id"] = linkedin_profile_id
         current_task_pk = getattr(task, "pk", None)
         if not isinstance(current_task_pk, int):
             current_task_pk = None
-        exists = Task.objects.filter(
+        exists_qs = Task.objects.filter(
             task_type=Task.TaskType.SEND_MESSAGE,
             status__in=[Task.Status.PENDING, Task.Status.RUNNING],
             payload__campaign_id=campaign_id,
             payload__public_id=public_id,
             payload__message_id=message_id,
-        ).exclude(pk=current_task_pk).exists()
+        )
+        if linkedin_profile_id is not None:
+            exists_qs = exists_qs.filter(payload__linkedin_profile_id=linkedin_profile_id)
+        exists = exists_qs.exclude(pk=current_task_pk).exists()
         if exists:
             return
         Task.objects.create(
@@ -95,7 +102,14 @@ def handle_send_message(task, session, qualifiers=None):
 
         if "Pending" in reason:
             if deal:
-                enqueue_check_pending(campaign_id, public_id, backoff_hours=backoff_hours, deal=deal, owner_id=owner_id)
+                enqueue_check_pending(
+                    campaign_id,
+                    public_id,
+                    backoff_hours=backoff_hours,
+                    deal=deal,
+                    owner_id=owner_id,
+                    linkedin_profile_id=linkedin_profile_id,
+                )
             _requeue_approved_send(retry_delay, "Waiting for pending connection before sending approved message")
             raise TaskSkipped("LinkedIn still shows Pending; approved message will retry after connection check") from skip_exc
 
@@ -152,8 +166,19 @@ def handle_send_message(task, session, qualifiers=None):
                 if deal.lead_id:
                     from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
 
-                    sync_pending_lead_to_google_sheet(deal.lead, reason_code="send_message_auto_connect")
-                enqueue_check_pending(campaign_id, public_id, backoff_hours=backoff_hours, deal=deal, owner_id=owner_id)
+                    sync_pending_lead_to_google_sheet(
+                        deal.lead,
+                        reason_code="send_message_auto_connect",
+                        config_user=owner_id,
+                    )
+                enqueue_check_pending(
+                    campaign_id,
+                    public_id,
+                    backoff_hours=backoff_hours,
+                    deal=deal,
+                    owner_id=owner_id,
+                    linkedin_profile_id=linkedin_profile_id,
+                )
             _requeue_approved_send(retry_delay, "Connection invite sent before approved message could be delivered")
             raise TaskSkipped("LinkedIn showed Connect; sent connection invite and requeued approved message") from skip_exc
 
@@ -228,7 +253,14 @@ def handle_send_message(task, session, qualifiers=None):
         note=f"Message: {msg.content[:50]}..."
     )
     
-    enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600, deal=deal, owner_id=owner_id)
+    enqueue_follow_up(
+        campaign_id,
+        public_id,
+        delay_seconds=4 * 3600,
+        deal=deal,
+        owner_id=owner_id,
+        linkedin_profile_id=linkedin_profile_id,
+    )
     enqueue_reply_check(
         campaign_id,
         public_id,
@@ -236,5 +268,6 @@ def handle_send_message(task, session, qualifiers=None):
         sent_at=sent_at,
         deal=deal,
         owner_id=owner_id,
+        linkedin_profile_id=linkedin_profile_id,
     )
     logger.info("Message dispatched successfully. Reply checks scheduled before ~4h follow-up.")

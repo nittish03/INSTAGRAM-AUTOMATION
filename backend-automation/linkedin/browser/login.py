@@ -13,6 +13,7 @@ from linkedin.conf import (
     BROWSER_LOGIN_TIMEOUT_MS,
     BROWSER_SLOW_MO,
     PLAYWRIGHT_HEADLESS,
+    bot_delay_seconds,
 )
 from linkedin.exceptions import AuthenticationError
 
@@ -31,21 +32,41 @@ LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
 
 SELECTORS = {
     "email": [
+        'input[autocomplete*="username"]',
         'input#username',
         'input[name="session_key"]',
         'input[autocomplete="username"]',
+        'input[autocomplete="email"]',
         'input[name="username"]',
+        'input[type="email"]',
+        'input[type="text"][name*="session"]',
+        'input[type="text"][aria-label*="Email" i]',
+        'input[type="text"][aria-label*="Phone" i]',
+        'input[type="text"][placeholder*="Email" i]',
+        'input[type="text"][placeholder*="Phone" i]',
     ],
     "password": [
+        'input[autocomplete*="current-password"]',
         'input#password',
         'input[name="session_password"]',
         'input[autocomplete="current-password"]',
         'input[name="password"]',
+        'input[type="password"]',
+        'input[aria-label*="Password" i]',
+        'input[placeholder*="Password" i]',
     ],
     "submit": [
         'button[type="submit"]',
         'button[data-litms-control-urn*="login-submit"]',
         'button[aria-label*="Sign in"]',
+        'button:has-text("Sign in")',
+        'input[type="submit"]',
+    ],
+    "next": [
+        'button[type="submit"]',
+        'button:has-text("Continue")',
+        'button:has-text("Next")',
+        'button:has-text("Sign in")',
     ],
 }
 
@@ -60,7 +81,7 @@ CHALLENGE_SELECTORS = [
 
 def _first_visible(page, selectors: list[str], timeout_ms: int = 5000):
     for selector in selectors:
-        locator = page.locator(selector).first
+        locator = page.locator(f"{selector}:visible").first
         try:
             locator.wait_for(state="visible", timeout=timeout_ms)
             return locator
@@ -69,17 +90,50 @@ def _first_visible(page, selectors: list[str], timeout_ms: int = 5000):
     return None
 
 
+def _clear_and_human_type(locator, text: str):
+    try:
+        locator.click()
+        locator.fill("")
+    except Exception:
+        pass
+    human_type(locator, text)
+
+
+def _login_input_summary(page) -> str:
+    try:
+        return page.locator("input").evaluate_all(
+            """els => els.map((el, idx) => ({
+                idx,
+                type: el.getAttribute('type') || '',
+                name: el.getAttribute('name') || '',
+                id: el.getAttribute('id') || '',
+                autocomplete: el.getAttribute('autocomplete') || '',
+                placeholder: el.getAttribute('placeholder') || '',
+                aria: el.getAttribute('aria-label') || '',
+                visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+            }))"""
+        )
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        return f"<input summary unavailable: {exc}>"
+
+
 def _raise_auth_diagnostic(page, reason: str):
     title = ""
     try:
         title = page.title()
     except Exception:  # pragma: no cover - diagnostic only
         title = "<unavailable>"
-    raise AuthenticationError(f"{reason}. URL={page.url!r} TITLE={title!r}")
+    raise AuthenticationError(
+        f"{reason}. URL={page.url!r} TITLE={title!r} INPUTS={_login_input_summary(page)!r}"
+    )
 
 
 def _is_challenge_url(url: str) -> bool:
     return any(frag in url for frag in CHALLENGE_URL_FRAGMENTS)
+
+
+def _is_feed_url(url: str) -> bool:
+    return "/feed" in (url or "")
 
 
 def _wait_for_feed_with_manual_challenge(page, timeout_s: int = MANUAL_CHALLENGE_TIMEOUT_S):
@@ -95,7 +149,7 @@ def _wait_for_feed_with_manual_challenge(page, timeout_s: int = MANUAL_CHALLENGE
         except Exception:
             current = ""
 
-        if "/feed" in current:
+        if _is_feed_url(current):
             return
 
         if _is_challenge_url(current) and not notified:
@@ -129,23 +183,75 @@ def playwright_login(session):
     lp = session.linkedin_profile
     logger.info(colored("Fresh login sequence starting", "cyan") + f" for {session}")
 
-    goto_page(
-        session,
-        action=lambda: page.goto(LINKEDIN_LOGIN_URL),
-        expected_url_pattern="/login",
-        error_message="Failed to load login page",
-    )
+    try:
+        page.goto(LINKEDIN_LOGIN_URL, timeout=BROWSER_LOGIN_TIMEOUT_MS)
+    except PlaywrightTimeoutError:
+        if not (_is_feed_url(page.url) or "/login" in page.url or _is_challenge_url(page.url)):
+            _raise_auth_diagnostic(page, "Failed to load login page")
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=10_000)
+    except PlaywrightTimeoutError:
+        logger.debug("Login page domcontentloaded timed out; continuing with field lookup")
 
-    email_input = _first_visible(page, SELECTORS["email"], timeout_ms=10000)
-    password_input = _first_visible(page, SELECTORS["password"], timeout_ms=3000)
-    if not email_input or not password_input:
+    # LinkedIn can redirect an already-authenticated browser from /login to
+    # /feed. Manual login in the opened browser also lands here. In both cases
+    # there is intentionally no login form, so treat it as success and let the
+    # caller persist the storage state.
+    try:
+        page.wait_for_url(
+            lambda url: _is_feed_url(url) or "/login" in url or _is_challenge_url(url),
+            timeout=5000,
+        )
+    except PlaywrightTimeoutError:
+        pass
+    if _is_feed_url(page.url):
+        logger.info(colored("LinkedIn session already authenticated", "green") + f" for {session}")
+        return
+
+    email_input = _first_visible(page, SELECTORS["email"], timeout_ms=15000)
+    if not email_input:
+        if _is_feed_url(page.url):
+            logger.info(colored("LinkedIn session authenticated after manual login", "green") + f" for {session}")
+            return
         if _first_visible(page, CHALLENGE_SELECTORS, timeout_ms=1500):
-            _raise_auth_diagnostic(page, "LinkedIn presented a challenge/captcha page")
-        _raise_auth_diagnostic(page, "LinkedIn login form fields not found")
+            _wait_for_feed_with_manual_challenge(page)
+            logger.info(colored("LinkedIn challenge completed", "green") + f" for {session}")
+            return
+        _raise_auth_diagnostic(page, "LinkedIn username/email field not found")
 
-    human_type(email_input, lp.linkedin_username)
+    logger.info("Typing LinkedIn username for %s", session)
+    _clear_and_human_type(email_input, lp.linkedin_username)
     session.wait()
-    human_type(password_input, lp.linkedin_password)
+
+    password_input = _first_visible(page, SELECTORS["password"], timeout_ms=5000)
+    if not password_input:
+        next_button = _first_visible(page, SELECTORS["next"], timeout_ms=3000)
+        if next_button:
+            logger.info("Submitting LinkedIn username step for %s", session)
+            next_button.click()
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=10_000)
+            except PlaywrightTimeoutError:
+                pass
+            try:
+                page.wait_for_timeout(1000)
+            except Exception:
+                time.sleep(1)
+
+        if _is_feed_url(page.url):
+            logger.info(colored("LinkedIn session authenticated after username step", "green") + f" for {session}")
+            return
+        if _first_visible(page, CHALLENGE_SELECTORS, timeout_ms=1500):
+            _wait_for_feed_with_manual_challenge(page)
+            logger.info(colored("LinkedIn challenge completed", "green") + f" for {session}")
+            return
+
+        password_input = _first_visible(page, SELECTORS["password"], timeout_ms=12000)
+    if not password_input:
+        _raise_auth_diagnostic(page, "LinkedIn password field not found after username step")
+
+    logger.info("Typing LinkedIn password for %s", session)
+    _clear_and_human_type(password_input, lp.linkedin_password)
 
     session.wait()
     submit_button = _first_visible(page, SELECTORS["submit"], timeout_ms=7000)
@@ -158,13 +264,13 @@ def playwright_login(session):
     # wait for the user to solve it manually instead of crashing the daemon.
     try:
         page.wait_for_url(
-            lambda url: "/feed" in url or _is_challenge_url(url),
+            lambda url: _is_feed_url(url) or _is_challenge_url(url),
             timeout=BROWSER_LOGIN_TIMEOUT_MS,
         )
     except PlaywrightTimeoutError:
         pass
 
-    if "/feed" not in page.url:
+    if not _is_feed_url(page.url):
         _wait_for_feed_with_manual_challenge(page)
 
     logger.debug("Login navigation complete: %s", page.url)
@@ -175,7 +281,7 @@ def launch_browser(storage_state=None):
     playwright = sync_playwright().start()
     browser = playwright.chromium.launch(
         headless=PLAYWRIGHT_HEADLESS,
-        slow_mo=BROWSER_SLOW_MO,
+        slow_mo=bot_delay_seconds(BROWSER_SLOW_MO),
     )
     context = browser.new_context(storage_state=storage_state)
     context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
@@ -208,13 +314,19 @@ def start_browser_session(session):
         _save_cookies(session)
         logger.info(colored("Login successful – session saved", "green", attrs=["bold"]))
     else:
-        goto_page(
-            session,
-            action=lambda: session.page.goto(LINKEDIN_FEED_URL),
-            expected_url_pattern="/feed",
-            timeout=BROWSER_DEFAULT_TIMEOUT_MS,
-            error_message="Saved session invalid",
-        )
+        try:
+            goto_page(
+                session,
+                action=lambda: session.page.goto(LINKEDIN_FEED_URL),
+                expected_url_pattern="/feed",
+                timeout=BROWSER_DEFAULT_TIMEOUT_MS,
+                error_message="Saved session invalid",
+            )
+        except RuntimeError as exc:
+            logger.warning("Saved LinkedIn session invalid for %s: %s", session, exc)
+            playwright_login(session)
+            _save_cookies(session)
+            logger.info(colored("Login successful – refreshed saved session", "green", attrs=["bold"]))
 
     session.page.wait_for_load_state("load")
     logger.info(colored("Browser ready", "green", attrs=["bold"]))

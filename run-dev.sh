@@ -60,6 +60,39 @@ if [[ ! -d "$BACKEND_VENV" ]]; then
   exit 1
 fi
 
+free_port() {
+  local port="$1"
+  local pids
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "Cannot check port $port: lsof is not installed."
+    exit 1
+  fi
+
+  pids="$(lsof -ti "tcp:$port" 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    echo "Port $port is free."
+    return
+  fi
+
+  echo "Freeing port $port by force-killing process(es): ${pids//$'\n'/ }"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  sleep 1
+  pids="$(lsof -ti "tcp:$port" 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    echo "Failed to free port $port; still used by process(es): ${pids//$'\n'/ }"
+    exit 1
+  fi
+}
+
+free_dev_ports() {
+  free_port 8000
+  free_port 3000
+}
+
 backend_cmd="cd \"$BACKEND_DIR\" && source .venv/bin/activate && python manage.py runserver"
 daemon_cmd="cd \"$BACKEND_DIR\" && source .venv/bin/activate && python manage.py rundaemon"
 frontend_cmd="cd \"$FRONTEND_DIR\" && npm run dev"
@@ -154,9 +187,11 @@ EOF
 
 case "$MODE" in
   current)
+    free_dev_ports
     start_in_current_terminal
     ;;
   system)
+    free_dev_ports
     start_in_system_terminal
     ;;
   *)

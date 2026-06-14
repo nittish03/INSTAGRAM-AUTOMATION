@@ -68,6 +68,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         task = MagicMock(
             payload={
@@ -114,6 +115,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         task = MagicMock(
             payload={
@@ -155,6 +157,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         task = Task.objects.create(
             task_type=Task.TaskType.SEND_MESSAGE,
@@ -206,6 +209,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         task = Task.objects.create(
             task_type=Task.TaskType.SEND_MESSAGE,
@@ -280,6 +284,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=sent_at,
         )
 
@@ -320,6 +325,7 @@ class ReplyCheckTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=sent_at,
         )
 
@@ -369,6 +375,7 @@ class ReplyCheckTest(TestCase):
                 is_outgoing=False,
                 is_draft=False,
                 owner=self.user,
+                linkedin_profile=self.profile,
                 creation_date=timezone.now(),
             )
             return []

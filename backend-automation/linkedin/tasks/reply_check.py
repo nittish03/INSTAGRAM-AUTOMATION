@@ -13,6 +13,7 @@ from termcolor import colored
 
 from chat.models import ChatMessage
 from crm.models import Deal, Lead
+from linkedin.conf import bot_time_limits_enabled
 from linkedin.enums import ProfileState
 from linkedin.models import Task
 
@@ -28,24 +29,26 @@ def _parse_payload_datetime(value: str | None):
     return parsed
 
 
-def _has_pending_draft(lead: Lead, *, campaign_id: int, owner) -> bool:
+def _has_pending_draft(lead: Lead, *, campaign_id: int, owner, linkedin_profile) -> bool:
     lead_ct = ContentType.objects.get_for_model(Lead)
     return ChatMessage.objects.filter(
         content_type=lead_ct,
         object_id=lead.pk,
         campaign_id=campaign_id,
         owner=owner,
+        linkedin_profile=linkedin_profile,
         is_draft=True,
         is_approved=False,
     ).exists()
 
 
-def _latest_inbound_after(lead: Lead, sent_at, *, owner, before=None):
+def _latest_inbound_after(lead: Lead, sent_at, *, owner, linkedin_profile, before=None):
     lead_ct = ContentType.objects.get_for_model(Lead)
     messages = ChatMessage.objects.filter(
         content_type=lead_ct,
         object_id=lead.pk,
         owner=owner,
+        linkedin_profile=linkedin_profile,
         is_outgoing=False,
         is_draft=False,
         creation_date__gt=sent_at,
@@ -59,7 +62,14 @@ def _latest_inbound_after(lead: Lead, sent_at, *, owner, before=None):
     )
 
 
-def _accelerate_follow_up(campaign_id: int, public_id: str, deal: Deal | None, *, owner_id: int | None) -> None:
+def _accelerate_follow_up(
+    campaign_id: int,
+    public_id: str,
+    deal: Deal | None,
+    *,
+    owner_id: int | None,
+    linkedin_profile_id: int | None,
+) -> None:
     now = timezone.now()
     (
         Task.objects.filter(
@@ -69,6 +79,7 @@ def _accelerate_follow_up(campaign_id: int, public_id: str, deal: Deal | None, *
             payload__public_id=public_id,
         )
         .filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True))
+        .filter(Q(payload__linkedin_profile_id=linkedin_profile_id) | Q(payload__linkedin_profile_id__isnull=True))
         .delete()
     )
     pending = Task.objects.filter(
@@ -76,24 +87,44 @@ def _accelerate_follow_up(campaign_id: int, public_id: str, deal: Deal | None, *
         status=Task.Status.PENDING,
         payload__campaign_id=campaign_id,
         payload__public_id=public_id,
-    ).filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True))
+    ).filter(
+        Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True),
+        Q(payload__linkedin_profile_id=linkedin_profile_id) | Q(payload__linkedin_profile_id__isnull=True),
+    )
     if pending.exists():
         pending.update(scheduled_at=now, deal=deal)
         return
 
     from linkedin.tasks.connect import enqueue_follow_up
 
-    enqueue_follow_up(campaign_id, public_id, delay_seconds=0, deal=deal, owner_id=owner_id)
+    enqueue_follow_up(
+        campaign_id,
+        public_id,
+        delay_seconds=0,
+        deal=deal,
+        owner_id=owner_id,
+        linkedin_profile_id=linkedin_profile_id,
+    )
 
 
-def _normal_follow_up_due_before(campaign_id: int, public_id: str, next_check_at, *, owner_id: int | None) -> bool:
+def _normal_follow_up_due_before(
+    campaign_id: int,
+    public_id: str,
+    next_check_at,
+    *,
+    owner_id: int | None,
+    linkedin_profile_id: int | None,
+) -> bool:
     return Task.objects.filter(
         task_type=Task.TaskType.FOLLOW_UP,
         status=Task.Status.PENDING,
         payload__campaign_id=campaign_id,
         payload__public_id=public_id,
         scheduled_at__lte=next_check_at,
-    ).filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True)).exists()
+    ).filter(
+        Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True),
+        Q(payload__linkedin_profile_id=linkedin_profile_id) | Q(payload__linkedin_profile_id__isnull=True),
+    ).exists()
 
 
 def handle_reply_check(task, session, qualifiers=None):
@@ -109,9 +140,12 @@ def handle_reply_check(task, session, qualifiers=None):
     sent_message_id = payload.get("sent_message_id")
     owner = session.django_user
     owner_id = getattr(owner, "pk", None)
+    linkedin_profile = getattr(session, "linkedin_profile", None)
+    linkedin_profile_id = getattr(linkedin_profile, "pk", None)
     sent_at = _parse_payload_datetime(payload.get("sent_at")) or timezone.now()
     expires_at = _parse_payload_datetime(payload.get("expires_at"))
     now = timezone.now()
+    enforce_time_limits = bot_time_limits_enabled()
 
     logger.info(
         "[%s] %s %s attempt=%s/%s",
@@ -132,34 +166,57 @@ def handle_reply_check(task, session, qualifiers=None):
     if deal.state != ProfileState.CONNECTED.value:
         logger.info("reply_check: %s is %s - stopping watcher", public_id, deal.state)
         return
-    if _has_pending_draft(deal.lead, campaign_id=campaign_id, owner=owner):
+    if _has_pending_draft(
+        deal.lead,
+        campaign_id=campaign_id,
+        owner=owner,
+        linkedin_profile=linkedin_profile,
+    ):
         logger.info("reply_check: draft already exists for %s - stopping watcher", public_id)
         return
-    if expires_at and now >= expires_at:
+    if enforce_time_limits and expires_at and now >= expires_at:
         logger.info("reply_check: active reply window expired for %s - stopping watcher", public_id)
         return
 
     sync_conversation(session, public_id, include_drafts=False)
 
-    inbound = _latest_inbound_after(deal.lead, sent_at, owner=owner, before=expires_at)
+    inbound = _latest_inbound_after(
+        deal.lead,
+        sent_at,
+        owner=owner,
+        linkedin_profile=linkedin_profile,
+        before=expires_at,
+    )
     if inbound:
         logger.info(
             "reply_check: inbound reply detected for %s at %s - follow-up moved to now",
             public_id,
             inbound.creation_date,
         )
-        _accelerate_follow_up(campaign_id, public_id, deal, owner_id=owner_id)
+        _accelerate_follow_up(
+            campaign_id,
+            public_id,
+            deal,
+            owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
+        )
         return
 
     next_attempt = attempt + 1
     next_check_at = now + timedelta(seconds=interval_seconds)
-    if next_attempt > max_attempts:
+    if enforce_time_limits and next_attempt > max_attempts:
         logger.info("reply_check: max attempts reached for %s - stopping watcher", public_id)
         return
-    if expires_at and next_check_at > expires_at:
+    if enforce_time_limits and expires_at and next_check_at > expires_at:
         logger.info("reply_check: active reply window expired for %s - stopping watcher", public_id)
         return
-    if _normal_follow_up_due_before(campaign_id, public_id, next_check_at, owner_id=owner_id):
+    if _normal_follow_up_due_before(
+        campaign_id,
+        public_id,
+        next_check_at,
+        owner_id=owner_id,
+        linkedin_profile_id=linkedin_profile_id,
+    ):
         logger.info("reply_check: normal follow-up is due before next check for %s", public_id)
         return
 
@@ -175,4 +232,5 @@ def handle_reply_check(task, session, qualifiers=None):
         delay_seconds=interval_seconds,
         deal=deal,
         owner_id=owner_id,
+        linkedin_profile_id=linkedin_profile_id,
     )

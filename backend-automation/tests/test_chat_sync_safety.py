@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from chat.models import ChatMessage
 from crm.models import Lead
+from linkedin.models import LinkedInProfile
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -24,6 +25,7 @@ class ChatSyncSafetyTest(TestCase):
             profile_data={"urn": "urn:li:fsd_profile:target"},
         )
         self.lead_ct = ContentType.objects.get_for_model(Lead)
+        self.profile = LinkedInProfile.objects.create(user=self.user, active=True)
 
     def test_navigation_conversation_capture_requires_target_urn(self):
         from linkedin.actions.conversations import find_conversation_urn_via_navigation
@@ -115,11 +117,13 @@ class ChatSyncSafetyTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=timezone.now(),
         )
         session = MagicMock()
         session.self_profile = {"urn": "urn:li:fsd_profile:self"}
         session.django_user = self.user
+        session.linkedin_profile = self.profile
 
         api_message = {
             "entityUrn": "urn:li:msg_message:real",
@@ -155,6 +159,7 @@ class ChatSyncSafetyTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         ChatMessage.objects.create(
             content_type=self.lead_ct,
@@ -165,6 +170,7 @@ class ChatSyncSafetyTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
 
         messages = _read_from_db(self.lead, self.lead_ct, owner=self.user, include_drafts=False)

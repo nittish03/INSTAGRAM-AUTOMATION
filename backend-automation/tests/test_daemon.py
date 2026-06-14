@@ -285,6 +285,25 @@ class DaemonHardeningTest(TestCase):
         send_task.refresh_from_db()
         self.assertEqual(send_task.status, Task.Status.PENDING)
 
+    def test_time_limits_env_disables_active_window_and_outreach_cooldown(self):
+        from linkedin.daemon import _recent_outreach_cooldown_seconds, seconds_until_active
+
+        ActionLog.objects.create(
+            linkedin_profile=self.profile,
+            campaign=self.campaign,
+            action_type=ActionLog.ActionType.FOLLOW_UP,
+            target_public_id="recent-send",
+            status=ActionLog.Status.SUCCESS,
+        )
+        mock_session = MagicMock(linkedin_profile=self.profile)
+
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
+            self.assertEqual(seconds_until_active(), 0.0)
+            self.assertEqual(
+                _recent_outreach_cooldown_seconds(mock_session, {"min_action_interval": 3600}),
+                0.0,
+            )
+
     @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
     @patch("linkedin.daemon._HANDLERS")
     @patch("linkedin.daemon.failure_diagnostics")

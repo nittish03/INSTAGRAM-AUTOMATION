@@ -5,6 +5,35 @@ import os
 from pathlib import Path
 
 
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+_FALSE_ENV_VALUES = {"0", "false", "no", "off"}
+BOT_TIME_LIMITS_ENV = "BOT_TIME_LIMITS_ENABLED"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    normalized = str(raw).strip().lower()
+    if normalized in _TRUE_ENV_VALUES:
+        return True
+    if normalized in _FALSE_ENV_VALUES:
+        return False
+    return default
+
+
+def bot_time_limits_enabled() -> bool:
+    """Whether local bot pacing, quotas, active windows, and runtime caps apply."""
+    return _env_bool(BOT_TIME_LIMITS_ENV, True)
+
+
+def bot_delay_seconds(seconds: float | int | None) -> float:
+    """Return a bot pacing delay, or zero when time limits are disabled."""
+    if not bot_time_limits_enabled():
+        return 0.0
+    return max(float(seconds or 0), 0.0)
+
+
 def _playwright_headless() -> bool:
     """Whether Chromium runs headless (required on servers without a display).
 
@@ -90,16 +119,16 @@ CAMPAIGN_CONFIG = {
 # Global OpenAI / LLM config (stored in DB via SiteConfig)
 # ----------------------------------------------------------------------
 
-def get_llm_config():
+def get_llm_config(user=None):
     """Return (llm_api_key, ai_model, llm_api_base) from the DB."""
     from linkedin.models import SiteConfig
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(user)
     return cfg.llm_api_key, cfg.ai_model, cfg.llm_api_base or None
 
 
-def get_llm_site_config():
-    """Return the singleton SiteConfig object for LLM/provider setup."""
+def get_llm_site_config(user=None):
+    """Return the SiteConfig object for LLM/provider setup."""
     from linkedin.models import SiteConfig
-    return SiteConfig.load()
+    return SiteConfig.load(user)
 
 

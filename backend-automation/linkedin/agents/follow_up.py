@@ -143,7 +143,7 @@ def run_follow_up_agent(
     conversation_text = _format_conversation(messages)
     system_prompt = _render_system_prompt(session, profile, conversation_text, outreach_mode, mode_reason)
 
-    site_config = get_llm_site_config()
+    site_config = get_llm_site_config(getattr(session, "django_user", None))
     llm = build_chat_llm(site_config, temperature=0.7, timeout=60)
     structured_llm = llm.with_structured_output(FollowUpDecision)
     decision = structured_llm.invoke(system_prompt)

@@ -22,6 +22,8 @@ from linkedin.conf import (
     CAMPAIGN_CONFIG,
     ENABLE_ACTIVE_HOURS,
     REST_DAYS,
+    bot_delay_seconds,
+    bot_time_limits_enabled,
 )
 from linkedin.diagnostics import failure_diagnostics
 from linkedin.ml.qualifier import BayesianQualifier, KitQualifier
@@ -79,6 +81,9 @@ def _prioritize_claims(queryset):
 
 def _recent_outreach_cooldown_seconds(session, cfg) -> float:
     """Return remaining cooldown after a real outward LinkedIn action."""
+    if not bot_time_limits_enabled():
+        return 0.0
+
     min_interval = float(cfg.get("min_action_interval") or 0)
     if min_interval <= 0:
         return 0.0
@@ -110,11 +115,15 @@ def _recent_outreach_cooldown_seconds(session, cfg) -> float:
     return max(min_interval - elapsed, 0.0)
 
 
-def _set_task_owner(task: Task, owner_id: int) -> bool:
+def _set_task_owner(task: Task, owner_id: int, linkedin_profile_id: int | None = None) -> bool:
     payload = dict(task.payload or {})
-    if payload.get("owner_id") == owner_id:
+    if payload.get("owner_id") == owner_id and (
+        linkedin_profile_id is None or payload.get("linkedin_profile_id") == linkedin_profile_id
+    ):
         return False
     payload["owner_id"] = owner_id
+    if linkedin_profile_id is not None:
+        payload["linkedin_profile_id"] = linkedin_profile_id
     task.payload = payload
     task.save(update_fields=["payload"])
     return True
@@ -129,26 +138,28 @@ def _backfill_owner_ids_for_scoped_tasks(campaign_ids: list[int]) -> int:
         task_type__in=_OWNER_SCOPED_TASK_TYPES,
         status__in=[Task.Status.PENDING, Task.Status.RUNNING],
         payload__campaign_id__in=campaign_ids,
-        payload__owner_id__isnull=True,
-    ).order_by("scheduled_at", "id")
+    ).filter(Q(payload__owner_id__isnull=True) | Q(payload__linkedin_profile_id__isnull=True)).order_by("scheduled_at", "id")
     changed = 0
 
     for task in tasks:
         payload = task.payload or {}
-        owner_id = None
+        owner_id = payload.get("owner_id")
+        linkedin_profile_id = None
 
         message_id = payload.get("message_id")
         if message_id:
-            owner_id = (
+            message_scope = (
                 ChatMessage.objects.filter(pk=message_id)
-                .values_list("owner_id", flat=True)
+                .values_list("owner_id", "linkedin_profile_id")
                 .first()
             )
+            if message_scope:
+                owner_id, linkedin_profile_id = message_scope
 
         public_id = payload.get("public_id")
         campaign_id = payload.get("campaign_id")
-        if owner_id is None and public_id and campaign_id:
-            owner_id = (
+        if (owner_id is None or linkedin_profile_id is None) and public_id and campaign_id:
+            action_scope = (
                 ActionLog.objects.filter(
                     campaign_id=campaign_id,
                     target_public_id=public_id,
@@ -156,11 +167,18 @@ def _backfill_owner_ids_for_scoped_tasks(campaign_ids: list[int]) -> int:
                     linkedin_profile__user_id__isnull=False,
                 )
                 .order_by("-created_at", "-id")
-                .values_list("linkedin_profile__user_id", flat=True)
+                .values_list("linkedin_profile__user_id", "linkedin_profile_id")
                 .first()
             )
+            if action_scope:
+                owner_id = owner_id or action_scope[0]
+                linkedin_profile_id = linkedin_profile_id or action_scope[1]
 
-        if owner_id is not None and _set_task_owner(task, int(owner_id)):
+        if owner_id is not None and _set_task_owner(
+            task,
+            int(owner_id),
+            int(linkedin_profile_id) if linkedin_profile_id is not None else None,
+        ):
             changed += 1
 
     return changed
@@ -214,7 +232,7 @@ def _build_qualifiers(campaigns, cfg):
 
 def seconds_until_active() -> float:
     """Return seconds to wait before the next active window, or 0 if active now."""
-    if not ENABLE_ACTIVE_HOURS:
+    if not bot_time_limits_enabled() or not ENABLE_ACTIVE_HOURS:
         return 0.0
     tz = ZoneInfo(ACTIVE_TIMEZONE)
     now = timezone.localtime(timezone=tz)
@@ -255,6 +273,9 @@ def heal_tasks(session):
     session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(session_user_id, int):
         session_user_id = None
+    session_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    if not isinstance(session_profile_id, int):
+        session_profile_id = None
 
     backfilled = _backfill_owner_ids_for_scoped_tasks(campaign_ids)
     if backfilled:
@@ -272,7 +293,7 @@ def heal_tasks(session):
 
     # 2. Seed connect tasks per campaign (regular first, freemium deferred)
     for campaign in session.campaigns:
-        delay = CAMPAIGN_CONFIG["connect_delay_seconds"] if campaign.is_freemium else 0
+        delay = bot_delay_seconds(CAMPAIGN_CONFIG["connect_delay_seconds"]) if campaign.is_freemium else 0
         enqueue_connect(campaign.pk, delay_seconds=delay)
 
     # 3. Check_pending tasks for PENDING profiles
@@ -294,6 +315,7 @@ def heal_tasks(session):
                 backoff_hours=backoff,
                 deal=deal,
                 owner_id=session_user_id,
+                linkedin_profile_id=session_profile_id,
             )
 
     # 4. Follow_up tasks for CONNECTED profiles
@@ -318,6 +340,7 @@ def heal_tasks(session):
                 object_id=deal.lead.pk, 
                 campaign=campaign,
                 owner_id=session_user_id,
+                linkedin_profile_id=session_profile_id,
                 is_draft=True,
                 is_approved=False,
             ).exists()
@@ -328,6 +351,8 @@ def heal_tasks(session):
                 payload__campaign_id=campaign.pk,
                 payload__public_id=public_id,
                 payload__owner_id=session_user_id,
+            ).filter(
+                Q(payload__linkedin_profile_id=session_profile_id) | Q(payload__linkedin_profile_id__isnull=True)
             ).exists()
 
             if has_pending_draft or has_send_task:
@@ -336,9 +361,10 @@ def heal_tasks(session):
             enqueue_follow_up(
                 campaign.pk,
                 public_id,
-                delay_seconds=random.uniform(5, 60),
+                delay_seconds=bot_delay_seconds(random.uniform(5, 60)),
                 deal=deal,
                 owner_id=session_user_id,
+                linkedin_profile_id=session_profile_id,
             )
 
 
@@ -348,7 +374,7 @@ def heal_tasks(session):
 def run_daemon(session):
     cfg = CAMPAIGN_CONFIG
     started_monotonic = time.monotonic()
-    max_runtime = float(cfg.get("daemon_max_runtime_seconds") or 0)
+    max_runtime = bot_delay_seconds(cfg.get("daemon_max_runtime_seconds") or 0)
 
     qualifiers = _build_qualifiers(session.campaigns, cfg)
 
@@ -364,10 +390,17 @@ def run_daemon(session):
     session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(session_user_id, int):
         session_user_id = None
+    session_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    if not isinstance(session_profile_id, int):
+        session_profile_id = None
 
     task_scope = Task.objects.filter(payload__campaign_id__in=campaign_ids).filter(
         ~Q(task_type__in=_OWNER_SCOPED_TASK_TYPES)
         | Q(payload__owner_id=session_user_id)
+    ).filter(
+        ~Q(task_type__in=_OWNER_SCOPED_TASK_TYPES)
+        | Q(payload__linkedin_profile_id=session_profile_id)
+        | Q(payload__linkedin_profile_id__isnull=True)
     )
 
     logger.info(

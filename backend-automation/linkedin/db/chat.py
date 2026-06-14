@@ -31,6 +31,7 @@ def sync_conversation(session, public_identifier: str, *, include_drafts: bool =
         lead,
         ct,
         owner=session.django_user,
+        linkedin_profile=getattr(session, "linkedin_profile", None),
         include_drafts=include_drafts,
     )
 
@@ -49,6 +50,9 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
     campaign = getattr(session, "campaign", None)
     if not isinstance(getattr(campaign, "pk", None), int):
         campaign = None
+    linkedin_profile = getattr(session, "linkedin_profile", None)
+    if not isinstance(getattr(linkedin_profile, "pk", None), int):
+        linkedin_profile = None
 
     target_urn = lead.get_urn(session)
     mailbox_urn = session.self_profile["urn"]
@@ -90,6 +94,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
                 content_type=ct,
                 object_id=lead.pk,
                 owner=session.django_user,
+                linkedin_profile=linkedin_profile,
                 is_outgoing=True,
                 linkedin_urn__startswith="sent_",
                 content=parsed["text"],
@@ -111,6 +116,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
                 "content": parsed["text"],
                 "is_outgoing": is_outgoing,
                 "owner": session.django_user,
+                "linkedin_profile": linkedin_profile,
                 "campaign": campaign,
                 **({"creation_date": parsed["delivered_at"]} if parsed["delivered_at"] else {}),
             },
@@ -121,7 +127,7 @@ def _sync_from_api(session, public_identifier: str, lead, ct):
     logger.debug("sync: processed %d messages for %s", len(elements), public_identifier)
 
 
-def _read_from_db(lead, ct, *, owner, include_drafts: bool = True) -> list[dict]:
+def _read_from_db(lead, ct, *, owner, linkedin_profile=None, include_drafts: bool = True) -> list[dict]:
     """Read all ChatMessages for a lead, sorted chronologically."""
     from chat.models import ChatMessage
 
@@ -132,6 +138,8 @@ def _read_from_db(lead, ct, *, owner, include_drafts: bool = True) -> list[dict]
         object_id=lead.pk,
         owner=owner,
     ).select_related("owner").order_by("creation_date")
+    if linkedin_profile is not None:
+        messages = messages.filter(linkedin_profile=linkedin_profile)
     if not include_drafts:
         messages = messages.filter(is_draft=False).exclude(linkedin_urn__startswith="draft_")
 

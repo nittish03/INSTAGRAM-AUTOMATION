@@ -82,7 +82,7 @@ def update_deal_inference(deal, source: str, confidence: float) -> None:
     )
 
 
-def lead_sheet_export_verification(lead) -> tuple[bool, str, str]:
+def lead_sheet_export_verification(lead, *, config_user=None) -> tuple[bool, str, str]:
     """Whether this lead may be written to the business Google Sheet.
 
     Requires a CONNECTED deal **and** an explicit ``connection_detected`` outreach
@@ -96,7 +96,7 @@ def lead_sheet_export_verification(lead) -> tuple[bool, str, str]:
     if not lead.deal_set.filter(state=ProfileState.CONNECTED).exists():
         return False, "not_connected", ""
 
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(config_user)
     min_api = float(cfg.sheet_export_min_confidence_api)
     min_after = float(cfg.sheet_export_min_confidence_after_invite)
 

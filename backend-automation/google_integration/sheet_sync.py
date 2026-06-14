@@ -196,10 +196,15 @@ def _find_existing_lead_row(
 
 
 def resolve_google_sync_user(config) -> User | None:
-    """User whose OAuth tokens are used for Sheets (explicit sync user or first connected superuser)."""
+    """User whose OAuth tokens are used for Sheets."""
     u = getattr(config, "google_sheet_sync_user", None)
     if u is not None:
         return u
+    u = getattr(config, "user", None)
+    if u is not None:
+        ga = getattr(u, "google_account", None)
+        if ga and ga.is_connected:
+            return u
     for user in User.objects.filter(is_superuser=True).select_related("google_account"):
         ga = getattr(user, "google_account", None)
         if ga and ga.is_connected:
@@ -247,6 +252,17 @@ def _sheet_last_follow_up_date_cell(lead: "Lead") -> str:
     return timezone.localtime(log.created_at).strftime("%m/%d/%Y")
 
 
+def _config_user_for_lead(lead: "Lead", config_user=None):
+    if config_user is not None:
+        return config_user
+    return (
+        lead.deal_set.filter(campaign__users__isnull=False)
+        .order_by("-update_date")
+        .values_list("campaign__users", flat=True)
+        .first()
+    )
+
+
 def build_sheet_row(
     lead: "Lead",
     *,
@@ -286,11 +302,12 @@ def _sync_lead_status_to_google_sheet(
     status_label: str,
     reason_code: str,
     skip_if_existing_statuses: set[str] | None = None,
+    config_user=None,
 ) -> bool:
     """Write or update one lead row by LinkedIn profile URL/public id."""
     from linkedin.models import SiteConfig
 
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(_config_user_for_lead(lead, config_user))
     if not cfg.google_sheet_sync_enabled:
         return False
     sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
@@ -368,6 +385,7 @@ def sync_pending_lead_to_google_sheet(
     lead: "Lead",
     *,
     reason_code: str = "pending_invite_sent",
+    config_user=None,
 ) -> bool:
     """Ensure a sent/pending invite appears in the sheet with Status=Pending."""
     from linkedin.enums import ProfileState
@@ -386,6 +404,7 @@ def sync_pending_lead_to_google_sheet(
         status_label=ProfileState.PENDING.value,
         reason_code=reason_code,
         skip_if_existing_statuses={ProfileState.PENDING.value},
+        config_user=config_user,
     )
 
 
@@ -393,6 +412,7 @@ def sync_qualified_lead_to_google_sheet(
     lead: "Lead",
     *,
     reason_code: str = "qualified_or_stale_connection",
+    config_user=None,
 ) -> bool:
     """Ensure a non-connected lead is not left as Connected in the sheet."""
     from linkedin.enums import ProfileState
@@ -411,6 +431,7 @@ def sync_qualified_lead_to_google_sheet(
         status_label=ProfileState.QUALIFIED.value,
         reason_code=reason_code,
         skip_if_existing_statuses={ProfileState.QUALIFIED.value},
+        config_user=config_user,
     )
 
 
@@ -418,6 +439,7 @@ def sync_lead_to_google_sheet(
     lead: "Lead",
     *,
     bypass_verification: bool = False,
+    config_user=None,
 ) -> bool:
     """Append one lead row to the configured sheet. Returns True if a row was written.
 
@@ -428,7 +450,8 @@ def sync_lead_to_google_sheet(
     from linkedin.models import SiteConfig
     from linkedin.outreach_tracking import lead_sheet_export_verification
 
-    cfg = SiteConfig.load()
+    owner = _config_user_for_lead(lead, config_user)
+    cfg = SiteConfig.load(owner)
     if not cfg.google_sheet_sync_enabled:
         return False
     sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
@@ -443,7 +466,7 @@ def sync_lead_to_google_sheet(
     if not has_connected_deal:
         return False
 
-    ok_verify, reason_code, status_label = lead_sheet_export_verification(lead)
+    ok_verify, reason_code, status_label = lead_sheet_export_verification(lead, config_user=owner)
     if not bypass_verification:
         if not ok_verify:
             logger.info("Google Sheet sync skipped lead pk=%s (%s)", lead.pk, reason_code)
@@ -459,4 +482,5 @@ def sync_lead_to_google_sheet(
         lead,
         status_label=status_label,
         reason_code=reason_code,
+        config_user=owner,
     )

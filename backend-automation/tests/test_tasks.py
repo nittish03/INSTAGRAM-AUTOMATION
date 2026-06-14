@@ -37,6 +37,30 @@ class TaskHardeningTest(TestCase):
         self.assertEqual(task.deal, deal)
         self.assertEqual(task.payload['campaign_id'], self.campaign.id)
 
+    def test_time_limits_env_zeros_bot_pacing_delays(self):
+        from linkedin.tasks.connect import enqueue_follow_up
+
+        lead = Lead.objects.create(public_identifier="delay-toggle")
+        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
+            before = timezone.now()
+            enqueue_connect(self.campaign.id, delay_seconds=3600, deal=deal)
+            enqueue_follow_up(self.campaign.id, "delay-toggle", delay_seconds=3600, deal=deal)
+
+        tasks = Task.objects.order_by("scheduled_at")
+        self.assertEqual(tasks.count(), 2)
+        for task in tasks:
+            self.assertLessEqual((task.scheduled_at - before).total_seconds(), 1)
+
+    def test_time_limits_env_can_preserve_external_retry_delay(self):
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
+            before = timezone.now()
+            enqueue_connect(self.campaign.id, delay_seconds=3600, apply_time_limits=False)
+
+        task = Task.objects.get(task_type=Task.TaskType.CONNECT)
+        self.assertGreaterEqual((task.scheduled_at - before).total_seconds(), 3500)
+
     def test_pause_new_connection_invites_skips_connect_enqueue_only(self):
         from linkedin.tasks.connect import enqueue_check_pending, enqueue_follow_up, enqueue_reply_check
 
@@ -292,8 +316,9 @@ class TaskHardeningTest(TestCase):
         
         session = MagicMock()
         session.campaign = self.campaign
+        session.linkedin_profile = self.profile
         
-        with self.assertRaisesRegex(RuntimeError, "ChatMessage 9999 no longer exists"):
+        with self.assertRaisesRegex(RuntimeError, "ChatMessage 9999 is not available"):
             handle_send_message(task, session)
 
     def test_send_message_missing_deal(self):
@@ -304,7 +329,10 @@ class TaskHardeningTest(TestCase):
         msg = ChatMessage.objects.create(
             content="Hello", 
             linkedin_urn="test_urn",
-            content_type_id=1, object_id=1 # dummy
+            content_type_id=1,
+            object_id=1,  # dummy
+            owner=self.user,
+            linkedin_profile=self.profile,
         )
         
         task = Task.objects.create(
@@ -315,6 +343,7 @@ class TaskHardeningTest(TestCase):
         
         session = MagicMock()
         session.campaign = self.campaign
+        session.linkedin_profile = self.profile
         
         with self.assertRaisesRegex(RuntimeError, "No Deal found"):
             handle_send_message(task, session)
@@ -442,13 +471,15 @@ class TaskHardeningTest(TestCase):
 
     def test_message_drafts_api_only_shows_connected_deal_drafts(self):
         import json
+        from datetime import timedelta
         from django.contrib.contenttypes.models import ContentType
         from django.test import RequestFactory
-        from linkedin.views import api_message_drafts, api_message_drafts_approve
+        from linkedin.views import api_message_drafts, api_message_drafts_approve, api_messaging_diagnostics
         from chat.models import ChatMessage
 
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
+        self.campaign.users.add(self.user)
         lead_ct = ContentType.objects.get_for_model(Lead)
         connected_lead = Lead.objects.create(
             public_identifier="connected-draft",
@@ -457,6 +488,15 @@ class TaskHardeningTest(TestCase):
         pending_lead = Lead.objects.create(
             public_identifier="pending-draft",
             linkedin_url="https://www.linkedin.com/in/pending-draft/",
+        )
+        other_profile_lead = Lead.objects.create(
+            public_identifier="other-profile-draft",
+            linkedin_url="https://www.linkedin.com/in/other-profile-draft/",
+        )
+        other_profile = LinkedInProfile.objects.create(
+            user=self.user,
+            linkedin_username="other-profile@example.com",
+            active=False,
         )
         connected_deal = Deal.objects.create(
             lead=connected_lead,
@@ -470,11 +510,19 @@ class TaskHardeningTest(TestCase):
             campaign=self.campaign,
             state=ProfileState.PENDING.value,
         )
+        Deal.objects.create(
+            lead=other_profile_lead,
+            campaign=self.campaign,
+            state=ProfileState.CONNECTED.value,
+            connection_assessment_source="api_degree_1",
+            connection_assessment_confidence=0.95,
+        )
         connected_draft = ChatMessage.objects.create(
             content_type=lead_ct,
             object_id=connected_lead.pk,
             campaign=self.campaign,
             owner=self.user,
+            linkedin_profile=self.profile,
             content="Connected draft",
             linkedin_urn="draft_connected_visible",
             is_outgoing=True,
@@ -486,11 +534,58 @@ class TaskHardeningTest(TestCase):
             object_id=pending_lead.pk,
             campaign=self.campaign,
             owner=self.user,
+            linkedin_profile=self.profile,
             content="Pending draft",
             linkedin_urn="draft_pending_hidden",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
+        )
+        ChatMessage.objects.create(
+            content_type=lead_ct,
+            object_id=other_profile_lead.pk,
+            campaign=self.campaign,
+            owner=self.user,
+            linkedin_profile=other_profile,
+            content="Other profile draft",
+            linkedin_urn="draft_other_profile_hidden",
+            is_outgoing=True,
+            is_draft=True,
+            is_approved=False,
+        )
+        Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.PENDING,
+            scheduled_at=timezone.now() - timedelta(hours=1),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": connected_lead.public_identifier,
+                "owner_id": self.user.pk,
+                "linkedin_profile_id": self.profile.pk,
+            },
+        )
+        Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.PENDING,
+            scheduled_at=timezone.now() + timedelta(hours=1),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": other_profile_lead.public_identifier,
+                "owner_id": self.user.pk,
+                "linkedin_profile_id": other_profile.pk,
+            },
+        )
+        Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.FAILED,
+            scheduled_at=timezone.now(),
+            payload={
+                "campaign_id": self.campaign.pk,
+                "public_id": other_profile_lead.public_identifier,
+                "owner_id": self.user.pk,
+                "linkedin_profile_id": other_profile.pk,
+            },
+            error="Other profile failure",
         )
         rf = RequestFactory()
 
@@ -499,6 +594,16 @@ class TaskHardeningTest(TestCase):
         response = api_message_drafts(list_request)
         payload = json.loads(response.content)
         self.assertEqual([item["id"] for item in payload["items"]], [connected_draft.pk])
+
+        diagnostics_request = rf.get("/api/messages/diagnostics/")
+        diagnostics_request.user = self.user
+        response = api_messaging_diagnostics(diagnostics_request)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["diagnostics"]["draftsTotal"], 1)
+        self.assertEqual(payload["diagnostics"]["draftsUnapproved"], 1)
+        self.assertEqual(payload["diagnostics"]["pendingFollowupTasks"], 0)
+        self.assertEqual(payload["diagnostics"]["failedFollowupTasks"], 0)
+        self.assertIsNone(payload["diagnostics"]["lastFailedFollowup"])
 
         approve_request = rf.post(
             "/api/messages/drafts/approve/",

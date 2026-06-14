@@ -76,14 +76,14 @@ class ProductWorkbenchApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(patch_resp.status_code, 200)
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         self.assertTrue(cfg.global_pause_outreach)
         self.assertTrue(cfg.pause_new_connection_invites)
         self.assertEqual(cfg.max_bulk_approve, 3)
         self.assertEqual(cfg.max_bulk_export, 4)
 
     def test_site_config_save_does_not_update_invite_pause(self):
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         cfg.pause_new_connection_invites = False
         cfg.save(update_fields=["pause_new_connection_invites"])
 
@@ -112,7 +112,7 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertIn("Staff access required", response.json()["error"])
 
     def test_bulk_retry_blocked_by_safe_mode(self):
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         cfg.safe_mode_enabled = True
         cfg.max_bulk_approve = 1
         cfg.save(update_fields=["safe_mode_enabled", "max_bulk_approve"])
@@ -135,7 +135,7 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertIn("Safe mode limit exceeded", response.json()["error"])
 
     def test_pause_new_connection_invites_is_not_global_pause_for_warm_retry(self):
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         cfg.pause_new_connection_invites = True
         cfg.global_pause_outreach = False
         cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
@@ -152,7 +152,7 @@ class ProductWorkbenchApiTests(TestCase):
         )
 
     def test_pause_new_connection_invites_does_not_retry_connect_tasks(self):
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         cfg.pause_new_connection_invites = True
         cfg.global_pause_outreach = False
         cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
@@ -174,7 +174,7 @@ class ProductWorkbenchApiTests(TestCase):
         )
 
     def test_global_pause_behavior_remains_hard_pause(self):
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(self.user)
         cfg.pause_new_connection_invites = False
         cfg.global_pause_outreach = True
         cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])

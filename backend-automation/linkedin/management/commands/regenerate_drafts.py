@@ -48,13 +48,13 @@ class Command(BaseCommand):
         from linkedin.models import SiteConfig
         from linkedin.services.draft_regeneration import regenerate_draft
 
-        ok, reason = validate_llm_site_config(SiteConfig.load())
-        if not ok:
-            raise CommandError(f"LLM configuration invalid: {reason}")
-
         linkedin_profile = resolve_profile(options["handle"])
         if linkedin_profile is None:
             raise CommandError("No active LinkedInProfile found.")
+
+        ok, reason = validate_llm_site_config(SiteConfig.load(linkedin_profile.user))
+        if not ok:
+            raise CommandError(f"LLM configuration invalid: {reason}")
 
         lead_ct = ContentType.objects.get_for_model(Lead)
         qs = (
@@ -63,8 +63,9 @@ class Command(BaseCommand):
                 is_draft=True,
                 is_approved=False,
                 owner=linkedin_profile.user,
+                linkedin_profile=linkedin_profile,
             )
-            .select_related("campaign", "owner")
+            .select_related("campaign", "owner", "linkedin_profile")
             .order_by("id")
         )
 

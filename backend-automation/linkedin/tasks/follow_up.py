@@ -52,6 +52,7 @@ def handle_follow_up(task, session, qualifiers):
     campaign_id = payload["campaign_id"]
     owner = session.linkedin_profile.user
     owner_id = owner.pk
+    linkedin_profile_id = getattr(session.linkedin_profile, "pk", None)
 
     logger.info(
         "[%s] %s %s",
@@ -66,6 +67,7 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=_seconds_until_tomorrow(),
             deal=deal,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
         )
         raise TaskSkipped("Daily follow-up limit reached")
 
@@ -101,6 +103,7 @@ def handle_follow_up(task, session, qualifiers):
                 backoff_hours=deal.backoff_hours or 6,
                 deal=deal,
                 owner_id=owner_id,
+                linkedin_profile_id=linkedin_profile_id,
             )
         raise TaskSkipped(
             "follow_up requires an API-verified connected profile before drafting "
@@ -120,16 +123,20 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=retry_delay,
             deal=deal,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
+            apply_time_limits=False,
         )
         raise TaskSkipped(f"Gemini quota exhausted; follow_up rescheduled in {retry_delay}s") from exc
 
     if decision.action == "send_message":
         lead_ct = ContentType.objects.get_for_model(Lead)
+        linkedin_profile = getattr(session, "linkedin_profile", None)
         has_draft = ChatMessage.objects.filter(
             content_type=lead_ct,
             object_id=deal.lead.pk,
             campaign=deal.campaign,
             owner=owner,
+            linkedin_profile=linkedin_profile,
             is_draft=True,
             is_approved=False,
         ).exists()
@@ -145,6 +152,7 @@ def handle_follow_up(task, session, qualifiers):
                 is_draft=True,
                 is_approved=False,
                 owner=owner,
+                linkedin_profile=linkedin_profile,
                 linkedin_urn=f"draft_{uuid.uuid4()}",
             )
             logger.info(
@@ -165,4 +173,5 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=wait_hours * 3600,
             deal=deal,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
         )

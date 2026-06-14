@@ -104,7 +104,7 @@ def discover_and_enrich(session, urls: set):
     Skips URLs that already have a Lead. Rate-limits with enrich_min_interval.
     """
     from linkedin.api.client import PlaywrightLinkedinAPI
-    from linkedin.conf import CAMPAIGN_CONFIG
+    from linkedin.conf import CAMPAIGN_CONFIG, bot_delay_seconds
 
     new_urls = [u for u in urls if not lead_exists(u)]
     if not new_urls:
@@ -112,7 +112,7 @@ def discover_and_enrich(session, urls: set):
 
     logger.info("Discovered %d new profiles (%d total on page)", len(new_urls), len(urls))
 
-    min_interval = CAMPAIGN_CONFIG.get("enrich_min_interval", 1)
+    min_interval = bot_delay_seconds(CAMPAIGN_CONFIG.get("enrich_min_interval", 1))
     session.ensure_browser()
     api = PlaywrightLinkedinAPI(session=session)
     enriched = 0
@@ -135,7 +135,8 @@ def discover_and_enrich(session, urls: set):
         if create_enriched_lead(session, url, profile) is not None:
             enriched += 1
 
-        time.sleep(min_interval)
+        if min_interval > 0:
+            time.sleep(min_interval)
 
     logger.info("Enriched %d/%d new profiles", enriched, len(new_urls))
 

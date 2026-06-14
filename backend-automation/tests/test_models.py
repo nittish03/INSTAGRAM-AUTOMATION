@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from linkedin.models import LinkedInProfile, Task, Campaign
 from django.utils import timezone
 import os
+from unittest.mock import patch
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -62,3 +63,19 @@ class ModelHardeningTest(TestCase):
 
         self.assertEqual(len(logs.records), 1)
         self.assertEqual(logs.records[0].levelname, "DEBUG")
+
+    def test_time_limits_env_can_disable_profile_rate_limits(self):
+        profile = LinkedInProfile.objects.create(
+            user=self.user,
+            connect_daily_limit=0,
+            connect_weekly_limit=0,
+            follow_up_daily_limit=0,
+        )
+
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "true"}):
+            self.assertFalse(profile.can_execute("connect"))
+            self.assertFalse(profile.can_execute("follow_up"))
+
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
+            self.assertTrue(profile.can_execute("connect"))
+            self.assertTrue(profile.can_execute("follow_up"))

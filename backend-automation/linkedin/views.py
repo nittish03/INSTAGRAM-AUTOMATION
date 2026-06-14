@@ -47,12 +47,26 @@ def _message_context_payload(message: ChatMessage | None) -> dict | None:
     }
 
 
-def _latest_conversation_message_payload(content_type_id: int, object_id: int, owner_id: int | None) -> dict | None:
+def _message_profile_for_user(user) -> LinkedInProfile | None:
+    return (
+        LinkedInProfile.objects.filter(user=user, active=True)
+        .order_by("-created_at", "id")
+        .first()
+    )
+
+
+def _latest_conversation_message_payload(
+    content_type_id: int,
+    object_id: int,
+    owner_id: int | None,
+    linkedin_profile_id: int | None,
+) -> dict | None:
     latest_message = (
         ChatMessage.objects.filter(
             content_type_id=content_type_id,
             object_id=object_id,
             owner_id=owner_id,
+            linkedin_profile_id=linkedin_profile_id,
             is_draft=False,
         )
         .exclude(linkedin_urn__startswith="draft_")
@@ -62,10 +76,13 @@ def _latest_conversation_message_payload(content_type_id: int, object_id: int, o
     return _message_context_payload(latest_message)
 
 
-def _connected_unapproved_draft_qs(user):
+def _connected_unapproved_draft_qs(profile: LinkedInProfile | None):
     """Drafts visible/approvable in the app: only leads connected in this campaign."""
     from django.contrib.contenttypes.models import ContentType
     from django.db.models import Exists, OuterRef
+
+    if profile is None:
+        return ChatMessage.objects.none()
 
     lead_ct = ContentType.objects.get_for_model(Lead)
     connected_deal = Deal.objects.filter(
@@ -73,10 +90,12 @@ def _connected_unapproved_draft_qs(user):
         campaign_id=OuterRef("campaign_id"),
         state=ProfileState.CONNECTED.value,
         connection_assessment_source="api_degree_1",
+        campaign__users=profile.user,
     )
     return (
         ChatMessage.objects.filter(
-            owner=user,
+            owner=profile.user,
+            linkedin_profile=profile,
             content_type=lead_ct,
             is_draft=True,
             is_approved=False,
@@ -101,7 +120,7 @@ def dashboard_callback(request, context):
     today = timezone.localdate()
     last_week = timezone.now() - timedelta(days=7)
 
-    drafts_awaiting = _connected_unapproved_draft_qs(request.user).count()
+    drafts_awaiting = _connected_unapproved_draft_qs(_message_profile_for_user(request.user)).count()
     try:
         drafts_url = (
             reverse("admin:chat_chatmessage_changelist")
@@ -276,7 +295,7 @@ def api_dashboard(request):
         today=Count("id", filter=Q(created_at__date=today)),
         week=Count("id", filter=Q(created_at__gte=last_week)),
     )
-    drafts_awaiting = _connected_unapproved_draft_qs(request.user).count()
+    drafts_awaiting = _connected_unapproved_draft_qs(_message_profile_for_user(request.user)).count()
 
     connected = deal_stats["connected"] or 0
     failed = deal_stats["failed"] or 0
@@ -764,9 +783,10 @@ def api_message_drafts(request):
     if not request.user.is_staff:
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
+    message_profile = _message_profile_for_user(request.user)
     qs = (
-        _connected_unapproved_draft_qs(request.user)
-        .select_related("campaign", "owner")
+        _connected_unapproved_draft_qs(message_profile)
+        .select_related("campaign", "owner", "linkedin_profile")
         .order_by("-creation_date")
     )
 
@@ -782,6 +802,7 @@ def api_message_drafts(request):
                 content_type_id=content_type_id,
                 object_id__in=object_ids,
                 owner_id=owner_id,
+                linkedin_profile=message_profile,
                 is_draft=False,
             )
             .exclude(linkedin_urn__startswith="draft_")
@@ -1129,7 +1150,7 @@ def api_search_keywords_delete(request, keyword_id: int):
 def api_site_config(request):
     from linkedin.models import SiteConfig
 
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(request.user)
     return JsonResponse(
         {
             "ok": True,
@@ -1144,6 +1165,7 @@ def api_site_config(request):
                 "googleSheetId": cfg.google_sheet_id,
                 "googleSheetTab": cfg.google_sheet_tab,
                 "googleSheetSyncUserId": cfg.google_sheet_sync_user_id,
+                "scope": "user",
             },
             "providerChoices": [
                 {"value": v, "label": label}
@@ -1167,7 +1189,7 @@ def api_site_config_save(request):
     except _json.JSONDecodeError:
         return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
 
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(request.user)
     provider = payload.get("llmProvider")
     if provider is not None:
         provider = str(provider).strip().lower()
@@ -1194,6 +1216,7 @@ def api_site_config_save(request):
     if new_key is not None and new_key != "":
         cfg.llm_api_key = new_key
 
+    cfg.google_sheet_sync_user = request.user
     cfg.save()
     return JsonResponse({"ok": True})
 
@@ -1262,50 +1285,56 @@ def api_analytics(request):
 @require_GET
 def api_messaging_diagnostics(request):
     """Snapshot of HITL messaging health: connected deals vs drafts vs queued tasks."""
-    from chat.models import ChatMessage
-    from django.contrib.contenttypes.models import ContentType
     from crm.models import Deal
-    from crm.models.lead import Lead
+    from django.utils import timezone
     from linkedin.enums import ProfileState
     from linkedin.models import SiteConfig
     from linkedin.llm import validate_llm_site_config
 
-    cfg = SiteConfig.load()
+    cfg = SiteConfig.load(request.user)
+    message_profile = _message_profile_for_user(request.user)
 
-    connected_qs = Deal.objects.filter(
-        state=ProfileState.CONNECTED,
-        campaign__users=request.user,
-    ).select_related("lead", "campaign")
+    connected_qs = Deal.objects.none()
+    if message_profile is not None:
+        connected_qs = Deal.objects.filter(
+            state=ProfileState.CONNECTED,
+            campaign__users=message_profile.user,
+        ).select_related("lead", "campaign")
     connected_count = connected_qs.count()
 
-    lead_ct = ContentType.objects.get_for_model(Lead)
-    drafts_total = ChatMessage.objects.filter(content_type=lead_ct, owner=request.user, is_draft=True).count()
-    drafts_unapproved = ChatMessage.objects.filter(
-        content_type=lead_ct, owner=request.user, is_draft=True, is_approved=False,
-    ).count()
+    visible_drafts = _connected_unapproved_draft_qs(message_profile)
+    drafts_total = visible_drafts.count()
+    drafts_unapproved = drafts_total
 
-    pending_followups = Task.objects.filter(
+    pending_followup_qs = Task.objects.filter(
         task_type=Task.TaskType.FOLLOW_UP,
         status=Task.Status.PENDING,
         payload__owner_id=request.user.pk,
-    ).count()
-    failed_followups = Task.objects.filter(
+    )
+    failed_followup_qs = Task.objects.filter(
         task_type=Task.TaskType.FOLLOW_UP,
         status=Task.Status.FAILED,
         payload__owner_id=request.user.pk,
-    ).count()
-    pending_sends = Task.objects.filter(
+    )
+    pending_send_qs = Task.objects.filter(
         task_type=Task.TaskType.SEND_MESSAGE,
         status=Task.Status.PENDING,
         payload__owner_id=request.user.pk,
-    ).count()
+    )
+    if message_profile is not None:
+        pending_followup_qs = pending_followup_qs.filter(payload__linkedin_profile_id=message_profile.pk)
+        failed_followup_qs = failed_followup_qs.filter(payload__linkedin_profile_id=message_profile.pk)
+        pending_send_qs = pending_send_qs.filter(payload__linkedin_profile_id=message_profile.pk)
+
+    # The card is for future scheduled follow-ups. Overdue pending tasks are
+    # internal ready-to-run queue rows and should not inflate the user-facing
+    # "pending follow-up" count.
+    pending_followups = pending_followup_qs.filter(scheduled_at__gt=timezone.now()).count()
+    failed_followups = failed_followup_qs.count()
+    pending_sends = pending_send_qs.count()
 
     last_failed = (
-        Task.objects.filter(
-            task_type=Task.TaskType.FOLLOW_UP,
-            status=Task.Status.FAILED,
-            payload__owner_id=request.user.pk,
-        )
+        failed_followup_qs
         .order_by("-ended_at", "-created_at")
         .values("id", "error", "ended_at")
         .first()
@@ -1316,19 +1345,10 @@ def api_messaging_diagnostics(request):
         lead = deal.lead
         if not lead or not lead.public_identifier:
             continue
-        has_draft = ChatMessage.objects.filter(
-            content_type=lead_ct,
-            object_id=lead.pk,
-            owner=request.user,
-            is_draft=True,
-        ).exists()
-        has_followup = Task.objects.filter(
-            task_type=Task.TaskType.FOLLOW_UP,
-            status=Task.Status.PENDING,
-            payload__owner_id=request.user.pk,
-            payload__public_id=lead.public_identifier,
-        ).exists()
-        if not has_draft and not has_followup:
+        has_draft = visible_drafts.filter(object_id=lead.pk, campaign_id=deal.campaign_id).exists()
+        has_followup = pending_followup_qs.filter(payload__public_id=lead.public_identifier).exists()
+        has_send_task = pending_send_qs.filter(payload__public_id=lead.public_identifier).exists()
+        if not has_draft and not has_followup and not has_send_task:
             leads_without_draft.append({
                 "leadId": lead.id,
                 "publicIdentifier": lead.public_identifier,
@@ -1373,10 +1393,13 @@ def api_messaging_heal(request):
     from linkedin.enums import ProfileState
     from linkedin.tasks.connect import enqueue_follow_up
 
-    deals = Deal.objects.filter(
-        state=ProfileState.CONNECTED,
-        campaign__users=request.user,
-    ).select_related("lead", "campaign")
+    message_profile = _message_profile_for_user(request.user)
+    deals = Deal.objects.none()
+    if message_profile is not None:
+        deals = Deal.objects.filter(
+            state=ProfileState.CONNECTED,
+            campaign__users=message_profile.user,
+        ).select_related("lead", "campaign")
     enqueued = 0
     skipped = 0
 
@@ -1391,6 +1414,7 @@ def api_messaging_heal(request):
             content_type=lead_ct,
             object_id=lead.pk,
             owner=request.user,
+            linkedin_profile=message_profile,
             is_draft=True,
         ).exists()
         has_pending_followup = Task.objects.filter(
@@ -1398,13 +1422,19 @@ def api_messaging_heal(request):
             status=Task.Status.PENDING,
             payload__owner_id=request.user.pk,
             payload__public_id=lead.public_identifier,
-        ).exists()
+        )
+        if message_profile is not None:
+            has_pending_followup = has_pending_followup.filter(payload__linkedin_profile_id=message_profile.pk)
+        has_pending_followup = has_pending_followup.exists()
         has_send_task = Task.objects.filter(
             task_type=Task.TaskType.SEND_MESSAGE,
             status__in=[Task.Status.PENDING, Task.Status.RUNNING],
             payload__owner_id=request.user.pk,
             payload__public_id=lead.public_identifier,
-        ).exists()
+        )
+        if message_profile is not None:
+            has_send_task = has_send_task.filter(payload__linkedin_profile_id=message_profile.pk)
+        has_send_task = has_send_task.exists()
 
         if has_draft or has_pending_followup or has_send_task:
             skipped += 1
@@ -1416,6 +1446,7 @@ def api_messaging_heal(request):
             delay_seconds=_random.uniform(5, 30),
             deal=deal,
             owner_id=request.user.pk,
+            linkedin_profile_id=message_profile.pk if message_profile else None,
         )
         enqueued += 1
 
@@ -1460,7 +1491,7 @@ def api_google_sheets(request):
         return JsonResponse({"ok": False, "error": "Google account not connected"}, status=400)
     try:
         sheets = gs.list_spreadsheets(ga)
-        cfg = SiteConfig.load()
+        cfg = SiteConfig.load(request.user)
         configured_id = (cfg.google_sheet_id or "").strip()
         # Drive list may omit sheets not created/opened by this app; always surface configured sheet explicitly.
         if configured_id and not any((s.get("id") or "") == configured_id for s in sheets):
@@ -1799,7 +1830,8 @@ def api_message_drafts_approve(request):
     if not isinstance(ids, list) or not ids:
         return JsonResponse({"ok": False, "error": "ids[] is required"}, status=400)
 
-    drafts = _connected_unapproved_draft_qs(request.user).filter(pk__in=ids)
+    message_profile = _message_profile_for_user(request.user)
+    drafts = _connected_unapproved_draft_qs(message_profile).filter(pk__in=ids)
     approved = 0
     for draft in drafts:
         public_id = ""
@@ -1834,6 +1866,7 @@ def api_message_drafts_approve(request):
                         "public_id": public_id,
                         "campaign_id": campaign_id,
                         "owner_id": draft.owner_id,
+                        "linkedin_profile_id": draft.linkedin_profile_id,
                     },
                 )
             approved += 1
@@ -1854,6 +1887,7 @@ def api_message_draft_detail(request, draft_id: int):
         draft = ChatMessage.objects.get(
             pk=draft_id,
             owner=request.user,
+            linkedin_profile=_message_profile_for_user(request.user),
             is_draft=True,
             is_approved=False,
         )
@@ -1904,20 +1938,27 @@ def api_message_draft_regenerate(request, draft_id: int):
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
 
     try:
-        draft = ChatMessage.objects.select_related("campaign", "owner").get(
+        message_profile = _message_profile_for_user(request.user)
+        if message_profile is None:
+            return JsonResponse(
+                {"ok": False, "error": "No active LinkedIn profile found for this draft owner"},
+                status=400,
+            )
+        draft = ChatMessage.objects.select_related("campaign", "owner", "linkedin_profile").get(
             pk=draft_id,
             owner=request.user,
+            linkedin_profile=message_profile,
             is_draft=True,
             is_approved=False,
         )
     except ChatMessage.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Draft not found or already approved"}, status=404)
 
-    ok, reason = validate_llm_site_config(SiteConfig.load())
+    ok, reason = validate_llm_site_config(SiteConfig.load(request.user))
     if not ok:
         return JsonResponse({"ok": False, "error": f"LLM configuration invalid: {reason}"}, status=400)
 
-    linkedin_profile = LinkedInProfile.objects.filter(user=draft.owner, active=True).select_related("user").first()
+    linkedin_profile = draft.linkedin_profile
     if linkedin_profile is None:
         return JsonResponse(
             {"ok": False, "error": "No active LinkedIn profile found for this draft owner"},
@@ -1950,6 +1991,7 @@ def api_message_draft_regenerate(request, draft_id: int):
                     draft.content_type_id,
                     draft.object_id,
                     draft.owner_id,
+                    draft.linkedin_profile_id,
                 ),
             },
         }
@@ -2003,10 +2045,10 @@ def api_task_retry(request, task_id: int):
         task = Task.objects.get(pk=task_id)
     except Task.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Task not found"}, status=404)
-    safe = get_safe_mode_settings()
+    safe = get_safe_mode_settings(request.user)
     if safe.global_pause_outreach:
         return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
-    new_task = retry_task(task)
+    new_task = retry_task(task, user=request.user)
     return JsonResponse({"ok": True, "item": {"taskId": new_task.id, "status": new_task.status}})
 
 
@@ -2022,14 +2064,14 @@ def api_tasks_bulk_retry(request):
     ids = payload.get("ids") or []
     if not isinstance(ids, list):
         return JsonResponse({"ok": False, "error": "ids must be a list"}, status=400)
-    safe = get_safe_mode_settings()
+    safe = get_safe_mode_settings(request.user)
     if safe.global_pause_outreach:
         return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
     if safe.enabled and len(ids) > safe.max_bulk_approve:
         return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_approve})"}, status=400)
     created = 0
     for task in Task.objects.filter(pk__in=ids):
-        retry_task(task)
+        retry_task(task, user=request.user)
         created += 1
     return JsonResponse({"ok": True, "retried": created})
 
@@ -2038,7 +2080,7 @@ def api_tasks_bulk_retry(request):
 @require_GET
 def api_export_preview(request):
     limit = _parse_int(request.GET.get("limit"), 250, 1, 500)
-    preview = export_preview(limit=limit)
+    preview = export_preview(limit=limit, user=request.user)
     return JsonResponse({"ok": True, **preview})
 
 
@@ -2058,10 +2100,10 @@ def api_export_selected(request):
         parsed_ids = [int(x) for x in lead_ids]
     except (TypeError, ValueError):
         return JsonResponse({"ok": False, "error": "leadIds must contain integers"}, status=400)
-    safe = get_safe_mode_settings()
+    safe = get_safe_mode_settings(request.user)
     if safe.enabled and len(parsed_ids) > safe.max_bulk_export:
         return JsonResponse({"ok": False, "error": f"Safe mode limit exceeded ({safe.max_bulk_export})"}, status=400)
-    results = export_selected(parsed_ids)
+    results = export_selected(parsed_ids, user=request.user)
     return JsonResponse({"ok": True, **results})
 
 
@@ -2088,7 +2130,7 @@ def api_followups_queue(request):
         parsed_ids = [int(x) for x in lead_ids]
     except (TypeError, ValueError):
         return JsonResponse({"ok": False, "error": "leadIds must contain integers"}, status=400)
-    safe = get_safe_mode_settings()
+    safe = get_safe_mode_settings(request.user)
     if safe.global_pause_outreach:
         return JsonResponse({"ok": False, "error": "Global pause is enabled"}, status=409)
     if safe.enabled and len(parsed_ids) > safe.max_bulk_approve:
@@ -2102,7 +2144,7 @@ def api_safe_mode(request):
     if request.method == "POST" and not request.user.is_staff:
         return JsonResponse({"ok": False, "error": "Staff access required"}, status=403)
     if request.method == "GET":
-        safe = get_safe_mode_settings()
+        safe = get_safe_mode_settings(request.user)
         return JsonResponse(
             {
                 "ok": True,
@@ -2122,7 +2164,7 @@ def api_safe_mode(request):
         payload = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
         return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
-    safe = set_safe_mode_settings(payload)
+    safe = set_safe_mode_settings(payload, user=request.user)
     return JsonResponse(
         {
             "ok": True,

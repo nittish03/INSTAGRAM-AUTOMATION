@@ -34,6 +34,11 @@ SUPABASE_URL=postgresql://<user>:<url_encoded_password>@<host>:5432/postgres?ssl
 DEBUG=true
 ALLOWED_HOSTS=127.0.0.1,localhost
 
+# Bot pacing and quota guardrails. Defaults to true when omitted.
+# Set false only when you intentionally want no local active-hour window,
+# daemon runtime cap, outreach cooldown, profile quota, or human-like delay.
+BOT_TIME_LIMITS_ENABLED=true
+
 # Google Workspace integration (optional, enables /admin/google/ Sheets workspace)
 GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
@@ -74,7 +79,8 @@ python manage.py rundaemon
 
 - **Encryption**: Sensitive credentials (LinkedIn passwords, API keys) are encrypted using Fernet (AES). The `LEADPILOT_ENCRYPTION_KEY` environment variable must be set in production.
 - **Rate Limits**: Connection and follow-up limits are configured per LinkedIn profile via the administration dashboard.
-- **Active Hours**: The system respects `ACTIVE_START_HOUR` and `ACTIVE_END_HOUR` settings to mimic human operating windows.
+- **Bot Time Limits**: `BOT_TIME_LIMITS_ENABLED=false` disables local bot pacing and caps: active hours/rest days, daemon runtime cap, recent outreach cooldown, profile daily/weekly quotas, connect/follow-up pacing, enrichment sleeps, and human-like typing/browser delays. Browser/network timeouts and external provider/platform retry waits remain in place to avoid stuck sessions and tight failure loops.
+- **Active Hours**: When bot time limits are enabled, the system respects `ACTIVE_START_HOUR` and `ACTIVE_END_HOUR` settings to mimic human operating windows.
 
 ## Operational Workflow (HitL)
 

@@ -40,6 +40,8 @@ class DraftRegenerationTest(TestCase):
             lead=self.lead,
             campaign=self.campaign,
             state=ProfileState.CONNECTED.value,
+            connection_assessment_source="api_degree_1",
+            connection_assessment_confidence=0.95,
         )
         self.lead_ct = ContentType.objects.get_for_model(Lead)
 
@@ -66,6 +68,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         ChatMessage.objects.create(
             content_type=self.lead_ct,
@@ -96,6 +99,7 @@ class DraftRegenerationTest(TestCase):
             is_outgoing=True,
             is_draft=False,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=old_sent_at,
         )
         ChatMessage.objects.create(
@@ -107,6 +111,7 @@ class DraftRegenerationTest(TestCase):
             is_outgoing=False,
             is_draft=False,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=latest_reply_at,
         )
         ChatMessage.objects.create(
@@ -119,6 +124,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=False,
             is_approved=True,
             owner=self.user,
+            linkedin_profile=self.profile,
             creation_date=timezone.now(),
         )
         draft = ChatMessage.objects.create(
@@ -131,6 +137,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         other_user = User.objects.create_user(username="other_draft_owner")
         ChatMessage.objects.create(
@@ -187,6 +194,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         decision = MagicMock(action="send_message", message="New better draft")
         session = MagicMock()
@@ -221,6 +229,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         decision = MagicMock(action="send_message", message="Dry run draft")
         session = MagicMock()
@@ -356,6 +365,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         self.client.force_login(self.user)
 
@@ -418,6 +428,7 @@ class DraftRegenerationTest(TestCase):
             is_draft=True,
             is_approved=False,
             owner=self.user,
+            linkedin_profile=self.profile,
         )
         self.client.force_login(self.user)
         result = MagicMock(
