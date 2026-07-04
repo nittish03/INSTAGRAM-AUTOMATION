@@ -437,6 +437,32 @@ class TaskHardeningTest(TestCase):
             ).exists()
         )
 
+    def test_follow_up_wait_preserves_business_delay_when_time_limits_disabled(self):
+        from linkedin.tasks.follow_up import handle_follow_up
+
+        lead = Lead.objects.create(public_identifier="wait_follow_up")
+        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        task = MagicMock(payload={"campaign_id": self.campaign.id, "public_id": "wait_follow_up"})
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.linkedin_profile = self.profile
+        session.django_user = self.user
+        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
+        decision = MagicMock(action="wait", follow_up_hours=2)
+
+        with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}), patch(
+            "linkedin.actions.status.get_connection_assessment",
+            return_value=assessment,
+        ), patch(
+            "linkedin.agents.follow_up.run_follow_up_agent",
+            return_value=decision,
+        ):
+            before = timezone.now()
+            handle_follow_up(task, session, {})
+
+        queued = Task.objects.get(task_type=Task.TaskType.FOLLOW_UP, deal=deal)
+        self.assertGreaterEqual((queued.scheduled_at - before).total_seconds(), 2 * 3600 - 5)
+
     def test_follow_up_does_not_draft_when_not_connected(self):
         from chat.models import ChatMessage
         from linkedin.tasks.follow_up import handle_follow_up

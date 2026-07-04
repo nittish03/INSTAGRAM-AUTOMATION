@@ -260,6 +260,7 @@ def handle_send_message(task, session, qualifiers=None):
         deal=deal,
         owner_id=owner_id,
         linkedin_profile_id=linkedin_profile_id,
+        apply_time_limits=False,
     )
     enqueue_reply_check(
         campaign_id,
