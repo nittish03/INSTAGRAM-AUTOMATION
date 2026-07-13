@@ -25,9 +25,9 @@ const blankForm: FormState = {
   linkedinPassword: "",
   active: true,
   subscribeNewsletter: true,
-  connectDailyLimit: "20",
-  connectWeeklyLimit: "100",
-  followUpDailyLimit: "30",
+  connectDailyLimit: "35",
+  connectWeeklyLimit: "175",
+  followUpDailyLimit: "25",
 };
 
 function clampPositive(value: string, fallback: number, max: number): number {
@@ -147,9 +147,9 @@ export default function LinkedinProfilesPage() {
         linkedinPassword: password,
         active: form.active,
         subscribeNewsletter: form.subscribeNewsletter,
-        connectDailyLimit: clampPositive(form.connectDailyLimit, 20, 500),
-        connectWeeklyLimit: clampPositive(form.connectWeeklyLimit, 100, 2000),
-        followUpDailyLimit: clampPositive(form.followUpDailyLimit, 30, 500),
+        connectDailyLimit: clampPositive(form.connectDailyLimit, 35, 500),
+        connectWeeklyLimit: clampPositive(form.connectWeeklyLimit, 175, 2000),
+        followUpDailyLimit: clampPositive(form.followUpDailyLimit, 25, 500),
       });
       setCreateOpen(false);
       setForm(blankForm);
