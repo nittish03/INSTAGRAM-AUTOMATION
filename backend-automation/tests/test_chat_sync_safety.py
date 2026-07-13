@@ -301,6 +301,49 @@ class ChatSyncSafetyTest(TestCase):
         prompt = structured_llm.invoke.call_args.args[0]
         self.assertIn("Mode: FOLLOW_UP", prompt)
 
+    def test_follow_up_agent_preserves_previous_conversation_context(self):
+        from linkedin.agents.follow_up import FollowUpDecision, run_follow_up_agent
+
+        session = MagicMock()
+        session.campaign = MagicMock(product_docs="", campaign_objective="", booking_link="")
+        session.self_profile = {}
+        session.django_user = self.user
+        first_message_at = timezone.now() - timedelta(days=1)
+        latest_message_at = timezone.now()
+        messages = [
+            {
+                "sender": "me",
+                "text": "Hi Neeraj, noticed your operations work at Acme.",
+                "timestamp": first_message_at.strftime("%Y-%m-%d %H:%M"),
+                "timestamp_dt": first_message_at,
+                "is_outgoing": True,
+            },
+            {
+                "sender": "Neeraj Kumar",
+                "text": "We are trying to reduce manual handoffs.",
+                "timestamp": latest_message_at.strftime("%Y-%m-%d %H:%M"),
+                "timestamp_dt": latest_message_at,
+                "is_outgoing": False,
+            },
+        ]
+        decision = FollowUpDecision(action="send_message", message="That context helps.", follow_up_hours=4)
+        structured_llm = MagicMock()
+        structured_llm.invoke.return_value = decision
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured_llm
+
+        with (
+            patch("linkedin.db.chat.sync_conversation", return_value=messages),
+            patch("linkedin.agents.follow_up.build_chat_llm", return_value=llm),
+        ):
+            run_follow_up_agent(session, self.lead.public_identifier, {"full_name": "Neeraj Kumar"})
+
+        prompt = structured_llm.invoke.call_args.args[0]
+        first_index = prompt.index("Hi Neeraj, noticed your operations work at Acme.")
+        latest_index = prompt.index("We are trying to reduce manual handoffs.")
+        self.assertLess(first_index, latest_index)
+        self.assertIn("Mode: REPLY", prompt)
+
     def test_send_raw_message_skips_name_search_fallback(self):
         from linkedin.actions.message import send_raw_message
 

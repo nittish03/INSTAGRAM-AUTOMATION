@@ -988,13 +988,13 @@ def _api_linkedin_profile_create(request):
     active = bool(payload.get("active", True))
     subscribe_newsletter = bool(payload.get("subscribeNewsletter", True))
     connect_daily = _coerce_positive_int(
-        payload.get("connectDailyLimit"), default=20, max_value=500
+        payload.get("connectDailyLimit"), default=35, max_value=500
     )
     connect_weekly = _coerce_positive_int(
-        payload.get("connectWeeklyLimit"), default=100, max_value=2000
+        payload.get("connectWeeklyLimit"), default=175, max_value=2000
     )
     follow_up_daily = _coerce_positive_int(
-        payload.get("followUpDailyLimit"), default=30, max_value=500
+        payload.get("followUpDailyLimit"), default=25, max_value=500
     )
 
     try:
