@@ -22,6 +22,8 @@ def generate_search_keywords(
     campaign_objective: str,
     n_keywords: int = 10,
     exclude_keywords: list[str] | None = None,
+    *,
+    user=None,
 ) -> list[str]:
     """Call LLM to generate LinkedIn search keywords from campaign context.
 
@@ -30,7 +32,7 @@ def generate_search_keywords(
     from linkedin.conf import get_llm_site_config
     from linkedin.llm import build_chat_llm
 
-    site_config = get_llm_site_config()
+    site_config = get_llm_site_config(user)
 
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
     template = env.get_template("search_keywords.j2")

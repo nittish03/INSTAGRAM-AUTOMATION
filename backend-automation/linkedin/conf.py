@@ -143,13 +143,26 @@ CAMPAIGN_CONFIG = {
 def get_llm_config(user=None):
     """Return (llm_api_key, ai_model, llm_api_base) from the DB."""
     from linkedin.models import SiteConfig
-    cfg = SiteConfig.load(user)
+    cfg = get_llm_site_config(user)
     return cfg.llm_api_key, cfg.ai_model, cfg.llm_api_base or None
 
 
 def get_llm_site_config(user=None):
-    """Return the SiteConfig object for LLM/provider setup."""
-    from linkedin.models import SiteConfig
+    """Return the SiteConfig object for LLM/provider setup.
+
+    When *user* is omitted, prefer the first active LinkedIn account owner's
+    per-user config over the legacy global row (pk=1).
+    """
+    from linkedin.models import LinkedInProfile, SiteConfig
+
+    if user is None:
+        profiles = list(
+            LinkedInProfile.objects.filter(active=True, user_id__isnull=False)
+            .select_related("user")
+            .order_by("pk")
+        )
+        if len(profiles) == 1:
+            user = profiles[0].user
     return SiteConfig.load(user)
 
 

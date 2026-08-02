@@ -184,12 +184,6 @@ class Command(BaseCommand):
         from linkedin.conf import get_llm_site_config
         from linkedin.llm import validate_llm_site_config
 
-        cfg = get_llm_site_config()
-        ok, reason = validate_llm_site_config(cfg)
-        if not ok:
-            logger.error("LLM configuration invalid: %s", reason)
-            sys.exit(1)
-
         profile = get_first_active_profile(handle=handle)
         if profile is None:
             if handle:
@@ -201,6 +195,18 @@ class Command(BaseCommand):
             else:
                 logger.error("No active LinkedIn profiles found.")
             sys.exit(1)
+
+        cfg = get_llm_site_config(getattr(profile, "user", None))
+        ok, reason = validate_llm_site_config(cfg)
+        if not ok:
+            logger.error("LLM configuration invalid: %s", reason)
+            sys.exit(1)
+        logger.info(
+            "LLM config: provider=%s model=%s user=%s",
+            cfg.llm_provider,
+            cfg.ai_model,
+            getattr(getattr(profile, "user", None), "username", "global"),
+        )
 
         session = get_or_create_session(profile)
 

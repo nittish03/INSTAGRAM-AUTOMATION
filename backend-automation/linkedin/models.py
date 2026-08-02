@@ -186,6 +186,24 @@ class SiteConfig(models.Model):
         super().save(*args, **kwargs)
         self.llm_api_key = plain_key
 
+    LLM_SYNC_FIELDS = (
+        "llm_api_key",
+        "llm_provider",
+        "ai_model",
+        "llm_api_base",
+        "azure_deployment",
+        "azure_api_version",
+    )
+
+    def sync_llm_fields_to_global(self) -> None:
+        """Mirror this row's LLM settings onto the legacy global config (pk=1)."""
+        if self.user_id is None:
+            return
+        global_cfg, _ = self.__class__.objects.get_or_create(pk=1, defaults={"user": None})
+        for field in self.LLM_SYNC_FIELDS:
+            setattr(global_cfg, field, getattr(self, field))
+        global_cfg.save()
+
     @classmethod
     def load(cls, user: User | int | None = None) -> "SiteConfig":
         global_cfg, _ = cls.objects.get_or_create(pk=1, defaults={"user": None})

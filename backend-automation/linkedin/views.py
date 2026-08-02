@@ -1218,6 +1218,7 @@ def api_site_config_save(request):
 
     cfg.google_sheet_sync_user = request.user
     cfg.save()
+    cfg.sync_llm_fields_to_global()
     return JsonResponse({"ok": True})
 
 

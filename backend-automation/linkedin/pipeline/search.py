@@ -30,6 +30,7 @@ def run_search(session) -> str | None:
                 product_docs=campaign.product_docs,
                 campaign_objective=campaign.campaign_objective,
                 exclude_keywords=used if used else None,
+                user=getattr(session, "django_user", None),
             )
         except (IOError, ValueError, openai.OpenAIError):
             logger.exception("Failed to generate search keywords")

@@ -44,7 +44,13 @@ class QualificationDecision(BaseModel):
     reason: str = Field(description="Brief explanation for the decision")
 
 
-def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: str) -> tuple[int, str]:
+def qualify_with_llm(
+    profile_text: str,
+    product_docs: str,
+    campaign_objective: str,
+    *,
+    user=None,
+) -> tuple[int, str]:
     """Call LLM to qualify a profile. Returns (label, reason).
 
     label: 1 = accept, 0 = reject.
@@ -52,7 +58,7 @@ def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: s
     from linkedin.conf import get_llm_site_config
     from linkedin.llm import build_chat_llm
 
-    site_config = get_llm_site_config()
+    site_config = get_llm_site_config(user)
 
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
     template = env.get_template("qualify_lead.j2")
