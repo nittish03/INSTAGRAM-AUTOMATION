@@ -13,7 +13,7 @@ from linkedin.conf import (
     BROWSER_LOGIN_TIMEOUT_MS,
     BROWSER_SLOW_MO,
     PLAYWRIGHT_HEADLESS,
-    bot_delay_seconds,
+    bot_pacing_delay_seconds,
 )
 from linkedin.exceptions import AuthenticationError
 
@@ -281,7 +281,7 @@ def launch_browser(storage_state=None):
     playwright = sync_playwright().start()
     browser = playwright.chromium.launch(
         headless=PLAYWRIGHT_HEADLESS,
-        slow_mo=bot_delay_seconds(BROWSER_SLOW_MO),
+        slow_mo=bot_pacing_delay_seconds(BROWSER_SLOW_MO),
     )
     context = browser.new_context(storage_state=storage_state)
     context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)

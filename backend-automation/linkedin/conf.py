@@ -8,6 +8,8 @@ from pathlib import Path
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 BOT_TIME_LIMITS_ENV = "BOT_TIME_LIMITS_ENABLED"
+BOT_SLEEP_ENV = "BOT_SLEEP_ENABLED"
+BOT_ACTIVE_HOURS_ENV = "BOT_ACTIVE_HOURS_ENABLED"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -23,12 +25,24 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def bot_time_limits_enabled() -> bool:
-    """Whether local bot pacing, quotas, active windows, and runtime caps apply."""
+    """Whether daily/weekly quotas, active windows, and runtime caps apply."""
     return _env_bool(BOT_TIME_LIMITS_ENV, True)
 
 
+def bot_sleep_enabled() -> bool:
+    """Whether human-like sleeps, cooldowns, and inter-action pacing apply."""
+    return _env_bool(BOT_SLEEP_ENV, True)
+
+
+def bot_pacing_delay_seconds(seconds: float | int | None) -> float:
+    """Return scheduling/cooldown delay, or zero when sleep pacing is disabled."""
+    if not bot_time_limits_enabled() or not bot_sleep_enabled():
+        return 0.0
+    return max(float(seconds or 0), 0.0)
+
+
 def bot_delay_seconds(seconds: float | int | None) -> float:
-    """Return a bot pacing delay, or zero when time limits are disabled."""
+    """Return a configured delay for runtime caps and other limit-only timers."""
     if not bot_time_limits_enabled():
         return 0.0
     return max(float(seconds or 0), 0.0)
@@ -65,19 +79,19 @@ FIXTURE_PROFILES_DIR = FIXTURE_DIR / "profiles"
 FIXTURE_PAGES_DIR = FIXTURE_DIR / "pages"
 DUMP_PAGES = False
 
-MIN_DELAY = 8
-MAX_DELAY = 18
+MIN_DELAY = 4
+MAX_DELAY = 9
 
 # ----------------------------------------------------------------------
 # Browser config
 # ----------------------------------------------------------------------
 PLAYWRIGHT_HEADLESS = _playwright_headless()
-BROWSER_SLOW_MO = 150
+BROWSER_SLOW_MO = 75
 BROWSER_DEFAULT_TIMEOUT_MS = 30_000
 BROWSER_LOGIN_TIMEOUT_MS = 40_000
 BROWSER_NAV_TIMEOUT_MS = 10_000
-HUMAN_TYPE_MIN_DELAY_MS = 60
-HUMAN_TYPE_MAX_DELAY_MS = 180
+HUMAN_TYPE_MIN_DELAY_MS = 30
+HUMAN_TYPE_MAX_DELAY_MS = 90
 
 # ----------------------------------------------------------------------
 # Onboarding defaults (shown to user during interactive setup)
@@ -96,23 +110,30 @@ ACTIVE_END_HOUR = 16     # exclusive, local time
 ACTIVE_TIMEZONE = "Asia/Kolkata"
 REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
 
+
+def bot_active_hours_enabled() -> bool:
+    """Whether the daemon pauses outside configured working hours."""
+    return _env_bool(BOT_ACTIVE_HOURS_ENV, ENABLE_ACTIVE_HOURS)
+
 # ----------------------------------------------------------------------
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 6,
+    "check_pending_recheck_after_hours": 3,
     "enrich_min_interval": 1,
-    "min_action_interval": 6 * 60,
+    "min_action_interval": 3 * 60,
     "daemon_max_runtime_seconds": 6 * 60 * 60,
     "qualification_n_mc_samples": 100,
     "min_ready_to_connect_prob": 0.9,
     "min_positive_pool_prob": 0.20,
     "embedding_model": "BAAI/bge-small-en-v1.5",
-    "connect_delay_seconds": 8 * 60,
-    "connect_no_candidate_delay_seconds": 20 * 60,
-    "reply_check_interval_seconds": 15 * 60,
+    "connect_delay_seconds": 2 * 60,
+    "connect_no_candidate_delay_seconds": 5 * 60,
+    "reply_check_interval_seconds": 7 * 60 + 30,
     "reply_check_max_attempts": 12,
-    "reply_check_window_seconds": 3 * 60 * 60,
+    "reply_check_window_seconds": 90 * 60,
+    "heal_follow_up_delay_min_seconds": 2.5,
+    "heal_follow_up_delay_max_seconds": 30,
 }
 
 # ----------------------------------------------------------------------

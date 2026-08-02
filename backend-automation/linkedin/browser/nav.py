@@ -1,6 +1,7 @@
 # linkedin/browser/nav.py
 import logging
 import random
+import time
 from urllib.parse import unquote, urlparse, urljoin
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -11,7 +12,7 @@ from linkedin.conf import (
     FIXTURE_PAGES_DIR,
     HUMAN_TYPE_MAX_DELAY_MS,
     HUMAN_TYPE_MIN_DELAY_MS,
-    bot_time_limits_enabled,
+    bot_sleep_enabled,
 )
 from linkedin.exceptions import SkipProfile
 
@@ -86,6 +87,8 @@ def find_first_visible(page, selectors: list[str]):
 
 
 TOP_CARD_SELECTORS = [
+    '[componentkey*="Topcard"]',
+    'div[id*="Topcard"][componentkey*="Topcard"]',
     'section:has(div.top-card-background-hero-image)',
     'section[data-member-id]',
     'section.artdeco-card:has(> div.pv-top-card)',
@@ -94,17 +97,24 @@ TOP_CARD_SELECTORS = [
 ]
 
 
-def find_top_card(session):
-    top_card = find_first_visible(session.page, TOP_CARD_SELECTORS)
-    if top_card is None:
-        logger.warning("Top card not found on %s", session.page.url)
-        raise SkipProfile("Top Card section not found")
-    return top_card
+def find_top_card(session, timeout_ms: int = 10_000):
+    page = session.page
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while time.monotonic() < deadline:
+        top_card = find_first_visible(page, TOP_CARD_SELECTORS)
+        if top_card is not None:
+            return top_card
+        try:
+            page.wait_for_timeout(300)
+        except Exception:
+            break
+    logger.warning("Top card not found on %s", page.url)
+    raise SkipProfile("Top Card section not found")
 
 
 def human_type(locator, text: str, min_delay: int = HUMAN_TYPE_MIN_DELAY_MS, max_delay: int = HUMAN_TYPE_MAX_DELAY_MS):
     """Type text with randomized per-keystroke delay to mimic human input."""
-    delay = random.randint(min_delay, max_delay) if bot_time_limits_enabled() else 0
+    delay = random.randint(min_delay, max_delay) if bot_sleep_enabled() else 0
     locator.type(text, delay=delay)
 
 

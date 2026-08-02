@@ -22,7 +22,10 @@ from linkedin.conf import (
     CAMPAIGN_CONFIG,
     ENABLE_ACTIVE_HOURS,
     REST_DAYS,
+    bot_active_hours_enabled,
     bot_delay_seconds,
+    bot_pacing_delay_seconds,
+    bot_sleep_enabled,
     bot_time_limits_enabled,
 )
 from linkedin.diagnostics import failure_diagnostics
@@ -65,14 +68,14 @@ _HANDLERS = {
 
 
 def _prioritize_claims(queryset):
-    """Run human-approved sends before background checks and draft generation."""
+    """Human-approved sends first, then pipeline connect, then passive checks."""
     return queryset.annotate(
         _daemon_priority=Case(
             When(task_type=Task.TaskType.SEND_MESSAGE, then=Value(0)),
-            When(task_type=Task.TaskType.REPLY_CHECK, then=Value(1)),
-            When(task_type=Task.TaskType.FOLLOW_UP, then=Value(2)),
-            When(task_type=Task.TaskType.CHECK_PENDING, then=Value(3)),
-            When(task_type=Task.TaskType.CONNECT, then=Value(4)),
+            When(task_type=Task.TaskType.CONNECT, then=Value(1)),
+            When(task_type=Task.TaskType.REPLY_CHECK, then=Value(2)),
+            When(task_type=Task.TaskType.FOLLOW_UP, then=Value(3)),
+            When(task_type=Task.TaskType.CHECK_PENDING, then=Value(4)),
             default=Value(9),
             output_field=IntegerField(),
         )
@@ -81,7 +84,7 @@ def _prioritize_claims(queryset):
 
 def _recent_outreach_cooldown_seconds(session, cfg) -> float:
     """Return remaining cooldown after a real outward LinkedIn action."""
-    if not bot_time_limits_enabled():
+    if not bot_time_limits_enabled() or not bot_sleep_enabled():
         return 0.0
 
     min_interval = float(cfg.get("min_action_interval") or 0)
@@ -232,7 +235,7 @@ def _build_qualifiers(campaigns, cfg):
 
 def seconds_until_active() -> float:
     """Return seconds to wait before the next active window, or 0 if active now."""
-    if not bot_time_limits_enabled() or not ENABLE_ACTIVE_HOURS:
+    if not bot_time_limits_enabled() or not bot_active_hours_enabled():
         return 0.0
     tz = ZoneInfo(ACTIVE_TIMEZONE)
     now = timezone.localtime(timezone=tz)
@@ -293,7 +296,7 @@ def heal_tasks(session):
 
     # 2. Seed connect tasks per campaign (regular first, freemium deferred)
     for campaign in session.campaigns:
-        delay = bot_delay_seconds(CAMPAIGN_CONFIG["connect_delay_seconds"]) if campaign.is_freemium else 0
+        delay = bot_pacing_delay_seconds(CAMPAIGN_CONFIG["connect_delay_seconds"]) if campaign.is_freemium else 0
         enqueue_connect(campaign.pk, delay_seconds=delay)
 
     # 3. Check_pending tasks for PENDING profiles
@@ -361,7 +364,12 @@ def heal_tasks(session):
             enqueue_follow_up(
                 campaign.pk,
                 public_id,
-                delay_seconds=bot_delay_seconds(random.uniform(5, 60)),
+                delay_seconds=bot_pacing_delay_seconds(
+                    random.uniform(
+                        cfg.get("heal_follow_up_delay_min_seconds", 2.5),
+                        cfg.get("heal_follow_up_delay_max_seconds", 30),
+                    )
+                ),
                 deal=deal,
                 owner_id=session_user_id,
                 linkedin_profile_id=session_profile_id,
@@ -475,6 +483,7 @@ def run_daemon(session):
 
         session.campaign = campaign
         task.mark_running()
+        task_started = time.monotonic()
 
         handler = _HANDLERS.get(task.task_type)
         if handler is None:
@@ -486,22 +495,30 @@ def run_daemon(session):
                 handler(task, session, qualifiers)
             _close_old_connections_for_daemon()
             task.mark_completed()
+            logger.info("Task %s completed in %.1fs", task, time.monotonic() - task_started)
         except TaskSkipped as e:
             _close_old_connections_for_daemon()
             task.mark_skipped(str(e))
-            logger.info("Task %s skipped: %s", task, str(e))
+            logger.info(
+                "Task %s skipped in %.1fs: %s",
+                task,
+                time.monotonic() - task_started,
+                str(e),
+            )
         except Exception:
+            elapsed = time.monotonic() - task_started
             error = traceback.format_exc()
             _close_old_connections_for_daemon()
             try:
                 task.mark_failed(error)
             except Exception:
                 logger.exception(
-                    "Task %s failed and could not be marked failed. Original traceback:\n%s",
+                    "Task %s failed after %.1fs and could not be marked failed. Original traceback:\n%s",
                     task,
+                    elapsed,
                     error,
                 )
             else:
-                logger.exception("Task %s failed", task)
+                logger.exception("Task %s failed after %.1fs", task, elapsed)
             continue
 

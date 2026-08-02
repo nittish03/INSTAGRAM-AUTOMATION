@@ -28,6 +28,8 @@ import type {
   SearchKeywordItem,
   SiteConfig,
   SiteConfigResponse,
+  LlmChatResponse,
+  LlmModelsResponse,
   TaskItem,
   User,
 } from "@/lib/types";
@@ -256,6 +258,20 @@ export const api = {
     request<Record<string, never>>("/api/site-config/save", {
       method: "POST",
       body: JSON.stringify(patch),
+    }),
+  llmChat: (
+    payload: Partial<SiteConfig> & { llmApiKey?: string; message: string },
+    init?: RequestInit,
+  ) =>
+    request<LlmChatResponse>("/api/site-config/llm-chat/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      ...init,
+    }),
+  listLlmModels: (payload: Partial<SiteConfig> & { llmApiKey?: string }) =>
+    request<LlmModelsResponse>("/api/site-config/list-models/", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
   analytics: (days = 14) => request<AnalyticsData>(`/api/analytics?days=${days}`),
   googleStatus: () => request<{ google: GoogleStatus }>("/api/google/status"),

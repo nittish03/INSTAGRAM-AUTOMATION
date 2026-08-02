@@ -13,7 +13,7 @@ from typing import Callable
 from django.utils import timezone
 from termcolor import colored
 
-from linkedin.conf import CAMPAIGN_CONFIG, bot_delay_seconds, bot_time_limits_enabled
+from linkedin.conf import CAMPAIGN_CONFIG, bot_pacing_delay_seconds, bot_time_limits_enabled
 from linkedin.db.deals import increment_connect_attempts, set_profile_state
 from linkedin.db.leads import disqualify_lead
 from linkedin.models import ActionLog, Task
@@ -402,7 +402,7 @@ def enqueue_connect(
     _enqueue_task(
         task_type=Task.TaskType.CONNECT,
         payload={"campaign_id": campaign_id},
-        delay_seconds=bot_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
+        delay_seconds=bot_pacing_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
         deal=deal,
     )
 
@@ -462,7 +462,7 @@ def enqueue_follow_up(
     _enqueue_task(
         task_type=Task.TaskType.FOLLOW_UP,
         payload=payload,
-        delay_seconds=bot_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
+        delay_seconds=bot_pacing_delay_seconds(delay_seconds) if apply_time_limits else delay_seconds,
         deal=deal,
     )
 

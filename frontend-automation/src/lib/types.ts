@@ -187,6 +187,22 @@ export type SiteConfigResponse = {
   providerChoices: { value: string; label: string }[];
 };
 
+export type LlmModelOption = {
+  id: string;
+  label: string;
+};
+
+export type LlmModelsResponse = {
+  models: LlmModelOption[];
+  source: string;
+  filteredOut: number;
+  hint: string;
+};
+
+export type LlmChatResponse = {
+  reply: string;
+};
+
 export type AnalyticsData = {
   rangeDays: number;
   daily: { date: string; connect: number; followUp: number }[];

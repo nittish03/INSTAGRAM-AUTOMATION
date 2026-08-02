@@ -1221,6 +1221,87 @@ def api_site_config_save(request):
     return JsonResponse({"ok": True})
 
 
+def _site_config_for_llm_test(user, payload: dict):
+    """Build an in-memory SiteConfig snapshot for a live LLM test (not saved)."""
+    from linkedin.models import SiteConfig
+
+    cfg = SiteConfig.load(user)
+    field_map = {
+        "llmProvider": "llm_provider",
+        "aiModel": "ai_model",
+        "llmApiBase": "llm_api_base",
+        "azureDeployment": "azure_deployment",
+        "azureApiVersion": "azure_api_version",
+    }
+    for json_key, attr in field_map.items():
+        value = payload.get(json_key)
+        if value is not None:
+            setattr(cfg, attr, value.strip() if isinstance(value, str) else value)
+    provider = payload.get("llmProvider")
+    if provider is not None:
+        cfg.llm_provider = str(provider).strip().lower()
+    new_key = payload.get("llmApiKey")
+    if new_key:
+        cfg.llm_api_key = new_key
+    return cfg
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_site_config_list_models(request):
+    import json as _json
+
+    from linkedin.llm import format_llm_error, list_llm_models
+
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    cfg = _site_config_for_llm_test(request.user, payload)
+    try:
+        result = list_llm_models(cfg)
+        return JsonResponse({"ok": True, **result})
+    except Exception as exc:
+        error = format_llm_error(exc)
+        logger.warning("LLM model list failed: %s", error)
+        return JsonResponse({"ok": False, "error": error}, status=502)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_site_config_llm_chat(request):
+    import json as _json
+
+    from linkedin.llm import build_chat_llm, format_llm_error, extract_llm_reply, validate_llm_site_config
+
+    try:
+        payload = _json.loads(request.body or b"{}")
+    except _json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return JsonResponse({"ok": False, "error": "message is required"}, status=400)
+    if len(message) > 4000:
+        return JsonResponse({"ok": False, "error": "message too long (max 4000 chars)"}, status=400)
+
+    cfg = _site_config_for_llm_test(request.user, payload)
+    ok, reason = validate_llm_site_config(cfg)
+    if not ok:
+        return JsonResponse({"ok": False, "error": reason}, status=400)
+
+    try:
+        llm = build_chat_llm(cfg, temperature=0.2, timeout=20, max_retries=0)
+        response = llm.invoke(message)
+        return JsonResponse({"ok": True, "reply": extract_llm_reply(response)})
+    except Exception as exc:
+        error = format_llm_error(exc)
+        logger.warning("LLM chat test failed: %s", error)
+        status = 429 if "429" in error or "quota" in error.lower() else 502
+        return JsonResponse({"ok": False, "error": error}, status=status)
+
+
 @login_required
 @require_GET
 def api_analytics(request):

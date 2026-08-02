@@ -330,7 +330,7 @@ def _try_keyboard_send_shortcuts(session, page, input_area: Locator) -> bool:
         try:
             input_area.focus(timeout=2000)
             page.keyboard.press(shortcut)
-            session.wait(3, 4)
+            session.wait(1.5, 2)
             if _input_cleared_after_send(input_area):
                 logger.info("Message sent using keyboard shortcut %s", shortcut)
                 return True
@@ -353,21 +353,21 @@ def _click_send_and_verify(session, page, input_area: Locator, message: str) -> 
                 if attempt == 0:
                     logger.warning("Send button stayed disabled after typing → retrying compose via paste")
                     _replace_compose_text_with_paste(session, page, input_area, message)
-                    session.wait(1, 2)
+                    session.wait(0.25, 0.5)
                     break
                 logger.warning("Send button stayed disabled after paste → trying keyboard send shortcuts")
                 if _try_keyboard_send_shortcuts(session, page, input_area):
                     return True
                 _log_disabled_send_diagnostics(send_btn, input_area)
                 return False
-            session.wait(0.5, 1)
+            session.wait(0.25, 0.5)
         else:
             pass
         if not send_btn.is_enabled(timeout=1000):
             continue
         send_btn.scroll_into_view_if_needed(timeout=2000)
         send_btn.click(delay=200)
-        session.wait(4, 5)
+        session.wait(2, 2.5)
 
         try:
             text = input_area.inner_text(timeout=2000).strip()
@@ -478,14 +478,14 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
         )
 
         _find(session.page, "new_message_button").first.click(delay=200)
-        session.wait(1, 2)
+        session.wait(0.25, 0.5)
 
         conn_input = _find(session.page, "connections_input").first
         conn_input.fill("")
-        session.wait(0.5, 1)
+        session.wait(0.25, 0.5)
 
         human_type(conn_input, full_name, min_delay=10, max_delay=50)
-        session.wait(2, 3)
+        session.wait(1, 1.5)
 
         rows = _find(session.page, "search_result_row")
         item = None
@@ -507,7 +507,7 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
 
         item.scroll_into_view_if_needed()
         item.click(delay=200)
-        session.wait(1, 2)
+        session.wait(0.25, 0.5)
         logger.debug("Selected messaging recipient for %s → %s", public_identifier, name_in_result)
 
         input_area = _find(session.page, "compose_input").first
@@ -579,9 +579,9 @@ if __name__ == "__main__":
 
     conn_input = _find(session.page, "connections_input").first
     conn_input.fill("")
-    session.wait(0.5, 1)
-    human_type(conn_input, args.name, min_delay=10, max_delay=50)
-    session.wait(3, 4)
+    session.wait(0.25, 0.5)
+    human_type(conn_input, args.name, min_delay=5, max_delay=25)
+    session.wait(1.5, 2)
 
     rows = _find(session.page, "search_result_row")
     count = rows.count()

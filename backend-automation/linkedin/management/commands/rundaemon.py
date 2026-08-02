@@ -86,7 +86,18 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, graceful_exit)
         signal.signal(signal.SIGTERM, ignore_sigterm)
 
+        from linkedin.conf import (
+            bot_active_hours_enabled,
+            bot_sleep_enabled,
+            bot_time_limits_enabled,
+        )
         from linkedin.daemon import run_daemon
+        logger.info(
+            "Pacing: sleep=%s limits=%s active_hours=%s",
+            bot_sleep_enabled(),
+            bot_time_limits_enabled(),
+            bot_active_hours_enabled(),
+        )
         try:
             run_daemon(session)
         finally:
@@ -109,7 +120,11 @@ class Command(BaseCommand):
                 except Exception:
                     pass
         logging.getLogger().handlers.clear()
-        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
         for name in (
             "urllib3", "httpx", "langchain", "openai", "playwright",
             "httpcore", "fastembed", "huggingface_hub", "filelock", "asyncio",
