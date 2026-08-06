@@ -167,22 +167,23 @@ start_in_system_terminal() {
     echo "  3) Daemon: $daemon_cmd"
   fi
 
+  # Always open NEW Terminal windows. Never inject into the current tab —
+  # when launched via "Start Dev.command", the front tab exits after this
+  # script finishes, which would kill a backend started in that same tab.
   osascript <<EOF
 tell application "Terminal"
   activate
-  if (count of windows) = 0 then
-    do script "$backend_cmd_escaped"
-  else
-    do script "$backend_cmd_escaped" in selected tab of front window
-  end if
+  do script "$backend_cmd_escaped"
+  delay 0.3
   do script "$frontend_cmd_escaped"
   if $RUN_DAEMON = 1 then
+    delay 0.3
     do script "$daemon_cmd_escaped"
   end if
 end tell
 EOF
 
-  echo "Launched in separate Terminal tabs."
+  echo "Launched in separate Terminal windows."
 }
 
 case "$MODE" in
