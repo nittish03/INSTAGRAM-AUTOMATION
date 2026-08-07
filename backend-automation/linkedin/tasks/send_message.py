@@ -252,7 +252,12 @@ def handle_send_message(task, session, qualifiers=None):
         status="success",
         note=f"Message: {msg.content[:50]}..."
     )
-    
+
+    if deal and deal.lead_id:
+        from google_integration.sheet_sync import sync_messaged_lead_to_google_sheet
+
+        sync_messaged_lead_to_google_sheet(deal.lead, config_user=owner_id)
+
     enqueue_follow_up(
         campaign_id,
         public_id,

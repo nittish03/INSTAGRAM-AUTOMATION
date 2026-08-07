@@ -253,14 +253,30 @@ def _sheet_last_follow_up_date_cell(lead: "Lead") -> str:
 
 
 def _config_user_for_lead(lead: "Lead", config_user=None):
+    """Resolve the SiteConfig owner for a lead (single campaign owner when possible)."""
     if config_user is not None:
         return config_user
-    return (
-        lead.deal_set.filter(campaign__users__isnull=False)
+    deal = (
+        lead.deal_set.select_related("campaign")
         .order_by("-update_date")
-        .values_list("campaign__users", flat=True)
         .first()
     )
+    if deal is None:
+        return None
+    campaign_users = list(deal.campaign.users.order_by("id")[:2])
+    if not campaign_users:
+        logger.info(
+            "Google Sheet sync: lead pk=%s has no campaign owner — using global SiteConfig",
+            lead.pk,
+        )
+        return None
+    if len(campaign_users) != 1:
+        logger.info(
+            "Google Sheet sync: lead pk=%s campaign has ambiguous owners — using %s",
+            lead.pk,
+            campaign_users[0].username,
+        )
+    return campaign_users[0]
 
 
 def build_sheet_row(
@@ -307,25 +323,49 @@ def _sync_lead_status_to_google_sheet(
     """Write or update one lead row by LinkedIn profile URL/public id."""
     from linkedin.models import SiteConfig
 
-    cfg = SiteConfig.load(_config_user_for_lead(lead, config_user))
+    owner = _config_user_for_lead(lead, config_user)
+    cfg = SiteConfig.load(owner)
     if not cfg.google_sheet_sync_enabled:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: sync disabled",
+            lead.pk,
+            reason_code,
+        )
         return False
     sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
     if not sid:
-        logger.debug("google_sheet_sync enabled but google_sheet_id empty — skip")
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no sheet ID configured",
+            lead.pk,
+            reason_code,
+        )
         return False
 
     if not lead.linkedin_url:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no linkedin_url",
+            lead.pk,
+            reason_code,
+        )
         return False
 
     user = resolve_google_sync_user(cfg)
     if not user:
-        logger.warning("Google Sheet sync: no user — set SiteConfig.google_sheet_sync_user or connect Google as a superuser")
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no OAuth user — set google_sheet_sync_user or connect Google",
+            lead.pk,
+            reason_code,
+        )
         return False
 
     account = GoogleAccount.objects.filter(user=user).first()
     if not account or not account.is_connected:
-        logger.warning("Google Sheet sync: user %s has no connected GoogleAccount", user)
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: GoogleAccount not connected for %s",
+            lead.pk,
+            reason_code,
+            user.username,
+        )
         return False
 
     tab = (cfg.google_sheet_tab or "Sheet1").strip() or "Sheet1"
@@ -435,6 +475,100 @@ def sync_qualified_lead_to_google_sheet(
     )
 
 
+def sync_messaged_lead_to_google_sheet(
+    lead: "Lead",
+    *,
+    reason_code: str = "message_sent",
+    config_user=None,
+) -> bool:
+    """Export CONNECTED leads with proven outbound messaging (successful FOLLOW_UP ActionLog).
+
+    Does not require CONNECTION_DETECTED verification — these leads have a sent message.
+    """
+    from linkedin.enums import ProfileState
+    from linkedin.models import ActionLog, SiteConfig
+
+    owner = _config_user_for_lead(lead, config_user)
+    cfg = SiteConfig.load(owner)
+    if not cfg.google_sheet_sync_enabled:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: sync disabled",
+            lead.pk,
+            reason_code,
+        )
+        return False
+    sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
+    if not sid:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no sheet ID configured",
+            lead.pk,
+            reason_code,
+        )
+        return False
+
+    if not lead.linkedin_url:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no linkedin_url",
+            lead.pk,
+            reason_code,
+        )
+        return False
+
+    if not lead.deal_set.filter(state=ProfileState.CONNECTED).exists():
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no CONNECTED deal",
+            lead.pk,
+            reason_code,
+        )
+        return False
+
+    pid = (lead.public_identifier or "").strip()
+    if not pid:
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s [%s]: no public_id",
+            lead.pk,
+            reason_code,
+        )
+        return False
+
+    if not ActionLog.objects.filter(
+        target_public_id=pid,
+        action_type=ActionLog.ActionType.FOLLOW_UP,
+        status=ActionLog.Status.SUCCESS,
+    ).exists():
+        logger.info(
+            "Google Sheet sync skipped lead pk=%s (%s) [%s]: no successful FOLLOW_UP",
+            lead.pk,
+            pid,
+            reason_code,
+        )
+        return False
+
+    return _sync_lead_status_to_google_sheet(
+        lead,
+        status_label=ProfileState.CONNECTED.value,
+        reason_code=reason_code,
+        config_user=owner,
+    )
+
+
+def google_sheet_sync_startup_line(config) -> str:
+    """One-line sheet-sync readiness summary for daemon startup logs."""
+    if not config.google_sheet_sync_enabled:
+        return "disabled"
+    sid = normalize_spreadsheet_id(config.google_sheet_id or "")
+    if not sid:
+        return "enabled but no sheet ID"
+    user = resolve_google_sync_user(config)
+    if not user:
+        return f"enabled sheet={sid[:8]}… but no OAuth user"
+    account = GoogleAccount.objects.filter(user=user).first()
+    if not account or not account.is_connected:
+        return f"enabled sheet={sid[:8]}… user={user.username} OAuth not connected"
+    tab = (config.google_sheet_tab or "Sheet1").strip() or "Sheet1"
+    return f"enabled sheet={sid[:8]}… tab={tab} user={user.username} OAuth=ok"
+
+
 def sync_lead_to_google_sheet(
     lead: "Lead",
     *,
@@ -453,17 +587,20 @@ def sync_lead_to_google_sheet(
     owner = _config_user_for_lead(lead, config_user)
     cfg = SiteConfig.load(owner)
     if not cfg.google_sheet_sync_enabled:
+        logger.info("Google Sheet sync skipped lead pk=%s: sync disabled", lead.pk)
         return False
     sid = normalize_spreadsheet_id(cfg.google_sheet_id or "")
     if not sid:
-        logger.debug("google_sheet_sync enabled but google_sheet_id empty — skip")
+        logger.info("Google Sheet sync skipped lead pk=%s: no sheet ID configured", lead.pk)
         return False
 
     if not lead.linkedin_url:
+        logger.info("Google Sheet sync skipped lead pk=%s: no linkedin_url", lead.pk)
         return False
 
     has_connected_deal = lead.deal_set.filter(state=ProfileState.CONNECTED).exists()
     if not has_connected_deal:
+        logger.info("Google Sheet sync skipped lead pk=%s: no CONNECTED deal", lead.pk)
         return False
 
     ok_verify, reason_code, status_label = lead_sheet_export_verification(lead, config_user=owner)

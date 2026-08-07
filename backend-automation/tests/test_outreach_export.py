@@ -11,15 +11,17 @@ from crm.models import Deal, Lead
 from google_integration.models import GoogleAccount
 from google_integration.sheet_sync import (
     SHEET_HEADER,
+    _config_user_for_lead,
     build_sheet_row,
     derive_active_label,
     normalize_sheet_status,
     sync_lead_to_google_sheet,
+    sync_messaged_lead_to_google_sheet,
     sync_pending_lead_to_google_sheet,
     sync_qualified_lead_to_google_sheet,
 )
 from linkedin.enums import ProfileState
-from linkedin.models import Campaign, OutreachEvent, SiteConfig
+from linkedin.models import ActionLog, Campaign, LinkedInProfile, OutreachEvent, SiteConfig
 from linkedin.outreach_tracking import emit_outreach_event, lead_sheet_export_verification
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
@@ -519,3 +521,105 @@ class OutreachExportGateTests(TestCase):
         self.assertTrue(sync_lead_to_google_sheet(self.lead))
         self.assertEqual(mock_update.call_args.args[2], "Sheet1!A3:J3")
         self.assertFalse(mock_append.called)
+
+
+class MessagedLeadExportTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("owner", password="x", is_superuser=True)
+        self.campaign = Campaign.objects.create(name="OwnerCamp")
+        self.campaign.users.add(self.owner)
+        self.owner_cfg = SiteConfig.load(self.owner)
+        self.owner_cfg.google_sheet_sync_enabled = True
+        self.owner_cfg.google_sheet_id = "owner_sheet_id"
+        self.owner_cfg.google_sheet_sync_user = self.owner
+        self.owner_cfg.save()
+
+        self.lead = Lead.objects.create(
+            first_name="M",
+            last_name="Sent",
+            company_name="Co",
+            linkedin_url="https://www.linkedin.com/in/msent/",
+            public_identifier="msent",
+            profile_data={"headline": "PM"},
+        )
+        self.deal = Deal.objects.create(
+            lead=self.lead,
+            campaign=self.campaign,
+            state=ProfileState.CONNECTED.value,
+        )
+        self.profile = LinkedInProfile.objects.create(user=self.owner, active=True)
+        ActionLog.objects.create(
+            linkedin_profile=self.profile,
+            campaign=self.campaign,
+            action_type=ActionLog.ActionType.FOLLOW_UP,
+            target_public_id="msent",
+            status=ActionLog.Status.SUCCESS,
+        )
+        GoogleAccount.objects.create(
+            user=self.owner,
+            refresh_token="not-empty",
+            google_email="owner@example.com",
+        )
+
+    def test_config_user_for_lead_resolves_campaign_owner(self):
+        self.assertEqual(_config_user_for_lead(self.lead), self.owner)
+
+    @patch("google_integration.sheet_sync.append_rows")
+    @patch("google_integration.sheet_sync.update_values")
+    @patch("google_integration.sheet_sync.get_values")
+    def test_messaged_connected_lead_exports_without_connection_detected(
+        self, mock_get_values, mock_update, mock_append
+    ):
+        mock_get_values.return_value = []
+
+        self.assertTrue(sync_messaged_lead_to_google_sheet(self.lead))
+        written_row = mock_update.call_args.args[3][0]
+        self.assertEqual(written_row[5], "Connected")
+        self.assertFalse(mock_append.called)
+        self.lead.refresh_from_db()
+        self.assertIsNotNone(self.lead.sheet_exported_at)
+
+    @patch("google_integration.sheet_sync.sync_messaged_lead_to_google_sheet")
+    @patch("linkedin.actions.message.send_raw_message", return_value=True)
+    @patch("linkedin.tasks.send_message.get_profile_dict_for_public_id")
+    def test_send_message_success_calls_sheet_sync(
+        self, mock_profile_dict, mock_send, mock_sheet_sync
+    ):
+        from chat.models import ChatMessage
+        from django.contrib.contenttypes.models import ContentType
+        from linkedin.tasks.send_message import handle_send_message
+        from unittest.mock import MagicMock
+
+        mock_profile_dict.return_value = {"profile": self.lead.profile_data}
+        lead_ct = ContentType.objects.get_for_model(Lead)
+        msg = ChatMessage.objects.create(
+            content_type=lead_ct,
+            object_id=self.lead.pk,
+            campaign=self.campaign,
+            content="Following up on our chat.",
+            linkedin_urn="draft_send",
+            is_outgoing=True,
+            is_draft=False,
+            is_approved=True,
+            owner=self.owner,
+            linkedin_profile=self.profile,
+        )
+        task = MagicMock(
+            payload={
+                "public_id": self.lead.public_identifier,
+                "campaign_id": self.campaign.pk,
+                "message_id": msg.pk,
+                "owner_id": self.owner.pk,
+            }
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.django_user = self.owner
+        session.linkedin_profile = self.profile
+
+        handle_send_message(task, session)
+
+        mock_sheet_sync.assert_called_once()
+        called_lead, = mock_sheet_sync.call_args.args
+        self.assertEqual(called_lead.pk, self.lead.pk)
+        self.assertEqual(mock_sheet_sync.call_args.kwargs.get("config_user"), self.owner.pk)

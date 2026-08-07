@@ -208,6 +208,12 @@ class Command(BaseCommand):
             getattr(getattr(profile, "user", None), "username", "global"),
         )
 
+        from linkedin.models import SiteConfig
+        from google_integration.sheet_sync import google_sheet_sync_startup_line
+
+        sheet_cfg = SiteConfig.load(getattr(profile, "user", None))
+        logger.info("Google Sheet sync: %s", google_sheet_sync_startup_line(sheet_cfg))
+
         session = get_or_create_session(profile)
 
         if not session.campaigns:
