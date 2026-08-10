@@ -232,6 +232,39 @@ class ChatSyncSafetyTest(TestCase):
         self.assertGreater(decision.follow_up_hours, 20)
         mock_llm.assert_not_called()
 
+    def test_follow_up_agent_passes_discovery_mode_for_empty_conversation(self):
+        from linkedin.agents.follow_up import FollowUpDecision, run_follow_up_agent
+
+        session = MagicMock()
+        session.campaign = MagicMock(
+            product_docs="LTD is a multi-client logistics tracker.",
+            campaign_objective="Book demos for LTD.",
+            booking_link="https://example.com/book",
+        )
+        session.self_profile = {"first_name": "Deepali", "last_name": "koli"}
+        session.django_user = self.user
+        decision = FollowUpDecision(
+            action="send_message",
+            message="Curious how you keep delivery predictable across clients?",
+            follow_up_hours=4,
+        )
+        structured_llm = MagicMock()
+        structured_llm.invoke.return_value = decision
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured_llm
+
+        with (
+            patch("linkedin.db.chat.sync_conversation", return_value=[]),
+            patch("linkedin.agents.follow_up.build_chat_llm", return_value=llm),
+        ):
+            run_follow_up_agent(session, self.lead.public_identifier, {"full_name": "Neeraj Kumar"})
+
+        prompt = structured_llm.invoke.call_args.args[0]
+        self.assertIn("Mode: DISCOVERY", prompt)
+        self.assertIn("do not mention in the message", prompt)
+        self.assertNotIn("## Booking Link", prompt)
+        self.assertIn("never mention product names", prompt)
+
     def test_follow_up_agent_passes_reply_mode_for_latest_prospect_message(self):
         from linkedin.agents.follow_up import FollowUpDecision, run_follow_up_agent
 
@@ -263,6 +296,7 @@ class ChatSyncSafetyTest(TestCase):
 
         prompt = structured_llm.invoke.call_args.args[0]
         self.assertIn("Mode: REPLY", prompt)
+        self.assertIn("only then relate our product", prompt)
 
     def test_follow_up_agent_passes_follow_up_mode_after_delay(self):
         from linkedin.agents.follow_up import FollowUpDecision, run_follow_up_agent

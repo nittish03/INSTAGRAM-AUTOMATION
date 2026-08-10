@@ -67,16 +67,31 @@ def _classify_follow_up_mode(
     *,
     min_follow_up_delay_hours: float = MIN_FOLLOW_UP_DELAY_HOURS,
 ) -> tuple[str, str, float | None]:
-    """Classify the next action mode before any LLM drafting."""
+    """Classify the next action mode before any LLM drafting.
+
+    Stages:
+    - DISCOVERY: no conversation yet → process question only (no product pitch)
+    - REPLY: prospect messaged last → contextual reply; soft pitch allowed
+    - FOLLOW_UP: we messaged last and delay elapsed → bump without hard pitch
+    - WAIT: too soon to message again, or ambiguous timestamps
+    """
     if not messages:
-        return "FOLLOW_UP", "No conversation exists yet, so draft an initial outreach message.", None
+        return (
+            "DISCOVERY",
+            "No conversation exists yet, so draft a discovery question about their process (no product pitch).",
+            None,
+        )
 
     last_message = messages[-1]
     if not last_message.get("timestamp_dt"):
         return "WAIT", "Latest message timestamp is missing or ambiguous.", min_follow_up_delay_hours
 
     if not last_message["is_outgoing"]:
-        return "REPLY", "The prospect sent the latest message, so draft a direct reply.", None
+        return (
+            "REPLY",
+            "The prospect sent the latest message, so reply to what they shared and only then relate our product.",
+            None,
+        )
 
     elapsed = timezone.now() - last_message["timestamp_dt"]
     hours_since_last_message = max(0.0, elapsed.total_seconds() / 3600)
