@@ -23,7 +23,7 @@ class Command(BaseCommand):
             metavar="USERNAME",
             default=None,
             help=(
-                "Run only against this Django user's active LinkedIn profiles. "
+                "Run only against this Django user's active Instagram profiles. "
                 "Defaults to the first active profile globally (single-tenant mode)."
             ),
         )
@@ -48,7 +48,7 @@ class Command(BaseCommand):
         try:
             self._ensure_newsletter(session)
         except AuthenticationError as exc:
-            logger.error("LinkedIn authentication failed: %s", exc)
+            logger.error("Instagram authentication failed: %s", exc)
             logger.error(
                 "Tip: log in manually once on this machine, complete any "
                 "security checkpoint, then re-run the daemon."
@@ -188,12 +188,12 @@ class Command(BaseCommand):
         if profile is None:
             if handle:
                 logger.error(
-                    "No active LinkedIn profiles found for user %r. "
-                    "Open the LinkedIn Profiles page and add or activate one.",
+                    "No active Instagram profiles found for user %r. "
+                    "Open the Instagram Profiles page and add or activate one.",
                     handle,
                 )
             else:
-                logger.error("No active LinkedIn profiles found.")
+                logger.error("No active Instagram profiles found.")
             sys.exit(1)
 
         cfg = get_llm_site_config(getattr(profile, "user", None))
@@ -231,7 +231,7 @@ class Command(BaseCommand):
         return session
 
     def _ensure_newsletter(self, session):
-        if session.linkedin_profile.newsletter_processed:
+        if session.instagram_profile.newsletter_processed:
             return
 
         from linkedin.api.newsletter import ensure_newsletter_subscription
@@ -241,7 +241,7 @@ class Command(BaseCommand):
         profile = session.self_profile
         country_code = profile.get("country_code")
         apply_gdpr_newsletter_override(session, country_code)
-        linkedin_url = public_id_to_url(profile["public_identifier"])
-        ensure_newsletter_subscription(session, linkedin_url=linkedin_url)
-        session.linkedin_profile.newsletter_processed = True
-        session.linkedin_profile.save(update_fields=["newsletter_processed"])
+        instagram_url = public_id_to_url(profile["public_identifier"])
+        ensure_newsletter_subscription(session, instagram_url=instagram_url)
+        session.instagram_profile.newsletter_processed = True
+        session.instagram_profile.save(update_fields=["newsletter_processed"])

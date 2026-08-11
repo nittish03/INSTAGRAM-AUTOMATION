@@ -6,28 +6,23 @@ import { EmptyState } from "@/components/empty-state";
 import { TableSkeleton } from "@/components/skeleton";
 import { api } from "@/lib/api";
 import { pageCache } from "@/lib/page-cache";
-import type { LinkedInProfileItem } from "@/lib/types";
+import type { InstagramProfileItem } from "@/lib/types";
 
-const CACHE_KEY = "linkedin-profiles.list";
+const CACHE_KEY = "instagram-profiles.list";
 
 type FormState = {
-  linkedinUsername: string;
-  linkedinPassword: string;
+  username: string;
+  password: string;
   active: boolean;
-  subscribeNewsletter: boolean;
-  connectDailyLimit: string;
-  connectWeeklyLimit: string;
-  followUpDailyLimit: string;
+  dmDailyLimit: string;
 };
 
 const blankForm: FormState = {
-  linkedinUsername: "",
-  linkedinPassword: "",
+  username: "",
+  password: "",
   active: true,
-  subscribeNewsletter: true,
-  connectDailyLimit: "35",
-  connectWeeklyLimit: "175",
-  followUpDailyLimit: "25",
+  // Conservative Instagram DM default.
+  dmDailyLimit: "15",
 };
 
 function clampPositive(value: string, fallback: number, max: number): number {
@@ -36,9 +31,9 @@ function clampPositive(value: string, fallback: number, max: number): number {
   return Math.min(Math.floor(n), max);
 }
 
-export default function LinkedinProfilesPage() {
-  const cached = pageCache.get<LinkedInProfileItem[]>(CACHE_KEY);
-  const [items, setItems] = useState<LinkedInProfileItem[]>(cached ?? []);
+export default function InstagramProfilesPage() {
+  const cached = pageCache.get<InstagramProfileItem[]>(CACHE_KEY);
+  const [items, setItems] = useState<InstagramProfileItem[]>(cached ?? []);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(!cached);
@@ -52,7 +47,7 @@ export default function LinkedinProfilesPage() {
   async function reload() {
     setError("");
     try {
-      const data = await api.linkedinProfiles();
+      const data = await api.instagramProfiles();
       setItems(data.items);
       pageCache.set(CACHE_KEY, data.items);
     } catch (e) {
@@ -64,7 +59,7 @@ export default function LinkedinProfilesPage() {
     let mounted = true;
     (async () => {
       try {
-        const data = await api.linkedinProfiles();
+        const data = await api.instagramProfiles();
         if (!mounted) return;
         setItems(data.items);
         pageCache.set(CACHE_KEY, data.items);
@@ -85,7 +80,7 @@ export default function LinkedinProfilesPage() {
     setError("");
     setInfo("");
     try {
-      await api.toggleLinkedinProfile(id);
+      await api.toggleInstagramProfile(id);
       pageCache.clear(CACHE_KEY);
       await reload();
     } catch (e) {
@@ -95,18 +90,18 @@ export default function LinkedinProfilesPage() {
     }
   }
 
-  async function deleteProfile(p: LinkedInProfileItem) {
+  async function deleteProfile(p: InstagramProfileItem) {
     const confirmed = window.confirm(
-      `Remove LinkedIn profile "${p.linkedinUsername}"? This unlinks it from your account and clears stored cookies. This cannot be undone.`,
+      `Remove Instagram profile "@${p.username}"? This unlinks it from your account and clears stored session cookies. This cannot be undone.`,
     );
     if (!confirmed) return;
     setDeletingId(p.id);
     setError("");
     setInfo("");
     try {
-      await api.deleteLinkedinProfile(p.id);
+      await api.deleteInstagramProfile(p.id);
       pageCache.clear(CACHE_KEY);
-      setInfo(`Removed ${p.linkedinUsername}.`);
+      setInfo(`Removed @${p.username}.`);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -129,32 +124,29 @@ export default function LinkedinProfilesPage() {
   }
 
   async function submitCreate() {
-    const username = form.linkedinUsername.trim();
-    const password = form.linkedinPassword;
+    const username = form.username.trim().replace(/^@/, "");
+    const password = form.password;
     if (!username) {
-      setFormError("LinkedIn email / username is required.");
+      setFormError("Instagram username is required.");
       return;
     }
     if (!password) {
-      setFormError("LinkedIn password is required.");
+      setFormError("Instagram password is required.");
       return;
     }
     setSubmitting(true);
     setFormError("");
     try {
-      await api.createLinkedinProfile({
-        linkedinUsername: username,
-        linkedinPassword: password,
+      await api.createInstagramProfile({
+        username,
+        password,
         active: form.active,
-        subscribeNewsletter: form.subscribeNewsletter,
-        connectDailyLimit: clampPositive(form.connectDailyLimit, 35, 500),
-        connectWeeklyLimit: clampPositive(form.connectWeeklyLimit, 175, 2000),
-        followUpDailyLimit: clampPositive(form.followUpDailyLimit, 25, 500),
+        dmDailyLimit: clampPositive(form.dmDailyLimit, 15, 200),
       });
       setCreateOpen(false);
       setForm(blankForm);
       pageCache.clear(CACHE_KEY);
-      setInfo(`Added ${username}.`);
+      setInfo(`Added @${username}.`);
       await reload();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Failed to add profile");
@@ -167,15 +159,16 @@ export default function LinkedinProfilesPage() {
     <div className="space-y-4">
       <section className="card flex items-start justify-between gap-4 p-5">
         <div>
-          <h2 className="text-2xl font-semibold">LinkedIn Profiles</h2>
+          <h2 className="text-2xl font-semibold">Instagram Profiles</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Your LinkedIn accounts. Each is private to your admin login — other
-            admins can&apos;t see or run them. Toggle activation, review rate
-            limits, or remove any account you no longer want this app to use.
+            Operator Instagram accounts for the automation loop (discover → qualify →
+            DM). Each account is private to your admin login — other admins can&apos;t
+            see or run them. Toggle activation, review DM rate limits, or remove any
+            account you no longer want this app to use.
           </p>
         </div>
         <button
-          aria-label="Add LinkedIn profile"
+          aria-label="Add Instagram profile"
           className="btn-primary flex h-10 w-10 shrink-0 items-center justify-center px-0! text-2xl"
           onClick={openCreate}
         >
@@ -187,11 +180,11 @@ export default function LinkedinProfilesPage() {
       {info ? <p className="text-sm text-emerald-400">{info}</p> : null}
 
       {loading ? (
-        <TableSkeleton rows={4} cols={7} />
+        <TableSkeleton rows={4} cols={6} />
       ) : items.length === 0 ? (
         <EmptyState
-          title="No LinkedIn profiles connected"
-          description="Click the + button above to add a LinkedIn account. It will be linked to your admin login only."
+          title="No Instagram profiles connected"
+          description="Click the + button above to add an Instagram account. The daemon uses it for discovery and DMs — linked to your admin login only."
         />
       ) : (
         <section className="card overflow-hidden">
@@ -200,11 +193,10 @@ export default function LinkedinProfilesPage() {
               <thead>
                 <tr>
                   <th className="th">Operator</th>
-                  <th className="th">LinkedIn</th>
+                  <th className="th">Instagram</th>
                   <th className="th">Active</th>
-                  <th className="th">Cookies</th>
-                  <th className="th">Connect (D / W)</th>
-                  <th className="th">Follow-up (D)</th>
+                  <th className="th">Session</th>
+                  <th className="th">DM / day</th>
                   <th className="th w-48">Actions</th>
                 </tr>
               </thead>
@@ -215,7 +207,7 @@ export default function LinkedinProfilesPage() {
                       <div>{p.djangoUser}</div>
                       <div className="text-xs text-slate-500">{p.djangoEmail}</div>
                     </td>
-                    <td className="td">{p.linkedinUsername}</td>
+                    <td className="td">@{p.username}</td>
                     <td className="td">
                       <span
                         className={
@@ -238,10 +230,7 @@ export default function LinkedinProfilesPage() {
                         {p.hasCookies ? "Loaded" : "Missing"}
                       </span>
                     </td>
-                    <td className="td">
-                      {p.connectDailyLimit} / {p.connectWeeklyLimit}
-                    </td>
-                    <td className="td">{p.followUpDailyLimit}</td>
+                    <td className="td">{p.dmDailyLimit}</td>
                     <td className="td">
                       <div className="flex gap-2">
                         <button
@@ -278,7 +267,7 @@ export default function LinkedinProfilesPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Add LinkedIn profile</h3>
+              <h3 className="text-lg font-semibold">Add Instagram profile</h3>
               <button
                 className="text-slate-400 hover:text-slate-200"
                 onClick={closeCreate}
@@ -291,8 +280,9 @@ export default function LinkedinProfilesPage() {
 
             <p className="text-xs text-slate-400">
               The profile will be linked to your admin login only. You can add
-              multiple LinkedIn accounts and switch between them by toggling
-              their <em>Active</em> state.
+              multiple Instagram accounts and switch between them by toggling
+              their <em>Active</em> state. Keep the DM / day limit conservative to
+              reduce account risk.
             </p>
 
             {formError ? (
@@ -302,119 +292,67 @@ export default function LinkedinProfilesPage() {
             <div className="grid gap-3">
               <div>
                 <label className="mb-1 block text-sm text-slate-300">
-                  LinkedIn email / username
+                  Instagram username
                 </label>
                 <input
                   className="input"
-                  placeholder="me@example.com"
-                  value={form.linkedinUsername}
+                  placeholder="eshway"
+                  value={form.username}
                   autoFocus
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, linkedinUsername: e.target.value }))
+                    setForm((f) => ({ ...f, username: e.target.value }))
                   }
                 />
               </div>
 
               <div>
                 <label className="mb-1 block text-sm text-slate-300">
-                  LinkedIn password
+                  Instagram password
                 </label>
                 <input
                   className="input"
                   type="password"
                   placeholder="••••••••"
-                  value={form.linkedinPassword}
+                  value={form.password}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, linkedinPassword: e.target.value }))
+                    setForm((f) => ({ ...f, password: e.target.value }))
                   }
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Encrypted at rest. Used by the daemon to log in via Playwright.
+                  Encrypted at rest. Used by the Instagram worker daemon to log in
+                  via Playwright and send DMs.
                 </p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-sm text-slate-300">
-                    Connect / day
-                  </label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={form.connectDailyLimit}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        connectDailyLimit: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm text-slate-300">
-                    Connect / week
-                  </label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={2000}
-                    value={form.connectWeeklyLimit}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        connectWeeklyLimit: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm text-slate-300">
-                    Follow-up / day
-                  </label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={form.followUpDailyLimit}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        followUpDailyLimit: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
+              <div>
+                <label className="mb-1 block text-sm text-slate-300">
+                  DM / day
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={form.dmDailyLimit}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      dmDailyLimit: e.target.value,
+                    }))
+                  }
+                />
               </div>
 
-              <div className="flex flex-wrap gap-4">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, active: e.target.checked }))
-                    }
-                  />
-                  Active immediately
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={form.subscribeNewsletter}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        subscribeNewsletter: e.target.checked,
-                      }))
-                    }
-                  />
-                  Subscribe to newsletter on first login
-                </label>
-              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={form.active}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, active: e.target.checked }))
+                  }
+                />
+                Active immediately
+              </label>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -430,8 +368,8 @@ export default function LinkedinProfilesPage() {
                 onClick={submitCreate}
                 disabled={
                   submitting ||
-                  !form.linkedinUsername.trim() ||
-                  !form.linkedinPassword
+                  !form.username.trim() ||
+                  !form.password
                 }
               >
                 {submitting ? "Adding..." : "Add profile"}

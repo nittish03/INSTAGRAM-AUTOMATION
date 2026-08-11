@@ -1,8 +1,8 @@
 # linkedin/gdpr.py
 """GDPR-like location detection for newsletter auto-subscription.
 
-On first run, checks the logged-in user's country code (from the Voyager
-API ``location.countryCode`` field) against a set of ISO-2 country codes
+On first run, checks the logged-in user's country code (from Instagram
+profile enrichment when available) against a set of ISO-2 country codes
 for jurisdictions with opt-in email marketing laws.  Non-GDPR accounts
 get ``subscribe_newsletter`` auto-enabled so they join the Leadway
 newsletter; GDPR-protected accounts keep their existing config.
@@ -49,12 +49,12 @@ def apply_gdpr_newsletter_override(session, country_code: str | None):
     """Auto-enable newsletter subscription for non-GDPR locations.
 
     If the country code is NOT GDPR-protected, sets
-    ``session.linkedin_profile.subscribe_newsletter = True`` and saves.
+    ``session.instagram_profile.subscribe_newsletter = True`` and saves.
     If GDPR-protected, does nothing (respects existing config).
     """
     if not is_gdpr_protected(country_code):
-        session.linkedin_profile.subscribe_newsletter = True
-        session.linkedin_profile.save(update_fields=["subscribe_newsletter"])
+        session.instagram_profile.subscribe_newsletter = True
+        session.instagram_profile.save(update_fields=["subscribe_newsletter"])
         logger.info(
             "Non-GDPR country (%s): auto-enabled newsletter for %s",
             country_code, session,

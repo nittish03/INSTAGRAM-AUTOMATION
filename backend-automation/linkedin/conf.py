@@ -96,9 +96,9 @@ HUMAN_TYPE_MAX_DELAY_MS = 90
 # ----------------------------------------------------------------------
 # Onboarding defaults (shown to user during interactive setup)
 # ----------------------------------------------------------------------
-DEFAULT_CONNECT_DAILY_LIMIT = 35
-DEFAULT_CONNECT_WEEKLY_LIMIT = 175
-DEFAULT_FOLLOW_UP_DAILY_LIMIT = 25
+DEFAULT_FOLLOW_DAILY_LIMIT = 20
+DEFAULT_FOLLOW_WEEKLY_LIMIT = 80
+DEFAULT_FOLLOW_UP_DAILY_LIMIT = 15
 
 # ----------------------------------------------------------------------
 # Active-hours schedule (daemon pauses outside this window)
@@ -116,20 +116,20 @@ def bot_active_hours_enabled() -> bool:
     return _env_bool(BOT_ACTIVE_HOURS_ENV, ENABLE_ACTIVE_HOURS)
 
 # ----------------------------------------------------------------------
-# Campaign config (timing + ML defaults — hardcoded, no YAML)
+# Campaign config (timing + ML defaults — Instagram-safe conservative pacing)
 # ----------------------------------------------------------------------
 CAMPAIGN_CONFIG = {
-    "check_pending_recheck_after_hours": 3,
-    "enrich_min_interval": 1,
-    "min_action_interval": 3 * 60,
-    "daemon_max_runtime_seconds": 6 * 60 * 60,
+    "check_pending_recheck_after_hours": 4,
+    "enrich_min_interval": 2,
+    "min_action_interval": 5 * 60,
+    "daemon_max_runtime_seconds": 4 * 60 * 60,
     "qualification_n_mc_samples": 100,
     "min_ready_to_connect_prob": 0.9,
     "min_positive_pool_prob": 0.20,
     "embedding_model": "BAAI/bge-small-en-v1.5",
-    "connect_delay_seconds": 2 * 60,
-    "connect_no_candidate_delay_seconds": 5 * 60,
-    "reply_check_interval_seconds": 7 * 60 + 30,
+    "connect_delay_seconds": 3 * 60,
+    "connect_no_candidate_delay_seconds": 8 * 60,
+    "reply_check_interval_seconds": 10 * 60,
     "reply_check_max_attempts": 12,
     "reply_check_window_seconds": 90 * 60,
     "heal_follow_up_delay_min_seconds": 2.5,
@@ -150,14 +150,14 @@ def get_llm_config(user=None):
 def get_llm_site_config(user=None):
     """Return the SiteConfig object for LLM/provider setup.
 
-    When *user* is omitted, prefer the first active LinkedIn account owner's
+    When *user* is omitted, prefer the first active Instagram account owner's
     per-user config over the legacy global row (pk=1).
     """
-    from linkedin.models import LinkedInProfile, SiteConfig
+    from linkedin.models import InstagramProfile, SiteConfig
 
     if user is None:
         profiles = list(
-            LinkedInProfile.objects.filter(active=True, user_id__isnull=False)
+            InstagramProfile.objects.filter(active=True, user_id__isnull=False)
             .select_related("user")
             .order_by("pk")
         )

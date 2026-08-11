@@ -169,9 +169,9 @@ class DaemonControlApiTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(username="daemon_staff", password="testpass123", is_staff=True)
         self.viewer = User.objects.create_user(username="daemon_viewer", password="testpass123")
-        from linkedin.models import LinkedInProfile
+        from linkedin.models import InstagramProfile
 
-        self.staff_profile = LinkedInProfile.objects.create(user=self.staff, active=True)
+        self.staff_profile = InstagramProfile.objects.create(user=self.staff, active=True)
 
     def test_launch_requires_staff(self):
         self.client.login(username="daemon_viewer", password="testpass123")
@@ -274,16 +274,16 @@ class DaemonControlApiTests(TestCase):
             lead=lead,
             campaign=campaign,
             state=ProfileState.CONNECTED.value,
-            connection_assessment_source="api_degree_1",
+            follow_assessment_source="api_follows_viewer",
         )
         draft = ChatMessage.objects.create(
             content_type=ContentType.objects.get_for_model(Lead),
             object_id=lead.pk,
             campaign=campaign,
             owner=self.staff,
-            linkedin_profile=self.staff_profile,
+            instagram_profile=self.staff_profile,
             content="Approved message",
-            linkedin_urn="draft_owner_scope",
+            instagram_message_id="draft_owner_scope",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -304,10 +304,10 @@ class DaemonControlApiTests(TestCase):
         from crm.models import Lead
         from django.contrib.auth.models import User
         from django.contrib.contenttypes.models import ContentType
-        from linkedin.models import Campaign, LinkedInProfile, Task
+        from linkedin.models import Campaign, InstagramProfile, Task
 
         other_user = User.objects.create_user(username="other_draft_staff", password="testpass123", is_staff=True)
-        other_profile = LinkedInProfile.objects.create(user=other_user, active=True)
+        other_profile = InstagramProfile.objects.create(user=other_user, active=True)
         self.client.login(username="daemon_staff", password="testpass123")
         campaign = Campaign.objects.create(name="Other Owner Campaign")
         lead = Lead.objects.create(public_identifier="other-owner-scope")
@@ -316,9 +316,9 @@ class DaemonControlApiTests(TestCase):
             object_id=lead.pk,
             campaign=campaign,
             owner=other_user,
-            linkedin_profile=other_profile,
+            instagram_profile=other_profile,
             content="Other owner's message",
-            linkedin_urn="draft_other_owner_scope",
+            instagram_message_id="draft_other_owner_scope",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -343,7 +343,7 @@ class DaemonControlApiTests(TestCase):
         self.client.login(username="daemon_staff", password="testpass123")
         campaign = Campaign.objects.create(name="Delete Me")
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now(),
             payload={"campaign_id": campaign.pk},
         )

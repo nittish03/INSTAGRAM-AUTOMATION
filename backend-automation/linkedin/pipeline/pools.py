@@ -126,21 +126,83 @@ def qualify_source(session, qualifier: BayesianQualifier) -> Generator[str, None
         yield result
 
 
+def _deal_has_draft_or_outreach_task(deal, *, owner_id: int | None = None, instagram_profile_id: int | None = None) -> bool:
+    """True if this deal already has a HITL draft or queued draft/send task."""
+    from chat.models import ChatMessage
+    from django.contrib.contenttypes.models import ContentType
+    from django.db.models import Q
+    from linkedin.models import Task
+
+    lead = deal.lead
+    if not lead:
+        return True
+
+    lead_ct = ContentType.objects.get_for_model(lead.__class__)
+    draft_qs = ChatMessage.objects.filter(
+        content_type=lead_ct,
+        object_id=lead.pk,
+        campaign=deal.campaign,
+        is_draft=True,
+        is_approved=False,
+    )
+    if owner_id is not None:
+        draft_qs = draft_qs.filter(owner_id=owner_id)
+    if instagram_profile_id is not None:
+        draft_qs = draft_qs.filter(instagram_profile_id=instagram_profile_id)
+    if draft_qs.exists():
+        return True
+
+    public_id = lead.public_identifier
+    if not public_id:
+        return True
+
+    task_qs = Task.objects.filter(
+        task_type__in=[Task.TaskType.FOLLOW_UP, Task.TaskType.SEND_MESSAGE],
+        status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+        payload__campaign_id=deal.campaign_id,
+        payload__public_id=public_id,
+    )
+    if owner_id is not None:
+        task_qs = task_qs.filter(Q(payload__owner_id=owner_id) | Q(payload__owner_id__isnull=True))
+    if instagram_profile_id is not None:
+        task_qs = task_qs.filter(
+            Q(payload__instagram_profile_id=instagram_profile_id)
+            | Q(payload__instagram_profile_id__isnull=True)
+        )
+    return task_qs.exists()
+
+
 def find_candidate(session, qualifier: BayesianQualifier) -> dict | None:
-    """Top profile ready for connection, backfilling via qualification if needed."""
+    """Next QUALIFIED lead needing a DM draft, backfilling via qualification if needed."""
     from crm.models import Deal
     from linkedin.enums import ProfileState
     from linkedin.url_utils import url_to_public_id
 
-    # 1. Look for existing QUALIFIED deals in this campaign
-    existing = Deal.objects.filter(
-        campaign=session.campaign,
-        state=ProfileState.QUALIFIED
-    ).select_related("lead").first()
+    owner_id = getattr(getattr(session, "django_user", None), "pk", None)
+    if not isinstance(owner_id, int):
+        owner_id = None
+    instagram_profile_id = getattr(getattr(session, "instagram_profile", None), "pk", None)
+    if not isinstance(instagram_profile_id, int):
+        instagram_profile_id = None
 
-    if existing:
+    # 1. Prefer existing QUALIFIED deals that still need a draft / follow_up
+    existing_qs = Deal.objects.filter(
+        campaign=session.campaign,
+        state=ProfileState.QUALIFIED,
+    ).select_related("lead").order_by("creation_date")
+
+    for existing in existing_qs:
+        if _deal_has_draft_or_outreach_task(
+            existing,
+            owner_id=owner_id,
+            instagram_profile_id=instagram_profile_id,
+        ):
+            continue
+        public_id = url_to_public_id(existing.lead.instagram_url) if existing.lead else None
+        if not public_id:
+            continue
         return {
-            "public_identifier": url_to_public_id(existing.lead.linkedin_url),
+            "public_identifier": public_id,
             "name": f"{existing.lead.first_name} {existing.lead.last_name}",
         }
 
@@ -148,7 +210,7 @@ def find_candidate(session, qualifier: BayesianQualifier) -> dict | None:
     # This will trigger search -> fetch -> run_qualification
     qualify = qualify_source(session, qualifier)
     public_id = next(qualify, None)
-    
+
     if public_id:
         from crm.models import Lead
         lead = Lead.objects.get(public_identifier=public_id)

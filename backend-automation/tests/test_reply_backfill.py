@@ -10,7 +10,7 @@ from django.utils import timezone
 from chat.models import ChatMessage
 from crm.models import Deal, Lead
 from linkedin.enums import ProfileState
-from linkedin.models import Campaign, LinkedInProfile, Task
+from linkedin.models import Campaign, InstagramProfile, Task
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -18,7 +18,7 @@ os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 class ReplyBackfillTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="reply_backfill_owner")
-        self.profile = LinkedInProfile.objects.create(user=self.user, active=True)
+        self.profile = InstagramProfile.objects.create(user=self.user, active=True)
         self.campaign = Campaign.objects.create(
             name="Reply Backfill Campaign",
             product_docs="We help agencies keep delivery on track.",
@@ -29,11 +29,11 @@ class ReplyBackfillTest(TestCase):
             first_name="Grace",
             last_name="Hopper",
             public_identifier="grace-hopper-reply",
-            linkedin_url="https://www.linkedin.com/in/grace-hopper-reply/",
+            instagram_url="https://www.instagram.com/grace-hopper-reply/",
             profile_data={
                 "public_identifier": "grace-hopper-reply",
                 "full_name": "Grace Hopper",
-                "urn": "urn:li:fsd_profile:grace-reply",
+                "urn": "ig_profile_grace_reply",
             },
         )
         self.deal = Deal.objects.create(
@@ -49,7 +49,7 @@ class ReplyBackfillTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content=content,
-            linkedin_urn=f"{'out' if outgoing else 'in'}_{minutes_ago}",
+            instagram_message_id=f"{'out' if outgoing else 'in'}_{minutes_ago}",
             is_outgoing=outgoing,
             is_draft=False,
             is_approved=outgoing,
@@ -109,7 +109,7 @@ class ReplyBackfillTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Draft already waiting",
-            linkedin_urn="draft_waiting",
+            instagram_message_id="draft_waiting",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,

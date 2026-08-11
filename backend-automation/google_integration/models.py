@@ -48,7 +48,7 @@ class GoogleAccount(models.Model):
         return f"{self.user.username} → {self.google_email or '(unlinked)'}"
 
     # ------------------------------------------------------------------
-    # Encryption hooks (mirrors LinkedInProfile pattern)
+    # Encryption hooks (mirrors InstagramProfile pattern)
     # ------------------------------------------------------------------
 
     def __init__(self, *args, **kwargs):

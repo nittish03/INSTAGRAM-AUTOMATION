@@ -25,7 +25,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--handle",
             default=None,
-            help="Django username for the LinkedIn account to use. Defaults to first active profile.",
+            help="Django username for the Instagram account to use. Defaults to first active profile.",
         )
         parser.add_argument(
             "--limit",
@@ -48,11 +48,11 @@ class Command(BaseCommand):
         from linkedin.models import SiteConfig
         from linkedin.services.draft_regeneration import regenerate_draft
 
-        linkedin_profile = resolve_profile(options["handle"])
-        if linkedin_profile is None:
-            raise CommandError("No active LinkedInProfile found.")
+        instagram_profile = resolve_profile(options["handle"])
+        if instagram_profile is None:
+            raise CommandError("No active InstagramProfile found.")
 
-        ok, reason = validate_llm_site_config(SiteConfig.load(linkedin_profile.user))
+        ok, reason = validate_llm_site_config(SiteConfig.load(instagram_profile.user))
         if not ok:
             raise CommandError(f"LLM configuration invalid: {reason}")
 
@@ -62,10 +62,10 @@ class Command(BaseCommand):
                 content_type=lead_ct,
                 is_draft=True,
                 is_approved=False,
-                owner=linkedin_profile.user,
-                linkedin_profile=linkedin_profile,
+                owner=instagram_profile.user,
+                instagram_profile=instagram_profile,
             )
-            .select_related("campaign", "owner", "linkedin_profile")
+            .select_related("campaign", "owner", "instagram_profile")
             .order_by("id")
         )
 
@@ -84,7 +84,7 @@ class Command(BaseCommand):
             self.stdout.write("No matching unapproved drafts found.")
             return
 
-        session = get_or_create_session(linkedin_profile)
+        session = get_or_create_session(instagram_profile)
         updated = skipped = failed = 0
 
         try:

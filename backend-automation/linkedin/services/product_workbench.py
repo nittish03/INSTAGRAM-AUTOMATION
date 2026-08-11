@@ -21,7 +21,7 @@ from linkedin.tasks.connect import enqueue_follow_up
 class SafeModeSettings:
     enabled: bool
     global_pause_outreach: bool
-    pause_new_connection_invites: bool
+    pause_new_follows: bool
     max_bulk_approve: int
     max_bulk_export: int
 
@@ -57,7 +57,7 @@ def lead_quality_insights(lead: Lead) -> dict[str, Any]:
 
     if lead.profile_data:
         score += 15
-        reasons.append("Profile is enriched with LinkedIn data.")
+        reasons.append("Profile is enriched with Instagram data.")
     else:
         score -= 12
         reasons.append("Profile is not enriched yet.")
@@ -347,8 +347,8 @@ def recovery_items(limit: int = 200) -> list[dict[str, Any]]:
 def retry_task(task: Task, *, user=None) -> Task:
     cfg = SiteConfig.load(user)
     if (
-        task.task_type == Task.TaskType.CONNECT
-        and bool(getattr(cfg, "pause_new_connection_invites", False))
+        task.task_type == Task.TaskType.FOLLOW
+        and bool(getattr(cfg, "pause_new_follows", False))
     ):
         return task
 
@@ -389,8 +389,8 @@ def export_preview(limit: int = 250, *, user=None) -> dict[str, Any]:
             reason = "already_exported"
         elif not lead.profile_data:
             reason = "profile_not_enriched"
-        elif not lead.linkedin_url:
-            reason = "missing_linkedin_url"
+        elif not lead.instagram_url:
+            reason = "missing_instagram_url"
         elif not ok_export:
             reason = f"not_verified_for_export:{verify_reason}"
 
@@ -501,12 +501,12 @@ def followup_suggestions(limit: int = 200, *, owner_id: int | None = None) -> li
 
 
 def queue_followups_for_leads(lead_ids: list[int], *, owner_id: int | None = None) -> dict[str, int]:
-    linkedin_profile_id = None
+    instagram_profile_id = None
     if owner_id is not None:
-        from linkedin.models import LinkedInProfile
+        from linkedin.models import InstagramProfile
 
-        linkedin_profile_id = (
-            LinkedInProfile.objects.filter(user_id=owner_id, active=True)
+        instagram_profile_id = (
+            InstagramProfile.objects.filter(user_id=owner_id, active=True)
             .order_by("-created_at", "id")
             .values_list("id", flat=True)
             .first()
@@ -526,7 +526,7 @@ def queue_followups_for_leads(lead_ids: list[int], *, owner_id: int | None = Non
             delay_seconds=10,
             deal=d,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
         )
         enqueued += 1
     return {"enqueued": enqueued, "skipped": skipped}
@@ -537,7 +537,7 @@ def get_safe_mode_settings(user=None) -> SafeModeSettings:
     return SafeModeSettings(
         enabled=bool(getattr(cfg, "safe_mode_enabled", True)),
         global_pause_outreach=bool(getattr(cfg, "global_pause_outreach", False)),
-        pause_new_connection_invites=bool(getattr(cfg, "pause_new_connection_invites", False)),
+        pause_new_follows=bool(getattr(cfg, "pause_new_follows", False)),
         max_bulk_approve=int(getattr(cfg, "max_bulk_approve", 25)),
         max_bulk_export=int(getattr(cfg, "max_bulk_export", 50)),
     )
@@ -553,16 +553,17 @@ def set_safe_mode_settings(payload: dict[str, Any], *, user=None) -> SafeModeSet
         max_bulk_export = cfg.max_bulk_export
     cfg.safe_mode_enabled = bool(payload.get("enabled", cfg.safe_mode_enabled))
     cfg.global_pause_outreach = bool(payload.get("globalPauseOutreach", cfg.global_pause_outreach))
-    cfg.pause_new_connection_invites = bool(
-        payload.get("pauseNewConnectionInvites", cfg.pause_new_connection_invites)
-    )
+    if "pauseNewFollows" in payload:
+        cfg.pause_new_follows = bool(payload.get("pauseNewFollows"))
+    else:
+        cfg.pause_new_follows = bool(cfg.pause_new_follows)
     cfg.max_bulk_approve = max(1, min(max_bulk_approve, 500))
     cfg.max_bulk_export = max(1, min(max_bulk_export, 1000))
     cfg.save(
         update_fields=[
             "safe_mode_enabled",
             "global_pause_outreach",
-            "pause_new_connection_invites",
+            "pause_new_follows",
             "max_bulk_approve",
             "max_bulk_export",
         ]

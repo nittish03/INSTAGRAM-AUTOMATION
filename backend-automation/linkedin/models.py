@@ -64,7 +64,7 @@ def decrypt_value(value: str) -> str:
 
 # action_type → (daily_limit_field, weekly_limit_field)
 _RATE_LIMIT_FIELDS = {
-    "connect": ("connect_daily_limit", "connect_weekly_limit"),
+    "follow": ("follow_daily_limit", "follow_weekly_limit"),
     "follow_up": ("follow_up_daily_limit", None),
 }
 
@@ -114,7 +114,7 @@ class SiteConfig(models.Model):
         max_length=100,
         blank=True,
         default="Sheet1",
-        help_text="Tab name (e.g. Sheet1). Rows append to columns A–G: Name, Company, Position, LinkedIn, Connected, Status, Action.",
+        help_text="Tab name (e.g. Sheet1). Rows append to columns A–G: Name, Company, Position, Instagram, Followed, Status, Action.",
     )
     google_sheet_sync_user = models.ForeignKey(
         User,
@@ -132,11 +132,11 @@ class SiteConfig(models.Model):
         default=False,
         help_text="Hard pause for queueing new outreach actions from operator workflows.",
     )
-    pause_new_connection_invites = models.BooleanField(
+    pause_new_follows = models.BooleanField(
         default=False,
         help_text=(
-            "Stops new connection invite expansion while allowing monitoring, replies, "
-            "follow-ups, and existing pending invite checks to continue."
+            "Stops new top-of-funnel outreach expansion (discover → qualify → DM draft). "
+            "Existing drafts, approvals, sends, reply checks, and follow-up bumps continue."
         ),
     )
     max_bulk_approve = models.PositiveIntegerField(
@@ -149,11 +149,11 @@ class SiteConfig(models.Model):
     )
     sheet_export_min_confidence_api = models.FloatField(
         default=0.85,
-        help_text="Minimum connection-detection confidence to export when verified via LinkedIn API 1st degree (no invite required).",
+        help_text="Minimum follow-back confidence to export when verified via Instagram UI (Message available / follows you).",
     )
-    sheet_export_min_confidence_after_invite = models.FloatField(
+    sheet_export_min_confidence_after_follow = models.FloatField(
         default=0.55,
-        help_text="Minimum confidence for export after an invite_sent event (UI/Message heuristic or API re-check).",
+        help_text="Minimum confidence for export after a follow_sent event (UI Message heuristic or re-check).",
     )
 
     class Meta:
@@ -229,11 +229,11 @@ class SiteConfig(models.Model):
                         "google_sheet_sync_user",
                         "safe_mode_enabled",
                         "global_pause_outreach",
-                        "pause_new_connection_invites",
+                        "pause_new_follows",
                         "max_bulk_approve",
                         "max_bulk_export",
                         "sheet_export_min_confidence_api",
-                        "sheet_export_min_confidence_after_invite",
+                        "sheet_export_min_confidence_after_follow",
                     ]
                     for field in copy_fields:
                         setattr(obj, field, getattr(global_cfg, field))
@@ -293,15 +293,13 @@ class Campaign(models.Model):
         app_label = "linkedin"
 
 
-class LinkedInProfile(models.Model):
-    # Multi-tenant ownership: each Django admin/superadmin owns the LinkedIn
-    # accounts they've personally connected. They can only see and manage their
-    # own profiles. Listing, toggling and deletion are scoped to ``user`` on the
-    # API layer (see ``linkedin.views.api_linkedin_profiles``).
+class InstagramProfile(models.Model):
+    """Instagram account used by the automation daemon (multi-tenant per Django user)."""
+
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name="linkedin_profiles",
+        related_name="instagram_profiles",
     )
     self_lead = models.ForeignKey(
         "crm.Lead",
@@ -310,13 +308,13 @@ class LinkedInProfile(models.Model):
         on_delete=models.SET_NULL,
         related_name="+",
     )
-    linkedin_username = models.CharField(max_length=200)
-    linkedin_password = models.CharField(max_length=200)
+    instagram_username = models.CharField(max_length=200)
+    instagram_password = models.CharField(max_length=200)
     subscribe_newsletter = models.BooleanField(default=True)
     active = models.BooleanField(default=True)
-    connect_daily_limit = models.PositiveIntegerField(default=35)
-    connect_weekly_limit = models.PositiveIntegerField(default=175)
-    follow_up_daily_limit = models.PositiveIntegerField(default=25)
+    follow_daily_limit = models.PositiveIntegerField(default=20)
+    follow_weekly_limit = models.PositiveIntegerField(default=80)
+    follow_up_daily_limit = models.PositiveIntegerField(default=15)
     legal_accepted = models.BooleanField(default=False)
     cookie_data = models.JSONField(null=True, blank=True)
     newsletter_processed = models.BooleanField(default=False)
@@ -325,20 +323,20 @@ class LinkedInProfile(models.Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._exhausted: dict[str, date] = {}
-        if self.linkedin_password and self.linkedin_password.startswith('gAAAA'):
-            self.linkedin_password = decrypt_value(self.linkedin_password)
+        if self.instagram_password and self.instagram_password.startswith('gAAAA'):
+            self.instagram_password = decrypt_value(self.instagram_password)
 
     def refresh_from_db(self, *args, **kwargs):
         super().refresh_from_db(*args, **kwargs)
-        if self.linkedin_password and self.linkedin_password.startswith('gAAAA'):
-            self.linkedin_password = decrypt_value(self.linkedin_password)
+        if self.instagram_password and self.instagram_password.startswith('gAAAA'):
+            self.instagram_password = decrypt_value(self.instagram_password)
 
     def save(self, *args, **kwargs):
-        plain_password = self.linkedin_password
-        if self.linkedin_password and not self.linkedin_password.startswith('gAAAA'):
-            self.linkedin_password = encrypt_value(self.linkedin_password)
+        plain_password = self.instagram_password
+        if self.instagram_password and not self.instagram_password.startswith('gAAAA'):
+            self.instagram_password = encrypt_value(self.instagram_password)
         super().save(*args, **kwargs)
-        self.linkedin_password = plain_password
+        self.instagram_password = plain_password
 
     def can_execute(self, action_type: str) -> bool:
         """Check if the action is allowed under daily/weekly rate limits."""
@@ -374,7 +372,7 @@ class LinkedInProfile(models.Model):
     ) -> None:
         """Persist a rate-limited action with detailed prospect metrics."""
         ActionLog.objects.create(
-            linkedin_profile=self,
+            instagram_profile=self,
             campaign=campaign,
             action_type=action_type,
             target_name=target_name,
@@ -392,7 +390,7 @@ class LinkedInProfile(models.Model):
         now_local = timezone.localtime(timezone.now())
         today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         return ActionLog.objects.filter(
-            linkedin_profile=self, action_type=action_type,
+            instagram_profile=self, action_type=action_type,
             created_at__gte=today_start,
         ).count()
 
@@ -402,26 +400,27 @@ class LinkedInProfile(models.Model):
             hour=0, minute=0, second=0, microsecond=0,
         )
         return ActionLog.objects.filter(
-            linkedin_profile=self, action_type=action_type,
+            instagram_profile=self, action_type=action_type,
             created_at__gte=monday,
         ).count()
 
     def __repr__(self):
-        return f"{self.user.username} ({self.linkedin_username})"
+        return f"{self.user.username} ({self.instagram_username})"
 
     def __str__(self):
-        return f"{self.user.username} ({self.linkedin_username})"
+        return f"{self.user.username} ({self.instagram_username})"
 
 
     class Meta:
         app_label = "linkedin"
-        # Same Django user can't add the same LinkedIn handle twice. Different
-        # users can independently connect the same LinkedIn handle (rare but
-        # legal — e.g. a shared corporate account).
+        verbose_name = "Instagram Profile"
+        verbose_name_plural = "Instagram Profiles"
+        # App label remains `linkedin` (package/import stability); table is Instagram-named.
+        db_table = "linkedin_instagramprofile"
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "linkedin_username"],
-                name="uniq_linkedinprofile_user_username",
+                fields=["user", "instagram_username"],
+                name="uniq_instagramprofile_user_username",
             ),
         ]
 
@@ -446,15 +445,15 @@ class SearchKeyword(models.Model):
 
 class ActionLog(models.Model):
     class ActionType(models.TextChoices):
-        CONNECT = "connect", "Connect"
+        FOLLOW = "follow", "Follow"
         FOLLOW_UP = "follow_up", "Follow Up"
 
     class Status(models.TextChoices):
         SUCCESS = "success"
         FAILED = "failed"
 
-    linkedin_profile = models.ForeignKey(
-        LinkedInProfile,
+    instagram_profile = models.ForeignKey(
+        InstagramProfile,
         on_delete=models.CASCADE,
         related_name="action_logs",
     )
@@ -474,11 +473,11 @@ class ActionLog(models.Model):
     class Meta:
         app_label = "linkedin"
         indexes = [
-            models.Index(fields=["linkedin_profile", "action_type", "created_at"]),
+            models.Index(fields=["instagram_profile", "action_type", "created_at"]),
         ]
 
     def __str__(self):
-        return f"{self.action_type} by {self.linkedin_profile} at {self.created_at}"
+        return f"{self.action_type} by {self.instagram_profile} at {self.created_at}"
 
 
 class SystemRawLog(models.Model):
@@ -513,9 +512,11 @@ class OutreachEvent(models.Model):
     """Explicit outreach actions and outcomes. Drives export eligibility — not inferred from Deal state alone."""
 
     class EventType(models.TextChoices):
-        INVITE_SENT = "invite_sent"
-        INVITE_FAILED = "invite_failed"
-        CONNECTION_DETECTED = "connection_detected"
+        FOLLOW_SENT = "follow_sent"
+        FOLLOW_FAILED = "follow_failed"
+        FOLLOW_BACK_DETECTED = "follow_back_detected"
+        MESSAGE_SENT = "message_sent"
+        MESSAGE_FAILED = "message_failed"
 
     event_type = models.CharField(max_length=32, choices=EventType.choices, db_index=True)
     lead = models.ForeignKey("crm.Lead", null=True, blank=True, on_delete=models.CASCADE, related_name="outreach_events")
@@ -547,8 +548,8 @@ class TaskQuerySet(models.QuerySet):
 
     def runnable(self):
         qs = self.due()
-        if bool(getattr(SiteConfig.load(), "pause_new_connection_invites", False)):
-            return qs.exclude(task_type=Task.TaskType.CONNECT)
+        if bool(getattr(SiteConfig.load(), "pause_new_follows", False)):
+            return qs.exclude(task_type=Task.TaskType.FOLLOW)
         return qs
 
     def claim_next(self) -> "Task | None":
@@ -557,8 +558,8 @@ class TaskQuerySet(models.QuerySet):
     def seconds_to_next(self) -> float | None:
         """Seconds until the next pending task, or None if queue is empty."""
         qs = self.pending()
-        if bool(getattr(SiteConfig.load(), "pause_new_connection_invites", False)):
-            qs = qs.exclude(task_type=Task.TaskType.CONNECT)
+        if bool(getattr(SiteConfig.load(), "pause_new_follows", False)):
+            qs = qs.exclude(task_type=Task.TaskType.FOLLOW)
         next_task = qs.only("scheduled_at").first()
         if next_task is None:
             return None
@@ -567,7 +568,7 @@ class TaskQuerySet(models.QuerySet):
 
 class Task(models.Model):
     class TaskType(models.TextChoices):
-        CONNECT = "connect"
+        FOLLOW = "follow"
         CHECK_PENDING = "check_pending"
         FOLLOW_UP = "follow_up"
         SEND_MESSAGE = "send_message"

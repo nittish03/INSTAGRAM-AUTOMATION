@@ -1,5 +1,5 @@
 # linkedin/pipeline/search.py
-"""Search keyword management and LinkedIn People search."""
+"""Search keyword management and Instagram search."""
 from __future__ import annotations
 
 import logging

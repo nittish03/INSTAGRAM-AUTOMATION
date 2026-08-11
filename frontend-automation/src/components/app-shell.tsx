@@ -20,11 +20,11 @@ const navSections = [
     ],
   },
   {
-    title: "LinkedIn",
+    title: "Instagram",
     items: [
       { href: "/action-logs", label: "Action logs", icon: "🧾" },
       { href: "/campaigns", label: "Campaigns", icon: "📣" },
-      { href: "/linkedin-profiles", label: "LinkedIn profiles", icon: "👤" },
+      { href: "/instagram-profiles", label: "Instagram profiles", icon: "👤" },
       { href: "/search-keywords", label: "Search keywords", icon: "🔎" },
       { href: "/site-configuration", label: "Site configuration", icon: "⚙️" },
       { href: "/tasks", label: "Tasks", icon: "✅" },

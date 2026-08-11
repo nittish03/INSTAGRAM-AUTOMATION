@@ -12,7 +12,7 @@ from linkedin.models import ActionLog
 class Command(BaseCommand):
     help = (
         "Upsert sheet rows for CONNECTED leads with a successful FOLLOW_UP ActionLog "
-        "(no CONNECTION_DETECTED verification required)."
+        "(no FOLLOW_BACK_DETECTED verification required)."
     )
 
     def add_arguments(self, parser):
@@ -50,7 +50,7 @@ class Command(BaseCommand):
                 has_follow_up=True,
                 has_connected=True,
             )
-            .exclude(linkedin_url="")
+            .exclude(instagram_url="")
             .exclude(public_identifier="")
             .order_by("pk")
         )

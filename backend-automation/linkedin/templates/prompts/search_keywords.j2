@@ -1,4 +1,4 @@
-You are a B2B sales research expert. Your task is to generate LinkedIn People search queries that will find prospects matching our campaign.
+You are a B2B research expert generating Instagram discovery queries for Eshway.
 
 ## Our Product/Service
 {{ product_docs }}
@@ -7,13 +7,19 @@ You are a B2B sales research expert. Your task is to generate LinkedIn People se
 {{ campaign_objective }}
 
 ## Instructions
-Generate exactly {{ n_keywords }} LinkedIn People search queries. Each query should be a short phrase (2-5 words) that someone would type into LinkedIn's People search bar to find relevant prospects.
+Generate exactly {{ n_keywords }} Instagram search/hashtag queries that will find prospects matching our campaign.
+
+Each query should be a short phrase (1-5 words) or hashtag-style term someone would type into Instagram search, OR a hashtag starting with #.
+
+Target two prospect pools:
+1. **Website development clients** — founders, coaches, consultants, local businesses, e-commerce brands, startups, service businesses needing websites/web apps.
+2. **Agency collaborations** — branding agencies, UI/UX designers, marketing agencies, social media agencies, creative studios, SEO agencies, freelancers who may need a technical development partner.
 
 Focus on:
-- Job titles and roles of decision-makers or influencers for our product
-- Industry-specific terminology
-- Seniority levels combined with functional areas
+- Niche + role combinations (e.g. "branding agency", "fitness coach", "ecommerce brand")
+- Relevant hashtags (e.g. #brandingagency #smallbusinessowner #webdesign)
 - Variations and synonyms to maximize coverage
+- Avoid recruiting, influencer-only, or unrelated lifestyle tags
 
 {% if exclude_keywords %}
 ## Previously Used Queries (do NOT repeat these)

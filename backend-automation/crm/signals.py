@@ -1,9 +1,7 @@
-"""CRM signals — Google Sheet export and follow-up enqueue when a Deal hits CONNECTED.
+"""CRM signals — Google Sheet export and follow-up enqueue for DM-first outreach.
 
-Sheet export is **verification-gated** in ``sync_lead_to_google_sheet`` (explicit
-``OutreachEvent`` + confidence). This signal still runs on CONNECTED transition;
-sync may no-op until ``connection_detected`` / ``invite_sent`` events satisfy
-export rules — avoiding inferred-state pollution in the sheet.
+Sheet export remains verification-gated in ``sync_lead_to_google_sheet``.
+HITL draft tasks are enqueued when a Deal becomes QUALIFIED (DM-first path).
 """
 from __future__ import annotations
 
@@ -31,7 +29,7 @@ def _sync_lead_after_commit(lead_pk: int) -> None:
 
 
 def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
-    """Ensure a FOLLOW_UP task exists for a CONNECTED Deal (idempotent).
+    """Ensure a FOLLOW_UP draft task exists for a QUALIFIED Deal (idempotent).
 
     Skip if the lead already has a pending draft or a queued send_message task.
     """
@@ -43,7 +41,7 @@ def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
 
     deal = (
         _Deal.objects.select_related("lead", "campaign")
-        .filter(pk=deal_pk, state=ProfileState.CONNECTED)
+        .filter(pk=deal_pk, state=ProfileState.QUALIFIED)
         .first()
     )
     if not deal or not deal.lead or not deal.lead.public_identifier:
@@ -73,7 +71,14 @@ def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
         payload__public_id=deal.lead.public_identifier,
         payload__owner_id=owner_id,
     ).exists()
-    if has_pending_draft or has_send_task:
+    has_follow_up = Task.objects.filter(
+        task_type=Task.TaskType.FOLLOW_UP,
+        status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+        payload__campaign_id=deal.campaign_id,
+        payload__public_id=deal.lead.public_identifier,
+        payload__owner_id=owner_id,
+    ).exists()
+    if has_pending_draft or has_send_task or has_follow_up:
         return
 
     enqueue_follow_up(
@@ -105,21 +110,18 @@ def deal_pre_save_track_state(sender, instance: Deal, **kwargs):
 
 @receiver(post_save, sender=Deal)
 def deal_post_save_google_sheet(sender, instance: Deal, created: bool, **kwargs):
-    """Export the lead the first time its Deal becomes CONNECTED."""
+    """Enqueue HITL drafts on QUALIFIED; sheet sync still runs on CONNECTED."""
     if kwargs.get("raw"):
         return
 
     new_state = instance.state
-    if new_state != ProfileState.CONNECTED:
-        return
-
     previous_state = getattr(instance, "_previous_state", None)
-    if not created and previous_state == ProfileState.CONNECTED:
-        return
-
     lead_id = instance.lead_id
     if not lead_id:
         return
 
-    transaction.on_commit(lambda pk=lead_id: _sync_lead_after_commit(pk))
-    transaction.on_commit(lambda pk=instance.pk: _enqueue_follow_up_after_commit(pk))
+    if new_state == ProfileState.QUALIFIED and (created or previous_state != ProfileState.QUALIFIED):
+        transaction.on_commit(lambda pk=instance.pk: _enqueue_follow_up_after_commit(pk))
+
+    if new_state == ProfileState.CONNECTED and (created or previous_state != ProfileState.CONNECTED):
+        transaction.on_commit(lambda pk=lead_id: _sync_lead_after_commit(pk))

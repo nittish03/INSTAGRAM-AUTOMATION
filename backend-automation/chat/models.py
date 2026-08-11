@@ -32,23 +32,23 @@ class ChatMessage(models.Model):
         verbose_name=_("Owner"),
         related_name="%(app_label)s_%(class)s_owner_related",
     )
-    linkedin_profile = models.ForeignKey(
-        "linkedin.LinkedInProfile",
+    instagram_profile = models.ForeignKey(
+        "linkedin.InstagramProfile",
         blank=True,
         null=True,
         on_delete=models.CASCADE,
         related_name="messages",
-        verbose_name=_("LinkedIn Profile"),
+        verbose_name=_("Instagram Profile"),
     )
     creation_date = models.DateTimeField(
         default=timezone.now,
         verbose_name=_("Creation date")
     )
 
-    linkedin_urn = models.CharField(
+    instagram_message_id = models.CharField(
         max_length=300, unique=True,
-        verbose_name=_("LinkedIn message URN"),
-        help_text=_("entityUrn from Voyager API, used for dedup"),
+        verbose_name=_("Instagram message id"),
+        help_text=_("Stable Instagram DM id used for dedup (GraphQL item id or synthetic hash)"),
     )
     is_outgoing = models.BooleanField(
         default=True,

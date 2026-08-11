@@ -13,7 +13,7 @@ def import_freemium_campaign(kit_config: dict):
     Adds all active users to the campaign.
     Returns the Campaign instance or None.
     """
-    from linkedin.models import Campaign, LinkedInProfile
+    from linkedin.models import Campaign, InstagramProfile
 
     campaign_name = kit_config.get("campaign_name", "Freemium Outreach")
 
@@ -28,8 +28,8 @@ def import_freemium_campaign(kit_config: dict):
         },
     )
 
-    # Add all active LinkedIn users to this campaign
-    for lp in LinkedInProfile.objects.filter(active=True).select_related("user"):
+    # Add all active Instagram users to this campaign
+    for lp in InstagramProfile.objects.filter(active=True).select_related("user"):
         campaign.users.add(lp.user)
 
     logger.info("[Freemium] Campaign imported: %s (action_fraction=%.2f)",
@@ -51,7 +51,7 @@ def seed_profiles(session, kit_config: dict):
     for public_id in public_ids:
         url = public_id_to_url(public_id)
 
-        lead, _ = Lead.objects.get_or_create(public_identifier=public_id, defaults={"linkedin_url": url})
+        lead, _ = Lead.objects.get_or_create(public_identifier=public_id, defaults={"instagram_url": url})
 
         lead.get_embedding(session)
         create_freemium_deal(session, public_id)

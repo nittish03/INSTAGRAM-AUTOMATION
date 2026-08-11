@@ -3,18 +3,20 @@ from __future__ import annotations
 
 
 def build_profile_text(profile: dict) -> str:
-    """Concatenate all text fields from in-memory profile dict, lowercased.
+    """Concatenate text fields from an Instagram (or legacy) profile dict.
 
-    Mirrors the SQL profile_text concatenation order:
-    headline + summary + location_name + industry.name +
-    position titles/companies/locations/descriptions +
-    education schools/degrees/fields
+    Includes bio/headline, category, external URL host signals, and position-like
+    fields so embeddings still work after the Instagram field conversion.
     """
     p = profile.get("profile", {}) or {}
     parts = [
         p.get("headline", "") or "",
         p.get("summary", "") or "",
+        p.get("biography", "") or "",
+        p.get("category_name", "") or "",
+        p.get("external_url", "") or "",
         p.get("location_name", "") or "",
+        p.get("username", "") or "",
     ]
 
     industry = p.get("industry", {}) or {}

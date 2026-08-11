@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 def handle_send_message(task, session, qualifiers=None):
     from linkedin.actions.message import send_raw_message
     from django.utils import timezone
-    from linkedin.tasks.connect import enqueue_check_pending, enqueue_follow_up, enqueue_reply_check
+    from linkedin.tasks.connect import enqueue_follow_up, enqueue_reply_check
     from crm.models.deal import Deal
+    from linkedin.models import OutreachEvent
+    from linkedin.outreach_tracking import emit_outreach_event
 
     payload = task.payload
     public_id = payload["public_id"]
@@ -35,12 +37,12 @@ def handle_send_message(task, session, qualifiers=None):
         session.campaign, colored("\u25b6 send_message", "blue", attrs=["bold"]), public_id,
     )
 
-    linkedin_profile = getattr(session, "linkedin_profile", None)
-    linkedin_profile_id = linkedin_profile.pk if getattr(linkedin_profile, "pk", None) is not None else None
+    instagram_profile = getattr(session, "instagram_profile", None)
+    instagram_profile_id = instagram_profile.pk if getattr(instagram_profile, "pk", None) is not None else None
     try:
-        msg = ChatMessage.objects.get(pk=message_id, linkedin_profile=linkedin_profile)
+        msg = ChatMessage.objects.get(pk=message_id, instagram_profile=instagram_profile)
     except ChatMessage.DoesNotExist:
-        error_msg = f"send_message: ChatMessage {message_id} is not available for this LinkedIn profile — aborting"
+        error_msg = f"send_message: ChatMessage {message_id} is not available for this Instagram profile — aborting"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
@@ -62,8 +64,8 @@ def handle_send_message(task, session, qualifiers=None):
         }
         if owner_id is not None:
             payload["owner_id"] = owner_id
-        if linkedin_profile_id is not None:
-            payload["linkedin_profile_id"] = linkedin_profile_id
+        if instagram_profile_id is not None:
+            payload["instagram_profile_id"] = instagram_profile_id
         current_task_pk = getattr(task, "pk", None)
         if not isinstance(current_task_pk, int):
             current_task_pk = None
@@ -74,8 +76,8 @@ def handle_send_message(task, session, qualifiers=None):
             payload__public_id=public_id,
             payload__message_id=message_id,
         )
-        if linkedin_profile_id is not None:
-            exists_qs = exists_qs.filter(payload__linkedin_profile_id=linkedin_profile_id)
+        if instagram_profile_id is not None:
+            exists_qs = exists_qs.filter(payload__instagram_profile_id=instagram_profile_id)
         exists = exists_qs.exclude(pk=current_task_pk).exists()
         if exists:
             return
@@ -89,105 +91,32 @@ def handle_send_message(task, session, qualifiers=None):
         )
 
     def _handle_not_messageable(skip_exc: TaskSkipped) -> None:
-        from linkedin.actions.connect import send_connection_request
-        from linkedin.conf import CAMPAIGN_CONFIG
         from linkedin.db.deals import set_profile_state
         from linkedin.enums import ProfileState
-        from linkedin.models import ActionLog, OutreachEvent
+        from linkedin.models import OutreachEvent
         from linkedin.outreach_tracking import emit_outreach_event
 
         reason = str(skip_exc)
-        backoff_hours = float(CAMPAIGN_CONFIG["check_pending_recheck_after_hours"])
-        retry_delay = backoff_hours * 3600
-
-        if "Pending" in reason:
-            if deal:
-                enqueue_check_pending(
-                    campaign_id,
-                    public_id,
-                    backoff_hours=backoff_hours,
-                    deal=deal,
-                    owner_id=owner_id,
-                    linkedin_profile_id=linkedin_profile_id,
-                )
-            _requeue_approved_send(retry_delay, "Waiting for pending connection before sending approved message")
-            raise TaskSkipped("LinkedIn still shows Pending; approved message will retry after connection check") from skip_exc
-
-        if "Connect" not in reason:
-            raise skip_exc
-
-        if not session.linkedin_profile.can_execute(ActionLog.ActionType.CONNECT):
-            _requeue_approved_send(24 * 3600, "Connect limit reached before approved message could be sent")
-            raise TaskSkipped("LinkedIn shows Connect but connect limit is reached; approved message requeued") from skip_exc
-
-        new_state = send_connection_request(session=session, profile=profile)
-        verified_connected = False
-        if new_state == ProfileState.CONNECTED:
-            from linkedin.actions.status import get_connection_assessment
-            from linkedin.outreach_tracking import update_deal_inference
-
-            post = get_connection_assessment(session, profile)
-            verified_connected = (
-                post.state == ProfileState.CONNECTED
-                and post.source == "api_degree_1"
+        fail_reason = (
+            "Instagram Message button not available "
+            "(private/restricted account or Message UI missing) — not falling back to Follow"
+        )
+        if deal:
+            set_profile_state(
+                session,
+                public_id,
+                ProfileState.FAILED.value,
+                reason=fail_reason,
             )
-            if deal:
-                update_deal_inference(deal, post.source, post.confidence)
-        state_to_store = (
-            ProfileState.CONNECTED
-            if new_state == ProfileState.CONNECTED and verified_connected
-            else new_state
-        )
-        if new_state == ProfileState.CONNECTED and not verified_connected:
-            state_to_store = ProfileState.PENDING
-
-        set_profile_state(session, public_id, state_to_store.value)
-
-        name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
-        session.linkedin_profile.record_action(
-            ActionLog.ActionType.CONNECT,
-            session.campaign,
-            target_name=name,
-            target_public_id=public_id,
-            status="success" if state_to_store in (ProfileState.PENDING, ProfileState.CONNECTED) else "failed",
-            note="Auto-connect before sending approved message",
-        )
-
-        if state_to_store == ProfileState.PENDING:
-            if deal:
-                emit_outreach_event(
-                    OutreachEvent.EventType.INVITE_SENT,
-                    deal=deal,
-                    lead=deal.lead,
-                    campaign=session.campaign,
-                    public_id=public_id,
-                    metadata={"via": "send_message_not_connected"},
-                )
-                if deal.lead_id:
-                    from google_integration.sheet_sync import sync_pending_lead_to_google_sheet
-
-                    sync_pending_lead_to_google_sheet(
-                        deal.lead,
-                        reason_code="send_message_auto_connect",
-                        config_user=owner_id,
-                    )
-                enqueue_check_pending(
-                    campaign_id,
-                    public_id,
-                    backoff_hours=backoff_hours,
-                    deal=deal,
-                    owner_id=owner_id,
-                    linkedin_profile_id=linkedin_profile_id,
-                )
-            _requeue_approved_send(retry_delay, "Connection invite sent before approved message could be delivered")
-            raise TaskSkipped("LinkedIn showed Connect; sent connection invite and requeued approved message") from skip_exc
-
-        if state_to_store == ProfileState.CONNECTED:
-            _requeue_approved_send(60, "Connected during send_message; retrying approved message")
-            raise TaskSkipped("Connected during send_message; approved message requeued") from skip_exc
-
-        _requeue_approved_send(retry_delay, f"Connect attempt returned {new_state.value}; approved message retained")
-        raise TaskSkipped(f"LinkedIn showed Connect; connect attempt returned {new_state.value}") from skip_exc
+            emit_outreach_event(
+                OutreachEvent.EventType.MESSAGE_FAILED,
+                deal=deal,
+                lead=deal.lead,
+                campaign=session.campaign,
+                public_id=public_id,
+                metadata={"reason": reason[:500], "via": "send_message_not_messageable"},
+            )
+        raise TaskSkipped(fail_reason) from skip_exc
 
     def _send_once():
         # Send path requires an active Playwright page; initialize browser explicitly.
@@ -218,9 +147,9 @@ def handle_send_message(task, session, qualifiers=None):
         )
         if not is_closed_page:
             if _is_transient_playwright_timeout(exc):
-                _requeue_approved_send(10 * 60, f"Transient LinkedIn timeout during send: {exc}")
+                _requeue_approved_send(10 * 60, f"Transient Instagram timeout during send: {exc}")
                 raise TaskSkipped(
-                    "LinkedIn timed out during approved message send; message requeued"
+                    "Instagram timed out during approved DM send; message requeued"
                 ) from exc
             raise
         logger.warning("Browser closed during send for %s - relaunching once", public_id)
@@ -232,19 +161,19 @@ def handle_send_message(task, session, qualifiers=None):
             30 * 60,
             "Profile Message popup send failed; approved message retained for retry",
         )
-        raise TaskSkipped("LinkedIn profile Message popup send failed; approved message requeued")
+        raise TaskSkipped("Instagram DM send failed; approved message requeued")
 
     # Assuming success, remove draft suffix if it exists, record rate limit actions
     sent_at = timezone.now()
-    if msg.linkedin_urn.startswith("draft_"):
-        msg.linkedin_urn = msg.linkedin_urn.replace("draft_", "sent_")
+    if msg.instagram_message_id.startswith("draft_"):
+        msg.instagram_message_id = msg.instagram_message_id.replace("draft_", "sent_")
     msg.creation_date = sent_at
     msg.is_draft = False
     msg.is_approved = True
-    msg.save(update_fields=["linkedin_urn", "creation_date", "is_draft", "is_approved"])
+    msg.save(update_fields=["instagram_message_id", "creation_date", "is_draft", "is_approved"])
 
     name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or public_id
-    session.linkedin_profile.record_action(
+    session.instagram_profile.record_action(
         ActionLog.ActionType.FOLLOW_UP, 
         session.campaign,
         target_name=name,
@@ -253,10 +182,19 @@ def handle_send_message(task, session, qualifiers=None):
         note=f"Message: {msg.content[:50]}..."
     )
 
-    if deal and deal.lead_id:
-        from google_integration.sheet_sync import sync_messaged_lead_to_google_sheet
+    if deal:
+        emit_outreach_event(
+            OutreachEvent.EventType.MESSAGE_SENT,
+            deal=deal,
+            lead=deal.lead,
+            campaign=session.campaign,
+            public_id=public_id,
+            metadata={"message_id": msg.pk, "via": "send_message"},
+        )
+        if deal.lead_id:
+            from google_integration.sheet_sync import sync_messaged_lead_to_google_sheet
 
-        sync_messaged_lead_to_google_sheet(deal.lead, config_user=owner_id)
+            sync_messaged_lead_to_google_sheet(deal.lead, config_user=owner_id)
 
     enqueue_follow_up(
         campaign_id,
@@ -264,7 +202,7 @@ def handle_send_message(task, session, qualifiers=None):
         delay_seconds=4 * 3600,
         deal=deal,
         owner_id=owner_id,
-        linkedin_profile_id=linkedin_profile_id,
+        instagram_profile_id=instagram_profile_id,
         apply_time_limits=False,
     )
     enqueue_reply_check(
@@ -274,6 +212,6 @@ def handle_send_message(task, session, qualifiers=None):
         sent_at=sent_at,
         deal=deal,
         owner_id=owner_id,
-        linkedin_profile_id=linkedin_profile_id,
+        instagram_profile_id=instagram_profile_id,
     )
     logger.info("Message dispatched successfully. Reply checks scheduled before ~4h follow-up.")

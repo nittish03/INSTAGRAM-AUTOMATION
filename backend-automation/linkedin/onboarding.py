@@ -1,5 +1,5 @@
 # linkedin/onboarding.py
-"""Onboarding: create Campaign + LinkedInProfile + LLM config in DB.
+"""Onboarding: create Campaign + InstagramProfile + LLM config in DB.
 
 Two ways to supply config:
 - OnboardConfig.from_json(path) — from a JSON file (non-interactive / cloud).
@@ -14,14 +14,14 @@ import sys
 from dataclasses import dataclass
 
 from linkedin.conf import (
-    DEFAULT_CONNECT_DAILY_LIMIT,
-    DEFAULT_CONNECT_WEEKLY_LIMIT,
+    DEFAULT_FOLLOW_DAILY_LIMIT,
+    DEFAULT_FOLLOW_WEEKLY_LIMIT,
     DEFAULT_FOLLOW_UP_DAILY_LIMIT,
     ROOT_DIR,
 )
 
-DEFAULT_PRODUCT_DOCS = ROOT_DIR / "README.md"
-DEFAULT_CAMPAIGN_OBJECTIVE = "B2B Lead Discovery and Automated Outreach"
+DEFAULT_PRODUCT_DOCS = ROOT_DIR / "defaults" / "eshway_product_docs.md"
+DEFAULT_CAMPAIGN_OBJECTIVE = ROOT_DIR / "defaults" / "eshway_campaign_objective.md"
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 class OnboardConfig:
     """All values needed to onboard — filled interactively or from JSON."""
 
-    linkedin_email: str = ""
-    linkedin_password: str = ""
+    instagram_username: str = ""
+    instagram_password: str = ""
     campaign_name: str = ""
     product_description: str = ""
     campaign_objective: str = ""
@@ -48,8 +48,8 @@ class OnboardConfig:
     azure_deployment: str = ""
     azure_api_version: str = "2024-10-21"
     newsletter: bool = True
-    connect_daily_limit: int = DEFAULT_CONNECT_DAILY_LIMIT
-    connect_weekly_limit: int = DEFAULT_CONNECT_WEEKLY_LIMIT
+    follow_daily_limit: int = DEFAULT_FOLLOW_DAILY_LIMIT
+    follow_weekly_limit: int = DEFAULT_FOLLOW_WEEKLY_LIMIT
     follow_up_daily_limit: int = DEFAULT_FOLLOW_UP_DAILY_LIMIT
 
     @classmethod
@@ -57,6 +57,9 @@ class OnboardConfig:
         import json
         with open(path) as f:
             data = json.load(f)
+        # Accept legacy JSON key during cutover.
+        if "instagram_username" not in data and "linkedin_email" in data:
+            data = {**data, "instagram_username": data["linkedin_email"]}
         return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data})
 
 
@@ -69,8 +72,8 @@ _CAMPAIGN_KEYS = {
     "booking_link", "seed_urls",
 }
 _ACCOUNT_KEYS = {
-    "linkedin_email", "linkedin_password", "newsletter",
-    "connect_daily_limit", "connect_weekly_limit", "follow_up_daily_limit",
+    "instagram_username", "instagram_password", "newsletter",
+    "follow_daily_limit", "follow_weekly_limit", "follow_up_daily_limit",
 }
 _LLM_KEYS = {
     "llm_api_key",
@@ -85,14 +88,14 @@ _ALL_KEYS = _CAMPAIGN_KEYS | _ACCOUNT_KEYS | _LLM_KEYS
 
 def missing_keys() -> set[str]:
     """Return onboarding field keys that still need values."""
-    from linkedin.models import Campaign, LinkedInProfile, SiteConfig
+    from linkedin.models import Campaign, InstagramProfile, SiteConfig
 
     keys: set[str] = set()
 
     if not Campaign.objects.exists():
         keys |= _CAMPAIGN_KEYS
 
-    if not LinkedInProfile.objects.filter(active=True).exists():
+    if not InstagramProfile.objects.filter(active=True).exists():
         keys |= _ACCOUNT_KEYS
 
     cfg = SiteConfig.load()
@@ -116,21 +119,21 @@ class Question:
 
 
 SELF_HOSTED_QUESTIONS = [
-    Question("linkedin_email", "LinkedIn Email"),
-    Question("linkedin_password", "LinkedIn Password", is_password=True),
+    Question("instagram_username", "Instagram Username"),
+    Question("instagram_password", "Instagram Password", is_password=True),
     Question("campaign_name", "Campaign Name (e.g. My Outreach)"),
     Question("product_description", "Product/Service Description", default="We help companies with..."),
     Question("campaign_objective", "Campaign Objective", default="Generate high-quality leads"),
     Question("booking_link", "Booking Link (optional)", required=False),
-    Question("seed_urls", "Seed LinkedIn URLs (comma separated)", required=False),
+    Question("seed_urls", "Seed Instagram URLs (comma separated)", required=False),
     Question("llm_api_key", "LLM API Key (Gemini/OpenAI)"),
     Question("llm_provider", "LLM Provider (openai/azure/gemini)", default="openai"),
     Question("ai_model", "Model Identifier", default=""),
     Question("llm_api_base", "LLM API Base URL (optional)", required=False),
     Question("azure_deployment", "Azure Deployment Name (optional)", required=False),
     Question("azure_api_version", "Azure API Version (optional)", default="2024-10-21", required=False),
-    Question("connect_daily_limit", "Daily Connection Limit", default=str(DEFAULT_CONNECT_DAILY_LIMIT)),
-    Question("connect_weekly_limit", "Weekly Connection Limit", default=str(DEFAULT_CONNECT_WEEKLY_LIMIT)),
+    Question("follow_daily_limit", "Daily Follow Limit", default=str(DEFAULT_FOLLOW_DAILY_LIMIT)),
+    Question("follow_weekly_limit", "Weekly Follow Limit", default=str(DEFAULT_FOLLOW_WEEKLY_LIMIT)),
     Question("follow_up_daily_limit", "Daily Follow-up Limit", default=str(DEFAULT_FOLLOW_UP_DAILY_LIMIT)),
 ]
 
@@ -179,7 +182,7 @@ def collect_from_wizard() -> OnboardConfig:
         raise SystemExit("Onboarding cancelled.")
 
     # Cast numeric inputs
-    for key in ["connect_daily_limit", "connect_weekly_limit", "follow_up_daily_limit"]:
+    for key in ["follow_daily_limit", "follow_weekly_limit", "follow_up_daily_limit"]:
         if key in answers:
             try:
                 answers[key] = int(answers[key])
@@ -220,19 +223,19 @@ def _create_campaign(name: str, product_docs: str, objective: str, booking_link:
 
 def _create_account(
     campaign,
-    email: str,
+    username: str,
     password: str,
     *,
     subscribe: bool = True,
-    connect_daily: int = DEFAULT_CONNECT_DAILY_LIMIT,
-    connect_weekly: int = DEFAULT_CONNECT_WEEKLY_LIMIT,
+    follow_daily: int = DEFAULT_FOLLOW_DAILY_LIMIT,
+    follow_weekly: int = DEFAULT_FOLLOW_WEEKLY_LIMIT,
     follow_up_daily: int = DEFAULT_FOLLOW_UP_DAILY_LIMIT,
 ):
-    """Create a User + LinkedInProfile record and return the profile."""
+    """Create a User + InstagramProfile record and return the profile."""
     from django.contrib.auth.models import User
-    from linkedin.models import LinkedInProfile
+    from linkedin.models import InstagramProfile
 
-    handle = email.split("@")[0].lower().replace(".", "_").replace("+", "_")
+    handle = username.split("@")[0].lower().replace(".", "_").replace("+", "_")
 
     user, created = User.objects.get_or_create(
         username=handle,
@@ -245,17 +248,17 @@ def _create_account(
     if campaign:
         campaign.users.add(user)
 
-    profile = LinkedInProfile.objects.create(
+    profile = InstagramProfile.objects.create(
         user=user,
-        linkedin_username=email,
-        linkedin_password=password,
+        instagram_username=username,
+        instagram_password=password,
         subscribe_newsletter=subscribe,
-        connect_daily_limit=connect_daily,
-        connect_weekly_limit=connect_weekly,
+        follow_daily_limit=follow_daily,
+        follow_weekly_limit=follow_weekly,
         follow_up_daily_limit=follow_up_daily,
     )
 
-    logger.info("Created LinkedIn profile for %s (handle=%s)", email, handle)
+    logger.info("Created Instagram profile for %s (handle=%s)", username, handle)
     print(f"Account '{handle}' created!")
 
     from termcolor import colored
@@ -285,7 +288,7 @@ def _create_seed_leads(campaign, seed_urls: str) -> None:
 
 def apply(config: OnboardConfig) -> None:
     """Commit an OnboardConfig to the local database and filesystem."""
-    from linkedin.models import Campaign, LinkedInProfile, SiteConfig
+    from linkedin.models import Campaign, InstagramProfile, SiteConfig
 
     # 1. Campaign & Seeds
     campaign = None
@@ -304,16 +307,16 @@ def apply(config: OnboardConfig) -> None:
             if config.seed_urls:
                 _create_seed_leads(campaign, config.seed_urls)
 
-    # 2. LinkedIn Account
+    # 2. Instagram Account
     created_profile = False
-    if config.linkedin_email and not LinkedInProfile.objects.filter(linkedin_username=config.linkedin_email).exists():
+    if config.instagram_username and not InstagramProfile.objects.filter(instagram_username=config.instagram_username).exists():
         _create_account(
             campaign,
-            config.linkedin_email,
-            config.linkedin_password,
+            config.instagram_username,
+            config.instagram_password,
             subscribe=config.newsletter,
-            connect_daily=config.connect_daily_limit,
-            connect_weekly=config.connect_weekly_limit,
+            follow_daily=config.follow_daily_limit,
+            follow_weekly=config.follow_weekly_limit,
             follow_up_daily=config.follow_up_daily_limit,
         )
         created_profile = True
@@ -321,9 +324,9 @@ def apply(config: OnboardConfig) -> None:
     # 2b. Ensure campaign membership is linked for existing accounts too.
     if campaign:
         linked = False
-        if config.linkedin_email:
-            existing_profile = LinkedInProfile.objects.filter(
-                linkedin_username=config.linkedin_email
+        if config.instagram_username:
+            existing_profile = InstagramProfile.objects.filter(
+                instagram_username=config.instagram_username
             ).select_related("user").first()
             if existing_profile:
                 campaign.users.add(existing_profile.user)
@@ -338,7 +341,7 @@ def apply(config: OnboardConfig) -> None:
         # Auto-heal common fresh-start scenario: one active profile, no campaign users.
         if not linked and not campaign.users.exists():
             active_profiles = list(
-                LinkedInProfile.objects.filter(active=True).select_related("user")
+                InstagramProfile.objects.filter(active=True).select_related("user")
             )
             if len(active_profiles) == 1:
                 campaign.users.add(active_profiles[0].user)
@@ -373,5 +376,5 @@ def apply(config: OnboardConfig) -> None:
     print("   UNUSABLE passwords for safety.")
     print("\n👉 To log in to the admin dashboard, you MUST set an admin password.")
     print(f"   Run this command now:")
-    print(f"\n      python manage.py create_admin_user {config.linkedin_email}")
+    print(f"\n      python manage.py create_admin_user {config.instagram_username}")
     print("\n" + "="*60)

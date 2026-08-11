@@ -137,7 +137,7 @@ export default function ActionLogsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Action Logs"
-        description="Connect / follow-up history with status, target, and operator details."
+        description="DM history with status, target, and operator details."
         actions={
           <>
             <input
@@ -152,7 +152,7 @@ export default function ActionLogsPage() {
               onChange={(e) => setType(e.target.value)}
             >
               <option value="">All types</option>
-              <option value="connect">connect</option>
+              <option value="follow">follow</option>
               <option value="follow_up">follow_up</option>
             </select>
             <select
@@ -172,7 +172,7 @@ export default function ActionLogsPage() {
       {loading ? (
         <TableSkeleton rows={8} cols={6} />
       ) : filtered.length === 0 ? (
-        <EmptyState title="No action logs found" description="Once the bot connects or follows up with leads, entries appear here." />
+        <EmptyState title="No action logs found" description="Once the Instagram worker follows or DMs leads, entries appear here." />
       ) : (
         <section className="card overflow-hidden">
           <div

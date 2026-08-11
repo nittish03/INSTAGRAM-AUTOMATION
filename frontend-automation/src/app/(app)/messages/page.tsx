@@ -286,9 +286,17 @@ export default function MessagesPage() {
   return (
     <div className="space-y-4">
       <section className="card p-5">
-        <h2 className="text-2xl font-semibold">Draft Messages (HITL)</h2>
+        <h2 className="text-2xl font-semibold">Instagram DM Drafts (HITL)</h2>
         <p className="mt-1 text-sm text-slate-400">
-          Select drafts and approve to queue <code>send_message</code> tasks.
+          Review AI-generated Instagram DMs (Eshway website clients + agency
+          collabs), then approve to queue <code>send_message</code> tasks for the
+          Instagram worker daemon. Edit or regenerate before approving — approval
+          still runs the automated send pipeline.
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Drafts should stay short and personalized (CLIENT / COLLABORATION /
+          BOTH). Prefer one strong profile detail, a clear Eshway relevance line,
+          and a low-pressure CTA — not a full pitch.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button
@@ -330,7 +338,7 @@ export default function MessagesPage() {
             className="btn-secondary"
             onClick={healFollowups}
           >
-            {healing ? "Queuing..." : "Re-queue follow-ups for connected leads"}
+            {healing ? "Queuing..." : "Re-queue drafts for qualified leads"}
           </button>
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
@@ -348,6 +356,7 @@ export default function MessagesPage() {
         <section className="card p-5">
           <h3 className="text-lg font-semibold">Messaging diagnostics</h3>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="Qualified deals" value={diag.qualifiedDeals ?? 0} />
             <Stat label="Connected deals" value={diag.connectedDeals} />
             <Stat label="Drafts (total)" value={diag.draftsTotal} />
             <Stat label="Awaiting approval" value={diag.draftsUnapproved} />
@@ -372,9 +381,9 @@ export default function MessagesPage() {
 
           {noDrafts && hasOrphans ? (
             <p className="mt-4 text-sm text-slate-400">
-              {diag.leadsWithoutDraft.length} connected lead(s) currently have
+              {diag.leadsWithoutDraft.length} qualified/connected lead(s) currently have
               no draft and no queued follow-up. Click{" "}
-              <em>Re-queue follow-ups</em> above; the daemon will pick them up
+              <em>Re-queue drafts</em> above; the daemon will pick them up
               on its next idle pass.
             </p>
           ) : null}
@@ -401,8 +410,8 @@ export default function MessagesPage() {
         <TableSkeleton rows={6} cols={5} />
       ) : items.length === 0 ? (
         <section className="card p-8 text-center text-sm text-slate-400">
-          No drafts awaiting approval yet. Once the daemon processes a follow-up
-          task, drafts will appear here.
+          No drafts awaiting approval yet. Once a lead is Qualified, the Instagram
+          worker creates a DM draft here for HITL review (no follow required).
         </section>
       ) : (
         <section className="space-y-3">
@@ -506,7 +515,7 @@ export default function MessagesPage() {
                   <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Last synced message
+                        Last synced Instagram message
                       </h4>
                       {m.latestMessage ? (
                         <span
@@ -527,8 +536,8 @@ export default function MessagesPage() {
                       </p>
                     ) : (
                       <p className="mt-3 text-sm text-slate-500">
-                        No synced LinkedIn messages found yet. Run the daemon or
-                        sync this conversation before approving.
+                        No synced Instagram DMs found yet. Run the Instagram
+                        worker daemon or sync this conversation before approving.
                       </p>
                     )}
                   </section>

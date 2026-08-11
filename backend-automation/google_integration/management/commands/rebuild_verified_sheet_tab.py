@@ -129,14 +129,17 @@ class Command(BaseCommand):
         self.stdout.write(f"Spreadsheet: {stats['spreadsheet_id']}")
         self.stdout.write(f"Dry run: {stats['dry_run']}")
         self.stdout.write(f"Mode: {stats.get('mode', 'export_verified')}")
-        if stats.get("linkedin_column_letter") is not None:
-            det = stats.get("linkedin_detection") or ""
+        if stats.get("instagram_column_letter") is not None:
+            det = stats.get("instagram_detection") or ""
             self.stdout.write(
-                f"LinkedIn URL column: {stats['linkedin_column_letter']} "
-                f"(index {stats.get('linkedin_column_index')}) [{det}]"
+                f"Instagram URL column: {stats['instagram_column_letter']} "
+                f"(index {stats.get('instagram_column_index')}) [{det}]"
             )
         self.stdout.write(f"Data rows read (excl. header): {stats['rows_read']}")
-        self.stdout.write(f"URLs recovered by scanning the row for linkedin.com: {stats.get('urls_from_row_scan_fallback', 0)}")
+        self.stdout.write(
+            f"URLs recovered by scanning the row for instagram.com "
+            f"(legacy linkedin.com cells still accepted): {stats.get('urls_from_row_scan_fallback', 0)}"
+        )
         self.stdout.write(f"Kept (written): {stats['kept']}")
         self.stdout.write(f"Dropped — empty URL: {stats['dropped_no_url']}")
         self.stdout.write(f"Dropped — URL not in CRM: {stats['dropped_no_lead']}")

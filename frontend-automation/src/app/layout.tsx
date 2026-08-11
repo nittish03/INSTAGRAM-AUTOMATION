@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Leadway Frontend",
-  description: "Next.js frontend for Leadway backend",
+  title: "Leadway · Instagram Outreach",
+  description: "Operator UI for Eshway Instagram automation — discover, qualify, and DM",
 };
 
 export default function RootLayout({

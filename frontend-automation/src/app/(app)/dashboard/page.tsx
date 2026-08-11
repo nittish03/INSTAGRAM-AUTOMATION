@@ -168,14 +168,14 @@ export default function DashboardPage() {
     try {
       const data = daemon?.running ? await api.stopDaemon() : await api.launchDaemon();
       setDaemon(data.daemon);
-      setInfo(data.daemon.running ? "Daemon is running." : "Daemon stopped.");
+      setInfo(data.daemon.running ? "Instagram worker is running." : "Instagram worker stopped.");
     } catch (e) {
       setError(
         e instanceof Error
           ? e.message
           : daemon?.running
-            ? "Failed to stop daemon"
-            : "Failed to launch daemon",
+            ? "Failed to stop Instagram worker"
+            : "Failed to launch Instagram worker",
       );
     } finally {
       daemonActionInFlight.current = false;
@@ -211,7 +211,8 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-2xl font-semibold">Control Center</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Monitor the full outreach pipeline and approve outbound drafts.
+            Monitor the Instagram outreach pipeline (discover → qualify →
+            draft → approve → DM) and control the worker daemon.
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-slate-400">
@@ -221,7 +222,7 @@ export default function DashboardPage() {
             className={daemon?.running ? "text-emerald-400" : "text-slate-500"}
             role="status"
           >
-            Daemon: {daemon?.running ? `Running${daemon.pid ? ` (#${daemon.pid})` : ""}` : "Stopped"}
+            Instagram worker: {daemon?.running ? `Running${daemon.pid ? ` (#${daemon.pid})` : ""}` : "Stopped"}
           </span>
           <button
             className="btn-primary"
@@ -229,10 +230,10 @@ export default function DashboardPage() {
             disabled={daemonLoading || daemonMutating}
             title={
               daemonLoading
-                ? "Checking daemon status"
+                ? "Checking Instagram worker status"
                 : daemon?.running
-                  ? "Stop the running daemon"
-                  : "Launch the local Leadway daemon"
+                  ? "Stop the running Instagram worker daemon"
+                  : "Launch the local Instagram worker daemon"
             }
           >
             {daemonLoading
@@ -242,8 +243,8 @@ export default function DashboardPage() {
                   ? "Stopping..."
                   : "Launching..."
                 : daemon?.running
-                  ? "Stop Daemon"
-                  : "Run Daemon"}
+                  ? "Stop Instagram Worker"
+                  : "Run Instagram Worker"}
           </button>
           <button
             className="btn-secondary"
@@ -376,7 +377,7 @@ export default function DashboardPage() {
             className="h-[calc(100vh-18rem)] min-h-96 overflow-auto bg-slate-950/60 p-4 font-mono text-xs leading-5 text-slate-200"
           >
             {!daemonLogs || daemonLogs.lines.length === 0 ? (
-              <p className="text-slate-500">No daemon logs yet. Start the daemon to stream logs here.</p>
+              <p className="text-slate-500">No worker logs yet. Start the Instagram worker to stream logs here.</p>
             ) : (
               daemonLogs.lines.map((line, idx) => (
                 <div key={`${idx}-${line.slice(0, 24)}`} className="whitespace-pre-wrap break-words">

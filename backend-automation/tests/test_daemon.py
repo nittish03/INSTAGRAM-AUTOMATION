@@ -2,7 +2,7 @@ import os
 import datetime
 from django.test import TestCase
 from django.contrib.auth.models import User
-from linkedin.models import ActionLog, LinkedInProfile, SiteConfig, Task, Campaign
+from linkedin.models import ActionLog, InstagramProfile, SiteConfig, Task, Campaign
 from linkedin.daemon import run_daemon
 from linkedin.exceptions import TaskSkipped
 from django.utils import timezone
@@ -14,10 +14,10 @@ class DaemonHardeningTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="daemon_tester")
         self.campaign = Campaign.objects.create(name="Daemon Campaign")
-        self.profile = LinkedInProfile.objects.create(
+        self.profile = InstagramProfile.objects.create(
             user=self.user,
-            linkedin_username="daemon@example.com",
-            linkedin_password="password"
+            instagram_username="daemon@example.com",
+            instagram_password="password"
         )
         
     @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", False)
@@ -31,7 +31,7 @@ class DaemonHardeningTest(TestCase):
         
         # Create a pending task assigned to our campaign
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=fixed_now - datetime.timedelta(minutes=1),
             payload={"campaign_id": self.campaign.pk}
         )
@@ -66,7 +66,7 @@ class DaemonHardeningTest(TestCase):
         mock_now.return_value = fixed_now
 
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=fixed_now - datetime.timedelta(minutes=1),
             payload={"campaign_id": self.campaign.pk}
         )
@@ -102,10 +102,10 @@ class DaemonHardeningTest(TestCase):
         fixed_now = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
         mock_now.return_value = fixed_now
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=fixed_now - datetime.timedelta(minutes=1),
             payload={"campaign_id": self.campaign.pk},
         )
@@ -243,7 +243,7 @@ class DaemonHardeningTest(TestCase):
         mock_handlers,
     ):
         ActionLog.objects.create(
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             campaign=self.campaign,
             action_type=ActionLog.ActionType.FOLLOW_UP,
             target_public_id="recent-send",
@@ -273,7 +273,7 @@ class DaemonHardeningTest(TestCase):
         mock_session = MagicMock()
         mock_session.campaigns = [self.campaign]
         mock_session.django_user = self.user
-        mock_session.linkedin_profile = self.profile
+        mock_session.instagram_profile = self.profile
 
         with patch("linkedin.daemon.time.sleep", side_effect=KeyboardInterrupt):
             try:
@@ -289,13 +289,13 @@ class DaemonHardeningTest(TestCase):
         from linkedin.daemon import _recent_outreach_cooldown_seconds, seconds_until_active
 
         ActionLog.objects.create(
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             campaign=self.campaign,
             action_type=ActionLog.ActionType.FOLLOW_UP,
             target_public_id="recent-send",
             status=ActionLog.Status.SUCCESS,
         )
-        mock_session = MagicMock(linkedin_profile=self.profile)
+        mock_session = MagicMock(instagram_profile=self.profile)
 
         with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
             self.assertEqual(seconds_until_active(), 0.0)

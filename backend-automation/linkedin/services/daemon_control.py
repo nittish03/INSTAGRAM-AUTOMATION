@@ -203,7 +203,7 @@ def launch_daemon(handle: str | None = None) -> DaemonStatus:
     """Spawn ``manage.py rundaemon``, optionally pinning it to a Django user.
 
     When ``handle`` is provided the daemon will only operate against that
-    user's LinkedIn profiles. Multi-tenant frontends pass
+    user's Instagram profiles. Multi-tenant frontends pass
     ``request.user.username`` so each admin's launch uses their own
     accounts even though the host can only run one daemon at a time.
     """

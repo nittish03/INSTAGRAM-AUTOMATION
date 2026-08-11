@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def encode_urn(urn: str) -> str:
-    """Percent-encode a URN for use inside Voyager GraphQL variables."""
+    """Percent-encode an opaque id for URL/query use."""
     return quote(urn, safe="")
 
 
 def check_response(res, context: str) -> None:
-    """Check a Voyager messaging API response, raising on errors."""
+    """Raise on non-OK HTTP messaging responses."""
     match res.status:
         case 401:
             raise AuthenticationError(f"Messaging API 401 ({context})")

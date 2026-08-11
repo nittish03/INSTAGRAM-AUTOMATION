@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from chat.models import ChatMessage
 from crm.models import Deal, Lead
-from linkedin.models import ActionLog, Campaign, LinkedInProfile, OutreachEvent, SearchKeyword, SiteConfig, Task
+from linkedin.models import ActionLog, Campaign, InstagramProfile, OutreachEvent, SearchKeyword, SiteConfig, Task
 
 
 class Command(BaseCommand):
@@ -40,7 +40,7 @@ class Command(BaseCommand):
             "counts": self._counts(),
             "campaigns": self._campaigns(),
             "site_config": self._site_config(),
-            "linkedin_profiles": self._profiles(),
+            "instagram_profiles": self._profiles(),
             "deals": self._deals(),
             "tasks": self._tasks(now),
             "outreach_events": self._outreach_events(),
@@ -60,7 +60,7 @@ class Command(BaseCommand):
             "outreach_events": OutreachEvent.objects.count(),
             "action_logs": ActionLog.objects.count(),
             "messages": ChatMessage.objects.count(),
-            "linkedin_profiles": LinkedInProfile.objects.count(),
+            "instagram_profiles": InstagramProfile.objects.count(),
             "search_keywords": SearchKeyword.objects.count(),
         }
 
@@ -90,11 +90,11 @@ class Command(BaseCommand):
             "google_sheet_tab",
             "safe_mode_enabled",
             "global_pause_outreach",
-            "pause_new_connection_invites",
+            "pause_new_follows",
             "max_bulk_approve",
             "max_bulk_export",
             "sheet_export_min_confidence_api",
-            "sheet_export_min_confidence_after_invite",
+            "sheet_export_min_confidence_after_follow",
         ):
             if not self.include_internal_ids:
                 row.pop("id", None)
@@ -103,13 +103,13 @@ class Command(BaseCommand):
 
     def _profiles(self):
         rows = []
-        for row in LinkedInProfile.objects.values(
+        for row in InstagramProfile.objects.values(
             "id",
             "user__username",
-            "linkedin_username",
+            "instagram_username",
             "active",
-            "connect_daily_limit",
-            "connect_weekly_limit",
+            "follow_daily_limit",
+            "follow_weekly_limit",
             "follow_up_daily_limit",
             "legal_accepted",
             "newsletter_processed",
@@ -118,7 +118,7 @@ class Command(BaseCommand):
                 row.pop("id", None)
             if not self.include_pii:
                 row.pop("user__username", None)
-                row.pop("linkedin_username", None)
+                row.pop("instagram_username", None)
             rows.append(row)
         return rows
 
@@ -275,12 +275,12 @@ class Command(BaseCommand):
 
         cfg = SiteConfig.objects.first()
         min_api = float(cfg.sheet_export_min_confidence_api) if cfg else 0.85
-        min_after = float(cfg.sheet_export_min_confidence_after_invite) if cfg else 0.55
+        min_after = float(cfg.sheet_export_min_confidence_after_follow) if cfg else 0.55
 
         detects = list(
             OutreachEvent.objects.filter(
                 lead=lead,
-                event_type=OutreachEvent.EventType.CONNECTION_DETECTED,
+                event_type=OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             ).order_by("created_at")
         )
         if not detects:
@@ -291,13 +291,15 @@ class Command(BaseCommand):
         src = (meta.get("source") or "").strip()
         conf = float(meta.get("confidence") or 0.0)
 
-        if src == "api_degree_1" and conf >= min_api:
+        # api_degree_1 kept for backward compat with old OutreachEvent rows
+        high_conf_sources = {"api_follows_viewer", "api_degree_1", "ui_message_button"}
+        if src in high_conf_sources and conf >= min_api:
             return True, "verified_api_first_degree", "Verified (API)"
 
         invites = list(
             OutreachEvent.objects.filter(
                 lead=lead,
-                event_type=OutreachEvent.EventType.INVITE_SENT,
+                event_type=OutreachEvent.EventType.FOLLOW_SENT,
             ).order_by("created_at")
         )
         if not invites:
@@ -307,7 +309,7 @@ class Command(BaseCommand):
         if latest.created_at < last_invite_at:
             return False, "detection_before_last_invite", ""
 
-        if conf >= min_after and src in ("api_degree_1", "ui_message_button"):
+        if conf >= min_after and src in high_conf_sources:
             return True, "verified_after_invite", "Accepted (post-invite)"
 
         return False, "insufficient_confidence_or_source", ""

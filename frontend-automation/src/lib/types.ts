@@ -53,7 +53,10 @@ export type Lead = {
   firstName: string;
   lastName: string;
   companyName: string;
-  linkedinUrl: string;
+  /** Preferred Instagram profile URL. */
+  instagramUrl: string;
+  /** Instagram handle when provided; otherwise use publicIdentifier. */
+  username?: string;
   publicIdentifier: string;
   state: string;
   sheetExportedAt: string | null;
@@ -65,14 +68,16 @@ export type Deal = {
   state: string;
   closingReason: string;
   reason: string;
-  connectAttempts: number;
+  /** Follow attempt count (Instagram follow requests). */
+  followAttempts: number;
   backoffHours: number;
   campaign: { id: number; name: string };
   lead: {
     id: number;
     name: string;
     publicIdentifier: string;
-    linkedinUrl: string;
+    username?: string;
+    instagramUrl: string;
   };
   createdAt: string;
   updatedAt: string;
@@ -133,31 +138,23 @@ export type ActionLog = {
   profile: { id: number; username: string; djangoUser: string };
 };
 
-export type LinkedInProfileItem = {
+export type InstagramProfileItem = {
   id: number;
   userId: number;
   djangoUser: string;
   djangoEmail: string;
-  linkedinUsername: string;
+  username: string;
   active: boolean;
-  subscribeNewsletter: boolean;
-  newsletterProcessed: boolean;
-  legalAccepted: boolean;
-  connectDailyLimit: number;
-  connectWeeklyLimit: number;
-  followUpDailyLimit: number;
+  dmDailyLimit: number;
   hasCookies: boolean;
   createdAt: string | null;
 };
 
-export type LinkedInProfileCreatePayload = {
-  linkedinUsername: string;
-  linkedinPassword: string;
+export type InstagramProfileCreatePayload = {
+  username: string;
+  password: string;
   active?: boolean;
-  subscribeNewsletter?: boolean;
-  connectDailyLimit?: number;
-  connectWeeklyLimit?: number;
-  followUpDailyLimit?: number;
+  dmDailyLimit?: number;
 };
 
 export type SearchKeywordItem = {
@@ -245,6 +242,7 @@ export type GoogleGridCellStyle = {
 
 export type MessagingDiagnostics = {
   connectedDeals: number;
+  qualifiedDeals?: number;
   draftsTotal: number;
   draftsUnapproved: number;
   pendingFollowupTasks: number;
@@ -261,6 +259,7 @@ export type MessagingDiagnostics = {
     publicIdentifier: string;
     fullName: string;
     campaign: string;
+    state?: string;
   }[];
 };
 
@@ -348,7 +347,8 @@ export type FollowupSuggestion = {
 export type SafeModeSettings = {
   enabled: boolean;
   globalPauseOutreach: boolean;
-  pauseNewConnectionInvites: boolean;
+  /** Pause new outreach expansion (discover → qualify → DM drafts). */
+  pauseNewFollows: boolean;
   maxBulkApprove: number;
   maxBulkExport: number;
 };

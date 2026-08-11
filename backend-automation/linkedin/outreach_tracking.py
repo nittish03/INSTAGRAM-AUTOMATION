@@ -70,14 +70,14 @@ def emit_outreach_event(
 def update_deal_inference(deal, source: str, confidence: float) -> None:
     from django.utils import timezone
 
-    deal.connection_assessment_source = (source or "")[:64]
-    deal.connection_assessment_confidence = float(confidence)
-    deal.connection_assessed_at = timezone.now()
+    deal.follow_assessment_source = (source or "")[:64]
+    deal.follow_assessment_confidence = float(confidence)
+    deal.follow_assessed_at = timezone.now()
     deal.save(
         update_fields=[
-            "connection_assessment_source",
-            "connection_assessment_confidence",
-            "connection_assessed_at",
+            "follow_assessment_source",
+            "follow_assessment_confidence",
+            "follow_assessed_at",
         ]
     )
 
@@ -85,25 +85,38 @@ def update_deal_inference(deal, source: str, confidence: float) -> None:
 def lead_sheet_export_verification(lead, *, config_user=None) -> tuple[bool, str, str]:
     """Whether this lead may be written to the business Google Sheet.
 
-    Requires a CONNECTED deal **and** an explicit ``connection_detected`` outreach
-    event whose metadata satisfies confidence rules — never Deal.CONNECTED alone.
+    Eligible when either:
+    - a successful ``message_sent`` outreach event exists (DM-first path), or
+    - a CONNECTED deal **and** an explicit ``follow_back_detected`` event
+      (legacy follow path) whose metadata satisfies confidence rules.
 
     Returns (eligible, reason_code, status_label_for_sheet_column).
     """
     from linkedin.enums import ProfileState
     from linkedin.models import OutreachEvent, SiteConfig
 
+    message_sent = (
+        OutreachEvent.objects.filter(
+            lead=lead,
+            event_type=OutreachEvent.EventType.MESSAGE_SENT,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if message_sent is not None:
+        return True, "message_sent", "Messaged"
+
     if not lead.deal_set.filter(state=ProfileState.CONNECTED).exists():
         return False, "not_connected", ""
 
     cfg = SiteConfig.load(config_user)
     min_api = float(cfg.sheet_export_min_confidence_api)
-    min_after = float(cfg.sheet_export_min_confidence_after_invite)
+    min_after = float(cfg.sheet_export_min_confidence_after_follow)
 
     detects = list(
         OutreachEvent.objects.filter(
             lead=lead,
-            event_type=OutreachEvent.EventType.CONNECTION_DETECTED,
+            event_type=OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
         ).order_by("created_at")
     )
     if not detects:
@@ -114,13 +127,15 @@ def lead_sheet_export_verification(lead, *, config_user=None) -> tuple[bool, str
     src = (meta.get("source") or "").strip()
     conf = float(meta.get("confidence") or 0.0)
 
-    if src == "api_degree_1" and conf >= min_api:
-        return True, "verified_api_first_degree", "Verified (API)"
+    # api_degree_1 kept for backward compat with old OutreachEvent rows
+    high_conf_sources = {"api_follows_viewer", "api_degree_1", "ui_message_button"}
+    if src in high_conf_sources and conf >= min_api:
+        return True, "verified_api_first_degree", "Verified (follow-back)"
 
     invites = list(
         OutreachEvent.objects.filter(
             lead=lead,
-            event_type=OutreachEvent.EventType.INVITE_SENT,
+            event_type=OutreachEvent.EventType.FOLLOW_SENT,
         ).order_by("created_at")
     )
     if not invites:
@@ -130,7 +145,7 @@ def lead_sheet_export_verification(lead, *, config_user=None) -> tuple[bool, str
     if latest.created_at < last_invite_at:
         return False, "detection_before_last_invite", ""
 
-    if conf >= min_after and src == "api_degree_1":
-        return True, "verified_after_invite", "Accepted (post-invite)"
+    if conf >= min_after and src in high_conf_sources:
+        return True, "verified_after_invite", "Accepted (post-follow)"
 
     return False, "insufficient_confidence_or_source", ""

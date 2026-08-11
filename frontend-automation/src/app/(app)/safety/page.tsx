@@ -9,11 +9,11 @@ import type { SafeModeSettings } from "@/lib/types";
 
 const helpText = {
   safeMode:
-    "Adds guardrails to risky bulk actions. It does not stop the daemon by itself; it mainly limits how many items can be approved or exported at once.",
+    "Adds guardrails to risky bulk actions. It does not stop the Instagram worker daemon by itself; it mainly limits how many items can be approved or exported at once.",
   globalPause:
-    "Hard pause for outreach queueing from product workflows. Use this when you want to stop operator-triggered outreach actions broadly.",
+    "Hard pause for outreach queueing from product workflows. Use this when you want to stop operator-triggered DM actions broadly.",
   pauseInvites:
-    "Stops only fresh top-of-funnel connection invites. Pending invite checks, reply checks, follow-ups, and approved message sends can still continue.",
+    "Stops only fresh top-of-funnel outreach expansion (discover → qualify → new DM drafts). Existing drafts, approvals, sends, reply checks, and follow-up bumps can still continue.",
   maxBulkApprove:
     "Maximum number of drafts or retry actions allowed in one bulk operation while safe mode is enabled.",
   maxBulkExport:
@@ -98,19 +98,19 @@ export default function SafetyPage() {
           </div>
           <div className="flex items-start gap-2 text-sm md:col-span-2">
             <input
-              id="pause-new-connection-invites"
+              id="pause-new-follows"
               className="mt-1"
               type="checkbox"
-              checked={settings.pauseNewConnectionInvites}
-              onChange={(e) => setSettings((cur) => (cur ? { ...cur, pauseNewConnectionInvites: e.target.checked } : cur))}
+              checked={settings.pauseNewFollows}
+              onChange={(e) => setSettings((cur) => (cur ? { ...cur, pauseNewFollows: e.target.checked } : cur))}
             />
             <span>
               <span className="inline-flex items-center gap-1.5">
-                <label htmlFor="pause-new-connection-invites">Pause new connection invites</label>
-                <HelpTip label="Pause new connection invites" text={helpText.pauseInvites} />
+                <label htmlFor="pause-new-follows">Pause new outreach</label>
+                <HelpTip label="Pause new outreach" text={helpText.pauseInvites} />
               </span>
               <span className="mt-1 block text-xs text-slate-500">
-                Stops new connection invite expansion while allowing monitoring, replies, follow-ups, and existing pending invite checks to continue.
+                Stops discover → qualify → new DM drafts while allowing existing drafts, approvals, sends, and reply checks to continue.
               </span>
             </span>
           </div>

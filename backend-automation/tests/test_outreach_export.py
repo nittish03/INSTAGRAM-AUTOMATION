@@ -21,7 +21,7 @@ from google_integration.sheet_sync import (
     sync_qualified_lead_to_google_sheet,
 )
 from linkedin.enums import ProfileState
-from linkedin.models import ActionLog, Campaign, LinkedInProfile, OutreachEvent, SiteConfig
+from linkedin.models import ActionLog, Campaign, InstagramProfile, OutreachEvent, SiteConfig
 from linkedin.outreach_tracking import emit_outreach_event, lead_sheet_export_verification
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
@@ -39,7 +39,7 @@ class OutreachExportGateTests(TestCase):
             first_name="A",
             last_name="B",
             company_name="Co",
-            linkedin_url="https://www.linkedin.com/in/ab/",
+            instagram_url="https://www.instagram.com/ab/",
             public_identifier="ab",
             profile_data={"headline": "Dev"},
         )
@@ -56,11 +56,11 @@ class OutreachExportGateTests(TestCase):
 
     def test_api_degree_event_eligible_without_invite(self):
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
         ok, reason, label = lead_sheet_export_verification(self.lead)
         self.assertTrue(ok)
@@ -86,7 +86,7 @@ class OutreachExportGateTests(TestCase):
 
     def test_ui_only_without_invite_not_eligible(self):
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
@@ -98,14 +98,14 @@ class OutreachExportGateTests(TestCase):
 
     def test_ui_after_invite_not_export_grade(self):
         emit_outreach_event(
-            OutreachEvent.EventType.INVITE_SENT,
+            OutreachEvent.EventType.FOLLOW_SENT,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
             metadata={},
         )
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
@@ -137,11 +137,11 @@ class OutreachExportGateTests(TestCase):
 
         self.assertFalse(sync_lead_to_google_sheet(self.lead))
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
         self.assertTrue(sync_lead_to_google_sheet(self.lead))
         self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
@@ -168,11 +168,11 @@ class OutreachExportGateTests(TestCase):
         self.lead.profile_data = None
         self.lead.save(update_fields=["profile_data"])
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         mock_resolve.return_value = self.user
@@ -207,7 +207,7 @@ class OutreachExportGateTests(TestCase):
         mock_resolve.return_value = self.user
         mock_get_values.return_value = []
 
-        self.assertTrue(sync_pending_lead_to_google_sheet(self.lead, reason_code="invite_sent"))
+        self.assertTrue(sync_pending_lead_to_google_sheet(self.lead, reason_code="follow_sent"))
         self.assertEqual(mock_update.call_args.args[2], "Sheet1!A2:J2")
         written_row = mock_update.call_args.args[3][0]
         self.assertEqual(written_row[4], "FALSE")
@@ -234,11 +234,11 @@ class OutreachExportGateTests(TestCase):
         self.cfg.google_sheet_sync_user = self.user
         self.cfg.save()
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         mock_resolve.return_value = self.user
@@ -246,7 +246,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Pending", "Follow up-1"],
+                ["A B", "Co", "Dev", self.lead.instagram_url, "TRUE", "Pending", "Follow up-1"],
             ],
         ]
 
@@ -274,11 +274,11 @@ class OutreachExportGateTests(TestCase):
         self.cfg.google_sheet_sync_user = self.user
         self.cfg.save()
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         mock_resolve.return_value = self.user
@@ -286,7 +286,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Pending", "Follow up-1", "Needs review"],
+                ["A B", "Co", "Dev", self.lead.instagram_url, "TRUE", "Pending", "Follow up-1", "Needs review"],
             ],
         ]
 
@@ -351,7 +351,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Connected", "Follow up-2"],
+                ["A B", "Co", "Dev", self.lead.instagram_url, "TRUE", "Connected", "Follow up-2"],
             ],
         ]
 
@@ -390,7 +390,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Connected", "Follow up-2"],
+                ["A B", "Co", "Dev", self.lead.instagram_url, "TRUE", "Connected", "Follow up-2"],
             ],
         ]
 
@@ -423,11 +423,11 @@ class OutreachExportGateTests(TestCase):
         self.lead.sheet_exported_at = timezone.now()
         self.lead.save(update_fields=["sheet_exported_at"])
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         mock_resolve.return_value = self.user
@@ -435,7 +435,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["A B", "Co", "Dev", self.lead.linkedin_url, "TRUE", "Pending", "Follow up-1"],
+                ["A B", "Co", "Dev", self.lead.instagram_url, "TRUE", "Pending", "Follow up-1"],
             ],
         ]
 
@@ -451,7 +451,7 @@ class OutreachExportGateTests(TestCase):
     @patch("google_integration.sheet_sync.update_values")
     @patch("google_integration.sheet_sync.get_values")
     @patch("google_integration.sheet_sync.resolve_google_sync_user")
-    def test_sheet_row_match_uses_linkedin_column_not_substring(
+    def test_sheet_row_match_uses_instagram_column_not_substring(
         self, mock_resolve, mock_get_values, mock_update, mock_append
     ):
         GoogleAccount.objects.create(
@@ -464,11 +464,11 @@ class OutreachExportGateTests(TestCase):
         self.cfg.google_sheet_sync_user = self.user
         self.cfg.save()
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         mock_resolve.return_value = self.user
@@ -476,7 +476,7 @@ class OutreachExportGateTests(TestCase):
             [SHEET_HEADER],
             [
                 SHEET_HEADER,
-                ["AB Adjacent", "Co", "Dev", "https://www.linkedin.com/in/not-ab/", "TRUE", "Pending"],
+                ["AB Adjacent", "Co", "Dev", "https://www.instagram.com/not-ab/", "TRUE", "Pending"],
             ],
             [["Name"], ["AB Adjacent"]],
         ]
@@ -502,18 +502,18 @@ class OutreachExportGateTests(TestCase):
         self.cfg.google_sheet_sync_user = self.user
         self.cfg.save()
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             lead=self.lead,
             deal=self.deal,
             campaign=self.campaign,
-            metadata={"source": "api_degree_1", "confidence": 0.95},
+            metadata={"source": "api_follows_viewer", "confidence": 0.95},
         )
 
         rows_with_gap = [
             SHEET_HEADER,
-            ["Existing", "Co", "Dev", "https://www.linkedin.com/in/existing/", "TRUE", "Connected"],
+            ["Existing", "Co", "Dev", "https://www.instagram.com/existing/", "TRUE", "Connected"],
             [],
-            ["Later", "Co", "Dev", "https://www.linkedin.com/in/later/", "TRUE", "Connected"],
+            ["Later", "Co", "Dev", "https://www.instagram.com/later/", "TRUE", "Connected"],
         ]
         mock_resolve.return_value = self.user
         mock_get_values.side_effect = [[SHEET_HEADER], rows_with_gap, rows_with_gap]
@@ -538,7 +538,7 @@ class MessagedLeadExportTests(TestCase):
             first_name="M",
             last_name="Sent",
             company_name="Co",
-            linkedin_url="https://www.linkedin.com/in/msent/",
+            instagram_url="https://www.instagram.com/msent/",
             public_identifier="msent",
             profile_data={"headline": "PM"},
         )
@@ -547,9 +547,9 @@ class MessagedLeadExportTests(TestCase):
             campaign=self.campaign,
             state=ProfileState.CONNECTED.value,
         )
-        self.profile = LinkedInProfile.objects.create(user=self.owner, active=True)
+        self.profile = InstagramProfile.objects.create(user=self.owner, active=True)
         ActionLog.objects.create(
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             campaign=self.campaign,
             action_type=ActionLog.ActionType.FOLLOW_UP,
             target_public_id="msent",
@@ -597,12 +597,12 @@ class MessagedLeadExportTests(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Following up on our chat.",
-            linkedin_urn="draft_send",
+            instagram_message_id="draft_send",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.owner,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         task = MagicMock(
             payload={
@@ -615,7 +615,7 @@ class MessagedLeadExportTests(TestCase):
         session = MagicMock()
         session.campaign = self.campaign
         session.django_user = self.owner
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
 
         handle_send_message(task, session)
 

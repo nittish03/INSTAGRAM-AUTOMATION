@@ -2,26 +2,28 @@
 .PHONY: help attach test docker-test stop build up up-view install setup run admin view
 
 help:
+	@echo "Leadway Instagram backend (Eshway webdev + agency collab)"
+	@echo "Messaging skill is DM-copy only — see skills/eshway_client_outreach_skill.md"
 	@perl -nle'print $& if m{^[a-zA-Z_-]+:.*?## .*$$}' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
 
 install: ## install all Python dependencies (local dev)
 	pip install uv 2>/dev/null || true
 	uv pip install -r requirements/local.txt
 
-setup: install ## install deps + Playwright browsers + migrate + bootstrap CRM
+setup: install ## install deps + Playwright + migrate (Instagram schema) + CRM seed
 	playwright install --with-deps chromium
 	python manage.py migrate --no-input
 	python manage.py setup_crm
 
-run: ## run the daemon
+run: ## run the Instagram automation daemon (rundaemon)
 	python manage.py rundaemon
 
 test: ## run the test suite
 	.venv/bin/pytest
 
-admin: ## start the Django Admin web server
+admin: ## start the Django Admin / API web server
 	@echo ""
-	@echo "  Django Admin: http://localhost:8000/admin/"
+	@echo "  Leadway API/Admin: http://localhost:8000/admin/"
 	@echo "  No superuser yet? Run: python manage.py createsuperuser"
 	@echo ""
 	python manage.py runserver

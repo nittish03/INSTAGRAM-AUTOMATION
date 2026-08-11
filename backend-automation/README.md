@@ -1,105 +1,50 @@
-# Leadway: B2B LinkedIn Outreach System
+# Leadway / Eshway: Instagram Outreach Automation
 
-Leadway is a system for automated LinkedIn outreach, integrating lead discovery, qualification, and messaging into a unified CRM pipeline.
+Instagram outreach system for Eshway — lead discovery, qualification, follow + HITL DMs — Django + Playwright daemon.
 
-## System Components
+## What it does
 
-1.  **Lead Scoring Pipeline**: Uses Gaussian Process Regression and Large Language Model (LLM) integration to qualify leads based on profile data and campaign objectives.
-2.  **Automation Engine**: A Playwright-based background worker that executes LinkedIn actions (profile visits, connection requests, messaging) at scheduled intervals.
-3.  **CRM Dashboard**: An Unfold-powered Django administration interface for managing campaigns, monitoring lead states, and approving message drafts.
+1. **Discovery** — Instagram search / hashtags → enrich profiles → lead pool
+2. **Qualification** — ML + LLM gate for website-dev clients and agency collaborations
+3. **Follow** — conservative follow pacing with rate limits / active hours
+4. **Follow-back check** — detect Message availability / follow-back
+5. **Messaging (HITL)** — draft DMs with the Eshway outreach messaging skill → operator approve → send
+6. **Reply sync + follow-ups** — reply_check / follow_up task loop
 
-## Setup Instructions
-
-### 1. Installation
-Requires Python 3.10+ (recommended: Python 3.12) and Playwright.
+## Setup
 
 ```bash
-# Setup virtual environment (important: use Python 3.10+)
 python3.12 -m venv .venv
 source .venv/bin/activate
-
-# Install dependencies (use python -m pip to guarantee venv pip)
-python -m pip install --upgrade pip
 python -m pip install -r requirements/local.txt
 playwright install chromium
-```
 
-### 2. Environment
-Supabase is mandatory (no SQLite fallback).
-
-Create `.env` in project root:
-
-```bash
-SUPABASE_URL=postgresql://<user>:<url_encoded_password>@<host>:5432/postgres?sslmode=require
-DEBUG=true
-ALLOWED_HOSTS=127.0.0.1,localhost
-
-# Bot pacing and quota guardrails. Defaults to true when omitted.
-# Set false only when you intentionally want no local active-hour window,
-# daemon runtime cap, outreach cooldown, profile quota, or human-like delay.
-BOT_TIME_LIMITS_ENABLED=true
-
-# Google Workspace integration (optional, enables /admin/google/ Sheets workspace)
-GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
-GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
-GOOGLE_REDIRECT_BASE=http://127.0.0.1:8000
-```
-
-### Google Workspace (Sheets) setup
-1. Create OAuth credentials in Google Cloud Console (type: Web application).
-2. Add authorized redirect URI: `http://127.0.0.1:8000/admin/google/auth/callback/`.
-3. Enable APIs: **Google Sheets API** and **Google Drive API**.
-4. Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
-5. Visit `http://127.0.0.1:8000/admin/google/` and click "Continue with Google".
-
-### 3. Initialization
-```bash
-# Database setup
+# .env must include SUPABASE_URL (Postgres), optional GOOGLE_* and LEADPILOT_ENCRYPTION_KEY
 python manage.py migrate
 python manage.py setup_crm
-
-# Create administration user
 python manage.py createsuperuser
 ```
 
-### 4. Execution
-The system requires two processes to run concurrently:
+## Run
 
-**Dashboard (UI):**
 ```bash
+# API / admin
 python manage.py runserver
-```
 
-**Automation Daemon (Worker):**
-```bash
+# Automation worker
 python manage.py rundaemon
 ```
 
-## Security and Configuration
+## Instagram API surface (frontend)
 
-- **Encryption**: Sensitive credentials (LinkedIn passwords, API keys) are encrypted using Fernet (AES). The `LEADPILOT_ENCRYPTION_KEY` environment variable must be set in production.
-- **Rate Limits**: Connection and follow-up limits are configured per LinkedIn profile via the administration dashboard.
-- **Bot Time Limits**: `BOT_TIME_LIMITS_ENABLED=false` disables local bot pacing and caps: active hours/rest days, daemon runtime cap, recent outreach cooldown, profile daily/weekly quotas, connect/follow-up pacing, enrichment sleeps, and human-like typing/browser delays. Browser/network timeouts and external provider/platform retry waits remain in place to avoid stuck sessions and tight failure loops.
-- **Active Hours**: When bot time limits are enabled, the system respects `ACTIVE_START_HOUR` and `ACTIVE_END_HOUR` settings to mimic human operating windows.
+- `GET|POST /api/instagram-profiles/`
+- `DELETE /api/instagram-profiles/<id>/`
+- `POST /api/instagram-profiles/<id>/toggle/`
+- Leads expose `instagramUrl` + `username` (`publicIdentifier`)
+- Drafts / approve / regenerate remain under `/api/messages/...`
 
-## Operational Workflow (HitL)
+## Notes
 
-1.  **Lead Discovery**: System identifies potential prospects and adds them to the database.
-2.  **Qualification**: Lead profiles are scored and transitioned to the `QUALIFIED` state if they match campaign criteria.
-3.  **Connection**: System dispatches connection requests. Once accepted, the deal transitions to `CONNECTED`.
-4.  **Messaging (Human-In-The-Loop)**: System generates a personalized message draft.
-5.  **Approval**: Operators review drafts in the dashboard and trigger dispatch.
-
-
-python3 -m venv .venv
-source .venv/bin/activate
-python -V
-
-pip install --upgrade pip
-pip install -r requirements/local.txt
-playwright install chromium
-
-python3 manage.py migrate
-python3 manage.py setup_crm
-python3 manage.py createsuperuser
-python3 manage.py check
+- Django app package remains `linkedin/` internally; product language and automation are Instagram.
+- DMs are **never** auto-sent — HITL approval required.
+- Instagram UI selectors are fragile; see TODOs in `linkedin/actions/` and `linkedin/browser/`.

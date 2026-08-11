@@ -1,7 +1,7 @@
-"""Re-enqueue follow_up tasks for every CONNECTED Deal that has no draft / send_message task.
+"""Re-enqueue follow_up tasks for QUALIFIED/CONNECTED Deals missing drafts.
 
-Run this once after pulling the messaging fix to backfill any leads that connected before
-the auto-enqueue signal was added. Safe to run repeatedly (idempotent dedup).
+DM-first: drafts are created for Qualified leads without requiring Follow.
+Safe to run repeatedly (idempotent dedup).
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Backfill follow_up tasks for CONNECTED leads missing drafts."
+    help = "Backfill follow_up tasks for Qualified/Connected leads missing drafts."
 
     def handle(self, *args, **options):
         from chat.models import ChatMessage
@@ -22,12 +22,14 @@ class Command(BaseCommand):
         from linkedin.tasks.connect import enqueue_follow_up
 
         deals = (
-            Deal.objects.filter(state=ProfileState.CONNECTED)
+            Deal.objects.filter(
+                state__in=[ProfileState.QUALIFIED, ProfileState.CONNECTED]
+            )
             .select_related("lead", "campaign")
         )
 
         if not deals.exists():
-            self.stdout.write("No CONNECTED deals — nothing to heal.")
+            self.stdout.write("No Qualified/Connected deals — nothing to heal.")
             return
 
         enqueued = 0

@@ -34,7 +34,7 @@ def _latest_real_message(lead: Lead, *, owner, is_outgoing: bool) -> ChatMessage
             is_draft=False,
             is_outgoing=is_outgoing,
         )
-        .exclude(linkedin_urn__startswith="draft_")
+        .exclude(instagram_message_id__startswith="draft_")
         .order_by("-creation_date", "-id")
         .first()
     )

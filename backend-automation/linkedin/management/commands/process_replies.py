@@ -14,7 +14,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--handle",
             default=None,
-            help="Django username for the LinkedIn account to use. Defaults to first active profile.",
+            help="Django username for the Instagram account to use. Defaults to first active profile.",
         )
         parser.add_argument(
             "--campaign-id",
@@ -25,7 +25,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--public-id",
             default="",
-            help="Only process one LinkedIn public identifier.",
+            help="Only process one Instagram public identifier.",
         )
         parser.add_argument(
             "--limit",
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             "--dry-run",
             action="store_true",
             help=(
-                "Sync LinkedIn conversations and report what would be accelerated, "
+                "Sync Instagram conversations and report what would be accelerated, "
                 "but do not move or create follow-up tasks."
             ),
         )
@@ -48,9 +48,9 @@ class Command(BaseCommand):
         from linkedin.enums import ProfileState
         from linkedin.services.reply_backfill import process_replied_deal
 
-        linkedin_profile = resolve_profile(options["handle"])
-        if linkedin_profile is None:
-            raise CommandError("No active LinkedInProfile found.")
+        instagram_profile = resolve_profile(options["handle"])
+        if instagram_profile is None:
+            raise CommandError("No active InstagramProfile found.")
 
         qs = (
             Deal.objects.filter(state=ProfileState.CONNECTED.value)
@@ -71,7 +71,7 @@ class Command(BaseCommand):
             self.stdout.write("No matching CONNECTED deals found.")
             return
 
-        session = get_or_create_session(linkedin_profile)
+        session = get_or_create_session(instagram_profile)
         accelerated = skipped = failed = 0
         try:
             for deal in deals:

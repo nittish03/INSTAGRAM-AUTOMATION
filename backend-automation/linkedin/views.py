@@ -17,7 +17,7 @@ from chat.models import ChatMessage
 from crm.models.deal import Deal
 from crm.models.lead import Lead
 from linkedin.enums import ProfileState
-from linkedin.models import ActionLog, Campaign, LinkedInProfile, Task
+from linkedin.models import ActionLog, Campaign, InstagramProfile, Task
 from linkedin.services.product_workbench import (
     campaign_health,
     export_preview,
@@ -47,9 +47,9 @@ def _message_context_payload(message: ChatMessage | None) -> dict | None:
     }
 
 
-def _message_profile_for_user(user) -> LinkedInProfile | None:
+def _message_profile_for_user(user) -> InstagramProfile | None:
     return (
-        LinkedInProfile.objects.filter(user=user, active=True)
+        InstagramProfile.objects.filter(user=user, active=True)
         .order_by("-created_at", "id")
         .first()
     )
@@ -59,25 +59,25 @@ def _latest_conversation_message_payload(
     content_type_id: int,
     object_id: int,
     owner_id: int | None,
-    linkedin_profile_id: int | None,
+    instagram_profile_id: int | None,
 ) -> dict | None:
     latest_message = (
         ChatMessage.objects.filter(
             content_type_id=content_type_id,
             object_id=object_id,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
             is_draft=False,
         )
-        .exclude(linkedin_urn__startswith="draft_")
+        .exclude(instagram_message_id__startswith="draft_")
         .order_by("-creation_date", "-id")
         .first()
     )
     return _message_context_payload(latest_message)
 
 
-def _connected_unapproved_draft_qs(profile: LinkedInProfile | None):
-    """Drafts visible/approvable in the app: only leads connected in this campaign."""
+def _outreach_unapproved_draft_qs(profile: InstagramProfile | None):
+    """Drafts visible/approvable: Qualified or Connected deals in this campaign (DM-first)."""
     from django.contrib.contenttypes.models import ContentType
     from django.db.models import Exists, OuterRef
 
@@ -85,24 +85,27 @@ def _connected_unapproved_draft_qs(profile: LinkedInProfile | None):
         return ChatMessage.objects.none()
 
     lead_ct = ContentType.objects.get_for_model(Lead)
-    connected_deal = Deal.objects.filter(
+    eligible_deal = Deal.objects.filter(
         lead_id=OuterRef("object_id"),
         campaign_id=OuterRef("campaign_id"),
-        state=ProfileState.CONNECTED.value,
-        connection_assessment_source="api_degree_1",
+        state__in=[ProfileState.QUALIFIED.value, ProfileState.CONNECTED.value],
         campaign__users=profile.user,
     )
     return (
         ChatMessage.objects.filter(
             owner=profile.user,
-            linkedin_profile=profile,
+            instagram_profile=profile,
             content_type=lead_ct,
             is_draft=True,
             is_approved=False,
         )
-        .annotate(_has_connected_deal=Exists(connected_deal))
-        .filter(_has_connected_deal=True)
+        .annotate(_has_eligible_deal=Exists(eligible_deal))
+        .filter(_has_eligible_deal=True)
     )
+
+
+# Backward-compatible alias used by older call sites / tests.
+_connected_unapproved_draft_qs = _outreach_unapproved_draft_qs
 
 
 def dashboard_callback(request, context):
@@ -158,7 +161,7 @@ def dashboard_callback(request, context):
     acceptance_rate = (connected / (connected + pending + failed) * 100) if (connected + pending + failed) > 0 else 0
     conversion_rate = (completed / total_pipeline * 100) if total_pipeline > 0 else 0
 
-    active_profile = LinkedInProfile.objects.filter(active=True).first()
+    active_profile = InstagramProfile.objects.filter(active=True).first()
 
     google_status = "Disconnected"
     google_email = ""
@@ -671,7 +674,8 @@ def api_leads(request):
             "firstName": l.first_name,
             "lastName": l.last_name,
             "companyName": l.company_name,
-            "linkedinUrl": l.linkedin_url,
+            "instagramUrl": l.instagram_url,
+            "username": l.public_identifier,
             "publicIdentifier": l.public_identifier,
             "state": getattr(l, "current_state", None) or "UNQUALIFIED",
             "sheetExportedAt": l.sheet_exported_at.isoformat() if l.sheet_exported_at else None,
@@ -717,14 +721,15 @@ def api_deals(request):
             "state": d.state,
             "closingReason": d.closing_reason,
             "reason": d.reason,
-            "connectAttempts": d.connect_attempts,
+            "followAttempts": d.follow_attempts,
             "backoffHours": d.backoff_hours,
             "campaign": {"id": d.campaign_id, "name": d.campaign.name},
             "lead": {
                 "id": d.lead_id,
                 "name": f"{d.lead.first_name} {d.lead.last_name}".strip() or d.lead.public_identifier,
                 "publicIdentifier": d.lead.public_identifier,
-                "linkedinUrl": d.lead.linkedin_url,
+                "username": d.lead.public_identifier,
+                "instagramUrl": d.lead.instagram_url,
             },
             "createdAt": d.creation_date.isoformat(),
             "updatedAt": d.update_date.isoformat(),
@@ -786,7 +791,7 @@ def api_message_drafts(request):
     message_profile = _message_profile_for_user(request.user)
     qs = (
         _connected_unapproved_draft_qs(message_profile)
-        .select_related("campaign", "owner", "linkedin_profile")
+        .select_related("campaign", "owner", "instagram_profile")
         .order_by("-creation_date")
     )
 
@@ -802,10 +807,10 @@ def api_message_drafts(request):
                 content_type_id=content_type_id,
                 object_id__in=object_ids,
                 owner_id=owner_id,
-                linkedin_profile=message_profile,
+                instagram_profile=message_profile,
                 is_draft=False,
             )
-            .exclude(linkedin_urn__startswith="draft_")
+            .exclude(instagram_message_id__startswith="draft_")
             .order_by("content_type_id", "object_id", "-creation_date", "-id")
         )
         for message in latest_messages:
@@ -851,22 +856,22 @@ def api_action_logs(request):
     profile_id = request.GET.get("profileId")
     campaign_id = request.GET.get("campaignId")
 
-    qs = ActionLog.objects.select_related("linkedin_profile", "linkedin_profile__user", "campaign").order_by("-created_at")
+    qs = ActionLog.objects.select_related("instagram_profile", "instagram_profile__user", "campaign").order_by("-created_at")
     if search:
         qs = qs.filter(
             Q(target_name__icontains=search)
             | Q(target_public_id__icontains=search)
             | Q(note__icontains=search)
             | Q(campaign__name__icontains=search)
-            | Q(linkedin_profile__linkedin_username__icontains=search)
-            | Q(linkedin_profile__user__username__icontains=search)
+            | Q(instagram_profile__instagram_username__icontains=search)
+            | Q(instagram_profile__user__username__icontains=search)
         )
     if action_type:
         qs = qs.filter(action_type=action_type)
     if status:
         qs = qs.filter(status=status)
     if profile_id:
-        qs = qs.filter(linkedin_profile_id=profile_id)
+        qs = qs.filter(instagram_profile_id=profile_id)
     if campaign_id:
         qs = qs.filter(campaign_id=campaign_id)
 
@@ -884,9 +889,9 @@ def api_action_logs(request):
             "createdAt": a.created_at.isoformat(),
             "campaign": {"id": a.campaign_id, "name": a.campaign.name if a.campaign else ""},
             "profile": {
-                "id": a.linkedin_profile_id,
-                "username": a.linkedin_profile.linkedin_username if a.linkedin_profile else "",
-                "djangoUser": a.linkedin_profile.user.username if a.linkedin_profile and a.linkedin_profile.user else "",
+                "id": a.instagram_profile_id,
+                "username": a.instagram_profile.instagram_username if a.instagram_profile else "",
+                "djangoUser": a.instagram_profile.user.username if a.instagram_profile and a.instagram_profile.user else "",
             },
         }
         for a in rows
@@ -894,20 +899,22 @@ def api_action_logs(request):
     return JsonResponse({"ok": True, "items": items, "pagination": {"page": page, "pageSize": page_size, "total": total}})
 
 
-def _serialize_linkedin_profile(p: LinkedInProfile) -> dict:
+def _serialize_instagram_profile(p: InstagramProfile) -> dict:
     return {
         "id": p.id,
         "userId": p.user_id,
         "djangoUser": p.user.username,
         "djangoEmail": p.user.email,
-        "linkedinUsername": p.linkedin_username,
+        "username": p.instagram_username,
+        "instagramUsername": p.instagram_username,
         "active": p.active,
         "subscribeNewsletter": p.subscribe_newsletter,
         "newsletterProcessed": p.newsletter_processed,
         "legalAccepted": p.legal_accepted,
-        "connectDailyLimit": p.connect_daily_limit,
-        "connectWeeklyLimit": p.connect_weekly_limit,
+        "followDailyLimit": p.follow_daily_limit,
+        "followWeeklyLimit": p.follow_weekly_limit,
         "followUpDailyLimit": p.follow_up_daily_limit,
+        "dmDailyLimit": p.follow_up_daily_limit,
         "hasCookies": bool(p.cookie_data),
         "createdAt": p.created_at.isoformat() if p.created_at else None,
     }
@@ -916,23 +923,23 @@ def _serialize_linkedin_profile(p: LinkedInProfile) -> dict:
 def _owned_profile_qs(user):
     """Profiles owned by the requesting Django user.
 
-    Each admin/superadmin only sees and manages the LinkedIn accounts they have
+    Each admin/superadmin only sees and manages the Instagram accounts they have
     personally connected — never another admin's accounts.
     """
     return (
-        LinkedInProfile.objects.filter(user=user)
+        InstagramProfile.objects.filter(user=user)
         .select_related("user")
-        .order_by("-created_at", "linkedin_username")
+        .order_by("-created_at", "instagram_username")
     )
 
 
 @login_required
 @require_http_methods(["GET", "POST"])
-def api_linkedin_profiles(request):
+def api_instagram_profiles(request):
     if request.method == "POST":
-        return _api_linkedin_profile_create(request)
+        return _api_instagram_profile_create(request)
 
-    items = [_serialize_linkedin_profile(p) for p in _owned_profile_qs(request.user)]
+    items = [_serialize_instagram_profile(p) for p in _owned_profile_qs(request.user)]
     return JsonResponse({"ok": True, "items": items})
 
 
@@ -948,12 +955,14 @@ def _coerce_positive_int(value, default: int, *, max_value: int) -> int:
     return min(n, max_value)
 
 
-def _api_linkedin_profile_create(request):
-    """Create a LinkedIn profile owned by ``request.user``.
+def _api_instagram_profile_create(request):
+    """Create an Instagram profile owned by ``request.user``.
 
     Always attributes the profile to the logged-in user — never accepts a
     ``userId`` from the client. Enforces case-insensitive uniqueness within the
-    same Django user via the ``uniq_linkedinprofile_user_username`` constraint.
+    same Django user via the ``uniq_instagramprofile_user_username`` constraint.
+
+    Accepts Instagram-shaped keys (``username`` / ``instagramUsername``).
     """
     import json as _json
 
@@ -962,69 +971,88 @@ def _api_linkedin_profile_create(request):
     except _json.JSONDecodeError:
         return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
 
-    linkedin_username = (payload.get("linkedinUsername") or "").strip()
-    linkedin_password = payload.get("linkedinPassword") or ""
+    instagram_username = (
+        payload.get("instagramUsername")
+        or payload.get("username")
+        or ""
+    )
+    instagram_username = str(instagram_username).strip()
+    instagram_password = (
+        payload.get("instagramPassword")
+        or payload.get("password")
+        or ""
+    )
 
-    if not linkedin_username:
+    if not instagram_username:
         return JsonResponse(
-            {"ok": False, "error": "linkedinUsername is required"}, status=400
+            {"ok": False, "error": "instagramUsername (or username) is required"},
+            status=400,
         )
-    if not linkedin_password:
+    if not instagram_password:
         return JsonResponse(
-            {"ok": False, "error": "linkedinPassword is required"}, status=400
+            {"ok": False, "error": "instagramPassword (or password) is required"},
+            status=400,
         )
 
-    if LinkedInProfile.objects.filter(
-        user=request.user, linkedin_username__iexact=linkedin_username
+    if InstagramProfile.objects.filter(
+        user=request.user, instagram_username__iexact=instagram_username
     ).exists():
         return JsonResponse(
             {
                 "ok": False,
-                "error": "You already have a LinkedIn profile with this username.",
+                "error": "You already have an Instagram profile with this username.",
             },
             status=409,
         )
 
     active = bool(payload.get("active", True))
     subscribe_newsletter = bool(payload.get("subscribeNewsletter", True))
-    connect_daily = _coerce_positive_int(
-        payload.get("connectDailyLimit"), default=35, max_value=500
+    # Follow limits are unused (DM-only product). Keep accepting optional payload
+    # keys for backward compatibility; otherwise use model field defaults.
+    follow_daily = _coerce_positive_int(
+        payload.get("followDailyLimit", payload.get("connectDailyLimit")),
+        default=InstagramProfile._meta.get_field("follow_daily_limit").default,
+        max_value=200,
     )
-    connect_weekly = _coerce_positive_int(
-        payload.get("connectWeeklyLimit"), default=175, max_value=2000
+    follow_weekly = _coerce_positive_int(
+        payload.get("followWeeklyLimit", payload.get("connectWeeklyLimit")),
+        default=InstagramProfile._meta.get_field("follow_weekly_limit").default,
+        max_value=500,
     )
     follow_up_daily = _coerce_positive_int(
-        payload.get("followUpDailyLimit"), default=25, max_value=500
+        payload.get("followUpDailyLimit", payload.get("dmDailyLimit")),
+        default=InstagramProfile._meta.get_field("follow_up_daily_limit").default,
+        max_value=200,
     )
 
     try:
-        profile = LinkedInProfile.objects.create(
+        profile = InstagramProfile.objects.create(
             user=request.user,
-            linkedin_username=linkedin_username,
-            linkedin_password=linkedin_password,
+            instagram_username=instagram_username,
+            instagram_password=instagram_password,
             active=active,
             subscribe_newsletter=subscribe_newsletter,
-            connect_daily_limit=connect_daily,
-            connect_weekly_limit=connect_weekly,
+            follow_daily_limit=follow_daily,
+            follow_weekly_limit=follow_weekly,
             follow_up_daily_limit=follow_up_daily,
         )
     except Exception:
-        logger.exception("Failed to create LinkedIn profile for user %s", request.user)
+        logger.exception("Failed to create Instagram profile for user %s", request.user)
         return JsonResponse(
-            {"ok": False, "error": "Failed to create LinkedIn profile"},
+            {"ok": False, "error": "Failed to create Instagram profile"},
             status=500,
         )
 
     return JsonResponse(
-        {"ok": True, "item": _serialize_linkedin_profile(profile)}, status=201
+        {"ok": True, "item": _serialize_instagram_profile(profile)}, status=201
     )
 
 
 def _get_owned_profile_or_error(request, profile_id: int):
     """Return (profile, None) when the user owns it, else (None, JsonResponse)."""
     try:
-        profile = LinkedInProfile.objects.select_related("user").get(pk=profile_id)
-    except LinkedInProfile.DoesNotExist:
+        profile = InstagramProfile.objects.select_related("user").get(pk=profile_id)
+    except InstagramProfile.DoesNotExist:
         return None, JsonResponse(
             {"ok": False, "error": "Profile not found"}, status=404
         )
@@ -1039,7 +1067,7 @@ def _get_owned_profile_or_error(request, profile_id: int):
 
 @login_required
 @require_http_methods(["POST"])
-def api_linkedin_profile_toggle(request, profile_id: int):
+def api_instagram_profile_toggle(request, profile_id: int):
     profile, error = _get_owned_profile_or_error(request, profile_id)
     if error is not None:
         return error
@@ -1051,7 +1079,7 @@ def api_linkedin_profile_toggle(request, profile_id: int):
 
 @login_required
 @require_http_methods(["DELETE"])
-def api_linkedin_profile_delete(request, profile_id: int):
+def api_instagram_profile_delete(request, profile_id: int):
     profile, error = _get_owned_profile_or_error(request, profile_id)
     if error is not None:
         return error
@@ -1366,7 +1394,7 @@ def api_analytics(request):
 @login_required
 @require_GET
 def api_messaging_diagnostics(request):
-    """Snapshot of HITL messaging health: connected deals vs drafts vs queued tasks."""
+    """Snapshot of HITL messaging health: draft-eligible deals vs drafts vs queued tasks."""
     from crm.models import Deal
     from django.utils import timezone
     from linkedin.enums import ProfileState
@@ -1376,13 +1404,14 @@ def api_messaging_diagnostics(request):
     cfg = SiteConfig.load(request.user)
     message_profile = _message_profile_for_user(request.user)
 
-    connected_qs = Deal.objects.none()
+    draftable_qs = Deal.objects.none()
     if message_profile is not None:
-        connected_qs = Deal.objects.filter(
-            state=ProfileState.CONNECTED,
+        draftable_qs = Deal.objects.filter(
+            state__in=[ProfileState.QUALIFIED, ProfileState.CONNECTED],
             campaign__users=message_profile.user,
         ).select_related("lead", "campaign")
-    connected_count = connected_qs.count()
+    connected_count = draftable_qs.filter(state=ProfileState.CONNECTED).count()
+    qualified_count = draftable_qs.filter(state=ProfileState.QUALIFIED).count()
 
     visible_drafts = _connected_unapproved_draft_qs(message_profile)
     drafts_total = visible_drafts.count()
@@ -1404,9 +1433,9 @@ def api_messaging_diagnostics(request):
         payload__owner_id=request.user.pk,
     )
     if message_profile is not None:
-        pending_followup_qs = pending_followup_qs.filter(payload__linkedin_profile_id=message_profile.pk)
-        failed_followup_qs = failed_followup_qs.filter(payload__linkedin_profile_id=message_profile.pk)
-        pending_send_qs = pending_send_qs.filter(payload__linkedin_profile_id=message_profile.pk)
+        pending_followup_qs = pending_followup_qs.filter(payload__instagram_profile_id=message_profile.pk)
+        failed_followup_qs = failed_followup_qs.filter(payload__instagram_profile_id=message_profile.pk)
+        pending_send_qs = pending_send_qs.filter(payload__instagram_profile_id=message_profile.pk)
 
     # The card is for future scheduled follow-ups. Overdue pending tasks are
     # internal ready-to-run queue rows and should not inflate the user-facing
@@ -1423,7 +1452,7 @@ def api_messaging_diagnostics(request):
     )
 
     leads_without_draft = []
-    for deal in connected_qs[:200]:
+    for deal in draftable_qs[:200]:
         lead = deal.lead
         if not lead or not lead.public_identifier:
             continue
@@ -1436,6 +1465,7 @@ def api_messaging_diagnostics(request):
                 "publicIdentifier": lead.public_identifier,
                 "fullName": f"{lead.first_name} {lead.last_name}".strip() or lead.public_identifier,
                 "campaign": deal.campaign.name if deal.campaign_id else "",
+                "state": deal.state,
             })
 
     llm_ok, _ = validate_llm_site_config(cfg)
@@ -1444,6 +1474,7 @@ def api_messaging_diagnostics(request):
         "ok": True,
         "diagnostics": {
             "connectedDeals": connected_count,
+            "qualifiedDeals": qualified_count,
             "draftsTotal": drafts_total,
             "draftsUnapproved": drafts_unapproved,
             "pendingFollowupTasks": pending_followups,
@@ -1467,7 +1498,7 @@ def api_messaging_diagnostics(request):
 @login_required
 @require_http_methods(["POST"])
 def api_messaging_heal(request):
-    """Backfill FOLLOW_UP tasks for CONNECTED deals lacking drafts/queued tasks."""
+    """Backfill FOLLOW_UP tasks for QUALIFIED/CONNECTED deals lacking drafts/queued tasks."""
     import random as _random
     from chat.models import ChatMessage
     from django.contrib.contenttypes.models import ContentType
@@ -1479,7 +1510,7 @@ def api_messaging_heal(request):
     deals = Deal.objects.none()
     if message_profile is not None:
         deals = Deal.objects.filter(
-            state=ProfileState.CONNECTED,
+            state__in=[ProfileState.QUALIFIED, ProfileState.CONNECTED],
             campaign__users=message_profile.user,
         ).select_related("lead", "campaign")
     enqueued = 0
@@ -1496,7 +1527,7 @@ def api_messaging_heal(request):
             content_type=lead_ct,
             object_id=lead.pk,
             owner=request.user,
-            linkedin_profile=message_profile,
+            instagram_profile=message_profile,
             is_draft=True,
         ).exists()
         has_pending_followup = Task.objects.filter(
@@ -1506,7 +1537,7 @@ def api_messaging_heal(request):
             payload__public_id=lead.public_identifier,
         )
         if message_profile is not None:
-            has_pending_followup = has_pending_followup.filter(payload__linkedin_profile_id=message_profile.pk)
+            has_pending_followup = has_pending_followup.filter(payload__instagram_profile_id=message_profile.pk)
         has_pending_followup = has_pending_followup.exists()
         has_send_task = Task.objects.filter(
             task_type=Task.TaskType.SEND_MESSAGE,
@@ -1515,7 +1546,7 @@ def api_messaging_heal(request):
             payload__public_id=lead.public_identifier,
         )
         if message_profile is not None:
-            has_send_task = has_send_task.filter(payload__linkedin_profile_id=message_profile.pk)
+            has_send_task = has_send_task.filter(payload__instagram_profile_id=message_profile.pk)
         has_send_task = has_send_task.exists()
 
         if has_draft or has_pending_followup or has_send_task:
@@ -1528,7 +1559,7 @@ def api_messaging_heal(request):
             delay_seconds=_random.uniform(5, 30),
             deal=deal,
             owner_id=request.user.pk,
-            linkedin_profile_id=message_profile.pk if message_profile else None,
+            instagram_profile_id=message_profile.pk if message_profile else None,
         )
         enqueued += 1
 
@@ -1948,7 +1979,7 @@ def api_message_drafts_approve(request):
                         "public_id": public_id,
                         "campaign_id": campaign_id,
                         "owner_id": draft.owner_id,
-                        "linkedin_profile_id": draft.linkedin_profile_id,
+                        "instagram_profile_id": draft.instagram_profile_id,
                     },
                 )
             approved += 1
@@ -1969,7 +2000,7 @@ def api_message_draft_detail(request, draft_id: int):
         draft = ChatMessage.objects.get(
             pk=draft_id,
             owner=request.user,
-            linkedin_profile=_message_profile_for_user(request.user),
+            instagram_profile=_message_profile_for_user(request.user),
             is_draft=True,
             is_approved=False,
         )
@@ -2023,13 +2054,13 @@ def api_message_draft_regenerate(request, draft_id: int):
         message_profile = _message_profile_for_user(request.user)
         if message_profile is None:
             return JsonResponse(
-                {"ok": False, "error": "No active LinkedIn profile found for this draft owner"},
+                {"ok": False, "error": "No active Instagram profile found for this draft owner"},
                 status=400,
             )
-        draft = ChatMessage.objects.select_related("campaign", "owner", "linkedin_profile").get(
+        draft = ChatMessage.objects.select_related("campaign", "owner", "instagram_profile").get(
             pk=draft_id,
             owner=request.user,
-            linkedin_profile=message_profile,
+            instagram_profile=message_profile,
             is_draft=True,
             is_approved=False,
         )
@@ -2040,15 +2071,15 @@ def api_message_draft_regenerate(request, draft_id: int):
     if not ok:
         return JsonResponse({"ok": False, "error": f"LLM configuration invalid: {reason}"}, status=400)
 
-    linkedin_profile = draft.linkedin_profile
-    if linkedin_profile is None:
+    instagram_profile = draft.instagram_profile
+    if instagram_profile is None:
         return JsonResponse(
-            {"ok": False, "error": "No active LinkedIn profile found for this draft owner"},
+            {"ok": False, "error": "No active Instagram profile found for this draft owner"},
             status=400,
         )
 
     try:
-        result = regenerate_draft(draft, get_or_create_session(linkedin_profile))
+        result = regenerate_draft(draft, get_or_create_session(instagram_profile))
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     except Exception:
@@ -2073,7 +2104,7 @@ def api_message_draft_regenerate(request, draft_id: int):
                     draft.content_type_id,
                     draft.object_id,
                     draft.owner_id,
-                    draft.linkedin_profile_id,
+                    draft.instagram_profile_id,
                 ),
             },
         }
@@ -2233,7 +2264,7 @@ def api_safe_mode(request):
                 "settings": {
                     "enabled": safe.enabled,
                     "globalPauseOutreach": safe.global_pause_outreach,
-                    "pauseNewConnectionInvites": safe.pause_new_connection_invites,
+                    "pauseNewFollows": safe.pause_new_follows,
                     "maxBulkApprove": safe.max_bulk_approve,
                     "maxBulkExport": safe.max_bulk_export,
                 },
@@ -2253,7 +2284,7 @@ def api_safe_mode(request):
             "settings": {
                 "enabled": safe.enabled,
                 "globalPauseOutreach": safe.global_pause_outreach,
-                "pauseNewConnectionInvites": safe.pause_new_connection_invites,
+                "pauseNewFollows": safe.pause_new_follows,
                 "maxBulkApprove": safe.max_bulk_approve,
                 "maxBulkExport": safe.max_bulk_export,
             },

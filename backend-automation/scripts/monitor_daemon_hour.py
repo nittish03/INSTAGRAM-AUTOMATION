@@ -21,7 +21,7 @@ django.setup()
 from django.utils import timezone as dj_tz
 
 from crm.models import Lead
-from linkedin.models import ActionLog, LinkedInProfile, Task
+from linkedin.models import ActionLog, InstagramProfile, Task
 from linkedin.services.daemon_control import LOG_FILE, daemon_status
 
 REPORT = Path.home() / ".leadway" / "monitor_report.jsonl"
@@ -40,7 +40,7 @@ ACTION_PATTERNS = {
 
 def snapshot(label: str, baseline: dict) -> dict:
     now = dj_tz.now()
-    profile = LinkedInProfile.objects.filter(user__username="nittish", active=True).first()
+    profile = InstagramProfile.objects.filter(user__username="nittish", active=True).first()
     log_text = LOG_FILE.read_text(encoding="utf-8", errors="replace") if LOG_FILE.exists() else ""
     counts = {
         "leads_total": Lead.objects.count(),
@@ -54,7 +54,7 @@ def snapshot(label: str, baseline: dict) -> dict:
     if profile:
         counts["connect_actions_today"] = profile._daily_count("connect")
         counts["follow_up_actions_today"] = profile._daily_count("follow_up")
-        counts["connect_daily_limit"] = profile.connect_daily_limit
+        counts["follow_daily_limit"] = profile.follow_daily_limit
         counts["follow_up_daily_limit"] = profile.follow_up_daily_limit
 
     log_hits = {k: len(p.findall(log_text)) for k, p in ACTION_PATTERNS.items()}

@@ -33,11 +33,10 @@ from linkedin.ml.qualifier import BayesianQualifier, KitQualifier
 from linkedin.models import Task
 from linkedin.tasks.check_pending import handle_check_pending
 from linkedin.tasks.connect import (
-    enqueue_check_pending,
     enqueue_connect,
     enqueue_follow_up,
     handle_connect,
-    new_connection_invites_paused,
+    new_follows_paused,
 )
 from linkedin.tasks.follow_up import handle_follow_up
 from linkedin.tasks.reply_check import handle_reply_check
@@ -54,12 +53,12 @@ _OWNER_SCOPED_TASK_TYPES = {
     Task.TaskType.REPLY_CHECK,
 }
 _OUTREACH_TASK_TYPES = {
-    Task.TaskType.CONNECT,
+    Task.TaskType.FOLLOW,
     Task.TaskType.SEND_MESSAGE,
 }
 
 _HANDLERS = {
-    Task.TaskType.CONNECT: handle_connect,
+    Task.TaskType.FOLLOW: handle_connect,
     Task.TaskType.CHECK_PENDING: handle_check_pending,
     Task.TaskType.FOLLOW_UP: handle_follow_up,
     Task.TaskType.SEND_MESSAGE: handle_send_message,
@@ -72,7 +71,7 @@ def _prioritize_claims(queryset):
     return queryset.annotate(
         _daemon_priority=Case(
             When(task_type=Task.TaskType.SEND_MESSAGE, then=Value(0)),
-            When(task_type=Task.TaskType.CONNECT, then=Value(1)),
+            When(task_type=Task.TaskType.FOLLOW, then=Value(1)),
             When(task_type=Task.TaskType.REPLY_CHECK, then=Value(2)),
             When(task_type=Task.TaskType.FOLLOW_UP, then=Value(3)),
             When(task_type=Task.TaskType.CHECK_PENDING, then=Value(4)),
@@ -83,7 +82,7 @@ def _prioritize_claims(queryset):
 
 
 def _recent_outreach_cooldown_seconds(session, cfg) -> float:
-    """Return remaining cooldown after a real outward LinkedIn action."""
+    """Return remaining cooldown after a real outward Instagram action."""
     if not bot_time_limits_enabled() or not bot_sleep_enabled():
         return 0.0
 
@@ -91,7 +90,7 @@ def _recent_outreach_cooldown_seconds(session, cfg) -> float:
     if min_interval <= 0:
         return 0.0
 
-    profile = getattr(session, "linkedin_profile", None)
+    profile = getattr(session, "instagram_profile", None)
     profile_pk = getattr(profile, "pk", None)
     if not isinstance(profile_pk, int):
         return 0.0
@@ -100,10 +99,10 @@ def _recent_outreach_cooldown_seconds(session, cfg) -> float:
 
     latest = (
         ActionLog.objects.filter(
-            linkedin_profile_id=profile_pk,
+            instagram_profile_id=profile_pk,
             status=ActionLog.Status.SUCCESS,
             action_type__in=[
-                ActionLog.ActionType.CONNECT,
+                ActionLog.ActionType.FOLLOW,
                 ActionLog.ActionType.FOLLOW_UP,
             ],
         )
@@ -118,15 +117,15 @@ def _recent_outreach_cooldown_seconds(session, cfg) -> float:
     return max(min_interval - elapsed, 0.0)
 
 
-def _set_task_owner(task: Task, owner_id: int, linkedin_profile_id: int | None = None) -> bool:
+def _set_task_owner(task: Task, owner_id: int, instagram_profile_id: int | None = None) -> bool:
     payload = dict(task.payload or {})
     if payload.get("owner_id") == owner_id and (
-        linkedin_profile_id is None or payload.get("linkedin_profile_id") == linkedin_profile_id
+        instagram_profile_id is None or payload.get("instagram_profile_id") == instagram_profile_id
     ):
         return False
     payload["owner_id"] = owner_id
-    if linkedin_profile_id is not None:
-        payload["linkedin_profile_id"] = linkedin_profile_id
+    if instagram_profile_id is not None:
+        payload["instagram_profile_id"] = instagram_profile_id
     task.payload = payload
     task.save(update_fields=["payload"])
     return True
@@ -141,46 +140,46 @@ def _backfill_owner_ids_for_scoped_tasks(campaign_ids: list[int]) -> int:
         task_type__in=_OWNER_SCOPED_TASK_TYPES,
         status__in=[Task.Status.PENDING, Task.Status.RUNNING],
         payload__campaign_id__in=campaign_ids,
-    ).filter(Q(payload__owner_id__isnull=True) | Q(payload__linkedin_profile_id__isnull=True)).order_by("scheduled_at", "id")
+    ).filter(Q(payload__owner_id__isnull=True) | Q(payload__instagram_profile_id__isnull=True)).order_by("scheduled_at", "id")
     changed = 0
 
     for task in tasks:
         payload = task.payload or {}
         owner_id = payload.get("owner_id")
-        linkedin_profile_id = None
+        instagram_profile_id = None
 
         message_id = payload.get("message_id")
         if message_id:
             message_scope = (
                 ChatMessage.objects.filter(pk=message_id)
-                .values_list("owner_id", "linkedin_profile_id")
+                .values_list("owner_id", "instagram_profile_id")
                 .first()
             )
             if message_scope:
-                owner_id, linkedin_profile_id = message_scope
+                owner_id, instagram_profile_id = message_scope
 
         public_id = payload.get("public_id")
         campaign_id = payload.get("campaign_id")
-        if (owner_id is None or linkedin_profile_id is None) and public_id and campaign_id:
+        if (owner_id is None or instagram_profile_id is None) and public_id and campaign_id:
             action_scope = (
                 ActionLog.objects.filter(
                     campaign_id=campaign_id,
                     target_public_id=public_id,
                     status=ActionLog.Status.SUCCESS,
-                    linkedin_profile__user_id__isnull=False,
+                    instagram_profile__user_id__isnull=False,
                 )
                 .order_by("-created_at", "-id")
-                .values_list("linkedin_profile__user_id", "linkedin_profile_id")
+                .values_list("instagram_profile__user_id", "instagram_profile_id")
                 .first()
             )
             if action_scope:
                 owner_id = owner_id or action_scope[0]
-                linkedin_profile_id = linkedin_profile_id or action_scope[1]
+                instagram_profile_id = instagram_profile_id or action_scope[1]
 
         if owner_id is not None and _set_task_owner(
             task,
             int(owner_id),
-            int(linkedin_profile_id) if linkedin_profile_id is not None else None,
+            int(instagram_profile_id) if instagram_profile_id is not None else None,
         ):
             changed += 1
 
@@ -264,9 +263,9 @@ def heal_tasks(session):
     """Reconcile task queue with CRM state on daemon startup.
 
     1. Reset stale 'running' tasks to 'pending' (crashed worker recovery)
-    2. Seed one 'connect' task per campaign if none pending
-    3. Create 'check_pending' tasks for PENDING profiles without tasks
-    4. Create 'follow_up' tasks for CONNECTED profiles without tasks
+    2. Seed one outreach-expansion (FOLLOW task type) per campaign for discover/qualify
+    3. Create 'follow_up' draft tasks for QUALIFIED/CONNECTED profiles without drafts
+       (check_pending / Follow are not seeded — DM-first path)
     """
     from crm.models import Deal
     from linkedin.enums import ProfileState
@@ -276,7 +275,7 @@ def heal_tasks(session):
     session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(session_user_id, int):
         session_user_id = None
-    session_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    session_profile_id = getattr(getattr(session, "instagram_profile", None), "pk", None)
     if not isinstance(session_profile_id, int):
         session_profile_id = None
 
@@ -294,60 +293,37 @@ def heal_tasks(session):
     if stale_count:
         logger.info("Recovered %d stale running tasks", stale_count)
 
-    # 2. Seed connect tasks per campaign (regular first, freemium deferred)
+    # 2. Seed outreach expansion (discover → qualify → draft) per campaign
     for campaign in session.campaigns:
         delay = bot_pacing_delay_seconds(CAMPAIGN_CONFIG["connect_delay_seconds"]) if campaign.is_freemium else 0
         enqueue_connect(campaign.pk, delay_seconds=delay)
 
-    # 3. Check_pending tasks for PENDING profiles
-    for campaign in session.campaigns:
-        session.campaign = campaign
-        pending_deals = Deal.objects.filter(
-            state=ProfileState.PENDING,
-            campaign=campaign,
-        ).select_related("lead")
-
-        for deal in pending_deals:
-            public_id = deal.lead.public_identifier
-            if not public_id:
-                continue
-            backoff = deal.backoff_hours or cfg["check_pending_recheck_after_hours"]
-            enqueue_check_pending(
-                campaign.pk,
-                public_id,
-                backoff_hours=backoff,
-                deal=deal,
-                owner_id=session_user_id,
-                linkedin_profile_id=session_profile_id,
-            )
-
-    # 4. Follow_up tasks for CONNECTED profiles
+    # 3. Follow_up draft tasks for QUALIFIED / CONNECTED profiles lacking drafts
     from chat.models import ChatMessage
     from django.contrib.contenttypes.models import ContentType
 
     for campaign in session.campaigns:
         session.campaign = campaign
-        connected_deals = Deal.objects.filter(
-            state=ProfileState.CONNECTED,
+        draftable_deals = Deal.objects.filter(
+            state__in=[ProfileState.QUALIFIED, ProfileState.CONNECTED],
             campaign=campaign,
         ).select_related("lead")
 
-        for deal in connected_deals:
-            public_id = deal.lead.public_identifier
+        for deal in draftable_deals:
+            public_id = deal.lead.public_identifier if deal.lead else None
             if not public_id:
                 continue
-            
-            # Check for existing pending draft OR pending SEND_MESSAGE task
+
             has_pending_draft = ChatMessage.objects.filter(
                 content_type=ContentType.objects.get_for_model(deal.lead),
-                object_id=deal.lead.pk, 
+                object_id=deal.lead.pk,
                 campaign=campaign,
                 owner_id=session_user_id,
-                linkedin_profile_id=session_profile_id,
+                instagram_profile_id=session_profile_id,
                 is_draft=True,
                 is_approved=False,
             ).exists()
-            
+
             has_send_task = Task.objects.filter(
                 task_type=Task.TaskType.SEND_MESSAGE,
                 status__in=[Task.Status.PENDING, Task.Status.RUNNING],
@@ -355,10 +331,20 @@ def heal_tasks(session):
                 payload__public_id=public_id,
                 payload__owner_id=session_user_id,
             ).filter(
-                Q(payload__linkedin_profile_id=session_profile_id) | Q(payload__linkedin_profile_id__isnull=True)
+                Q(payload__instagram_profile_id=session_profile_id) | Q(payload__instagram_profile_id__isnull=True)
             ).exists()
 
-            if has_pending_draft or has_send_task:
+            has_follow_up = Task.objects.filter(
+                task_type=Task.TaskType.FOLLOW_UP,
+                status__in=[Task.Status.PENDING, Task.Status.RUNNING],
+                payload__campaign_id=campaign.pk,
+                payload__public_id=public_id,
+            ).filter(
+                Q(payload__owner_id=session_user_id) | Q(payload__owner_id__isnull=True),
+                Q(payload__instagram_profile_id=session_profile_id) | Q(payload__instagram_profile_id__isnull=True),
+            ).exists()
+
+            if has_pending_draft or has_send_task or has_follow_up:
                 continue
 
             enqueue_follow_up(
@@ -372,9 +358,8 @@ def heal_tasks(session):
                 ),
                 deal=deal,
                 owner_id=session_user_id,
-                linkedin_profile_id=session_profile_id,
+                instagram_profile_id=session_profile_id,
             )
-
 
     pending_count = Task.objects.filter(payload__campaign_id__in=campaign_ids).pending().count()
     logger.info("Task queue healed: %d pending tasks", pending_count)
@@ -398,7 +383,7 @@ def run_daemon(session):
     session_user_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(session_user_id, int):
         session_user_id = None
-    session_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
+    session_profile_id = getattr(getattr(session, "instagram_profile", None), "pk", None)
     if not isinstance(session_profile_id, int):
         session_profile_id = None
 
@@ -407,8 +392,8 @@ def run_daemon(session):
         | Q(payload__owner_id=session_user_id)
     ).filter(
         ~Q(task_type__in=_OWNER_SCOPED_TASK_TYPES)
-        | Q(payload__linkedin_profile_id=session_profile_id)
-        | Q(payload__linkedin_profile_id__isnull=True)
+        | Q(payload__instagram_profile_id=session_profile_id)
+        | Q(payload__instagram_profile_id__isnull=True)
     )
 
     logger.info(
@@ -447,8 +432,8 @@ def run_daemon(session):
             due_scope = due_scope.exclude(task_type__in=_OUTREACH_TASK_TYPES)
 
         claim_scope = _prioritize_claims(due_scope)
-        if new_connection_invites_paused():
-            claim_scope = claim_scope.exclude(task_type=Task.TaskType.CONNECT)
+        if new_follows_paused():
+            claim_scope = claim_scope.exclude(task_type=Task.TaskType.FOLLOW)
         task = claim_scope.first()
         if task is None:
             if cooldown > 0 and task_scope.filter(
@@ -457,16 +442,16 @@ def run_daemon(session):
                 scheduled_at__lte=timezone.now(),
             ).exists():
                 logger.info(
-                    "Recent outreach action - holding sends/connects for %.0f more minutes",
+                    "Recent outreach action - holding sends/follows for %.0f more minutes",
                     cooldown / 60,
                 )
                 time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
                 continue
             if (
-                new_connection_invites_paused()
-                and task_scope.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+                new_follows_paused()
+                and task_scope.filter(task_type=Task.TaskType.FOLLOW, status=Task.Status.PENDING).exists()
             ):
-                logger.info("New connection invite expansion paused - polling until unpaused")
+                logger.info("New follow expansion paused - polling until unpaused")
                 time.sleep(_IDLE_POLL_INTERVAL_SECONDS)
                 continue
             logger.info(

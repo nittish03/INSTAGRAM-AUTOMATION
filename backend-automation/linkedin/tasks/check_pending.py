@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def handle_check_pending(task, session, qualifiers):
     from crm.models import Deal
-    from linkedin.actions.status import get_connection_assessment
+    from linkedin.actions.status import get_follow_assessment
     from linkedin.models import OutreachEvent
     from linkedin.outreach_tracking import emit_outreach_event, update_deal_inference
     from linkedin.tasks.connect import enqueue_check_pending, enqueue_follow_up
@@ -34,9 +34,9 @@ def handle_check_pending(task, session, qualifiers):
     owner_id = getattr(getattr(session, "django_user", None), "pk", None)
     if not isinstance(owner_id, int):
         owner_id = None
-    linkedin_profile_id = getattr(getattr(session, "linkedin_profile", None), "pk", None)
-    if not isinstance(linkedin_profile_id, int):
-        linkedin_profile_id = None
+    instagram_profile_id = getattr(getattr(session, "instagram_profile", None), "pk", None)
+    if not isinstance(instagram_profile_id, int):
+        instagram_profile_id = None
 
     logger.info(
         "[%s] %s %s",
@@ -63,7 +63,7 @@ def handle_check_pending(task, session, qualifiers):
         return
 
     try:
-        assessment = get_connection_assessment(session, profile)
+        assessment = get_follow_assessment(session, profile)
     except SkipProfile as e:
         logger.warning(
             "Could not verify pending status for %s (%s) — keeping Pending and rescheduling",
@@ -80,17 +80,18 @@ def handle_check_pending(task, session, qualifiers):
             backoff_hours=new_backoff,
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
         )
         return
 
     verified_connected = (
         assessment.state == ProfileState.CONNECTED
-        and assessment.source == "api_degree_1"
+        # api_degree_1 kept for backward compat with old assessment/event rows
+        and assessment.source in ("api_follows_viewer", "api_degree_1")
     )
     if assessment.state == ProfileState.CONNECTED and not verified_connected:
         logger.info(
-            "%s looked connected via %s but is not API degree-1 yet — keeping Pending",
+            "%s looked connected via %s but is not API follow-back verified yet — keeping Pending",
             public_id,
             assessment.source,
         )
@@ -98,7 +99,7 @@ def handle_check_pending(task, session, qualifiers):
     if verified_connected and deal:
         update_deal_inference(deal, assessment.source, assessment.confidence)
         emit_outreach_event(
-            OutreachEvent.EventType.CONNECTION_DETECTED,
+            OutreachEvent.EventType.FOLLOW_BACK_DETECTED,
             deal=deal,
             lead=deal.lead,
             campaign=session.campaign,
@@ -126,7 +127,7 @@ def handle_check_pending(task, session, qualifiers):
             public_id,
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
         )
     elif state_to_store == ProfileState.PENDING:
         if deal and deal.lead_id:
@@ -148,7 +149,7 @@ def handle_check_pending(task, session, qualifiers):
             backoff_hours=new_backoff,
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
         )
         logger.info(
             "%s still pending — scheduled in %.1fh (backoff %.1fh → %.1fh)",

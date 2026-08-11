@@ -10,7 +10,7 @@ from django.utils import timezone
 from chat.models import ChatMessage
 from crm.models import Deal, Lead
 from linkedin.enums import ProfileState
-from linkedin.models import Campaign, LinkedInProfile, SiteConfig, Task
+from linkedin.models import Campaign, InstagramProfile, SiteConfig, Task
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -18,7 +18,7 @@ os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 class ReplyCheckTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="reply_owner")
-        self.profile = LinkedInProfile.objects.create(user=self.user, active=True)
+        self.profile = InstagramProfile.objects.create(user=self.user, active=True)
         self.campaign = Campaign.objects.create(
             name="Reply Campaign",
             product_docs="We help agencies keep project delivery on track.",
@@ -29,11 +29,11 @@ class ReplyCheckTest(TestCase):
             first_name="Ada",
             last_name="Lovelace",
             public_identifier="ada-lovelace-reply",
-            linkedin_url="https://www.linkedin.com/in/ada-lovelace-reply/",
+            instagram_url="https://www.instagram.com/ada-lovelace-reply/",
             profile_data={
                 "public_identifier": "ada-lovelace-reply",
                 "full_name": "Ada Lovelace",
-                "urn": "urn:li:fsd_profile:ada-reply",
+                "urn": "ig_profile_ada_reply",
             },
         )
         self.deal = Deal.objects.create(
@@ -47,7 +47,7 @@ class ReplyCheckTest(TestCase):
         session = MagicMock()
         session.campaign = self.campaign
         session.django_user = self.user
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         session.page = MagicMock()
         return session
 
@@ -55,20 +55,20 @@ class ReplyCheckTest(TestCase):
         from linkedin.conf import CAMPAIGN_CONFIG
         from linkedin.tasks.send_message import handle_send_message
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
 
         msg = ChatMessage.objects.create(
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Worth taking a look?",
-            linkedin_urn="draft_send",
+            instagram_message_id="draft_send",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         task = MagicMock(
             payload={
@@ -110,12 +110,12 @@ class ReplyCheckTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Worth taking a look?",
-            linkedin_urn="draft_send_ui",
+            instagram_message_id="draft_send_ui",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         task = MagicMock(
             payload={
@@ -152,12 +152,12 @@ class ReplyCheckTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Worth taking a look?",
-            linkedin_urn="draft_send_timeout",
+            instagram_message_id="draft_send_timeout",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         task = Task.objects.create(
             task_type=Task.TaskType.SEND_MESSAGE,
@@ -195,8 +195,9 @@ class ReplyCheckTest(TestCase):
         self.assertTrue(msg.is_approved)
         self.assertFalse(msg.is_draft)
 
-    def test_send_message_connects_and_requeues_when_profile_shows_connect(self):
+    def test_send_message_fails_without_auto_follow_when_message_unavailable(self):
         from linkedin.exceptions import TaskSkipped
+        from linkedin.models import OutreachEvent
         from linkedin.tasks.send_message import handle_send_message
 
         msg = ChatMessage.objects.create(
@@ -204,12 +205,12 @@ class ReplyCheckTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Worth taking a look?",
-            linkedin_urn="draft_send_after_connect",
+            instagram_message_id="draft_send_no_follow",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         task = Task.objects.create(
             task_type=Task.TaskType.SEND_MESSAGE,
@@ -228,40 +229,36 @@ class ReplyCheckTest(TestCase):
             return_value={"profile": self.lead.profile_data},
         ), patch(
             "linkedin.actions.message.send_raw_message",
-            side_effect=TaskSkipped("LinkedIn still shows Connect; skipping message send"),
+            side_effect=TaskSkipped(
+                "Instagram Message button not available (private/restricted or Message UI missing)"
+            ),
         ), patch(
-            "linkedin.actions.connect.send_connection_request",
-            return_value=ProfileState.PENDING,
+            "linkedin.actions.connect.send_follow_request",
         ) as mock_connect:
-            with self.assertRaisesRegex(TaskSkipped, "sent connection invite"):
+            with self.assertRaisesRegex(TaskSkipped, "not falling back to Follow"):
                 handle_send_message(task, self._session())
 
-        mock_connect.assert_called_once()
+        mock_connect.assert_not_called()
         self.deal.refresh_from_db()
-        self.assertEqual(self.deal.state, ProfileState.PENDING)
-        self.assertTrue(
+        self.assertEqual(self.deal.state, ProfileState.FAILED)
+        self.assertFalse(
             Task.objects.filter(
                 task_type=Task.TaskType.CHECK_PENDING,
-                status=Task.Status.PENDING,
                 payload__public_id=self.lead.public_identifier,
             ).exists()
         )
         self.assertTrue(
-            Task.objects.filter(
-                task_type=Task.TaskType.SEND_MESSAGE,
-                status=Task.Status.PENDING,
-                payload__public_id=self.lead.public_identifier,
-                payload__message_id=msg.pk,
-            )
-            .exclude(pk=task.pk)
-            .exists()
+            OutreachEvent.objects.filter(
+                event_type=OutreachEvent.EventType.MESSAGE_FAILED,
+                lead=self.lead,
+            ).exists()
         )
 
     def test_reply_check_continues_when_new_invites_are_paused(self):
         from linkedin.tasks.reply_check import handle_reply_check
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         sent_at = timezone.now()
         task = MagicMock(
             payload={
@@ -279,12 +276,12 @@ class ReplyCheckTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Our last message",
-            linkedin_urn="sent_paused_mode",
+            instagram_message_id="sent_paused_mode",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=sent_at,
         )
 
@@ -320,12 +317,12 @@ class ReplyCheckTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Our last message",
-            linkedin_urn="sent_last",
+            instagram_message_id="sent_last",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=sent_at,
         )
 
@@ -371,11 +368,11 @@ class ReplyCheckTest(TestCase):
                 object_id=self.lead.pk,
                 campaign=self.campaign,
                 content="Yes, interested.",
-                linkedin_urn="inbound_reply",
+                instagram_message_id="inbound_reply",
                 is_outgoing=False,
                 is_draft=False,
                 owner=self.user,
-                linkedin_profile=self.profile,
+                instagram_profile=self.profile,
                 creation_date=timezone.now(),
             )
             return []

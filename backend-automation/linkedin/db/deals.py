@@ -17,8 +17,8 @@ _STATE_LOG_STYLE = {
 
 
 
-def increment_connect_attempts(session, public_id: str) -> int:
-    """Increment connect_attempts on the Deal and return the new count."""
+def increment_follow_attempts(session, public_id: str) -> int:
+    """Increment follow_attempts on the Deal and return the new count."""
     from crm.models import Deal
 
     deal = Deal.objects.filter(
@@ -27,16 +27,16 @@ def increment_connect_attempts(session, public_id: str) -> int:
     if not deal:
         return 1
 
-    deal.connect_attempts += 1
-    deal.save(update_fields=["connect_attempts"])
-    return deal.connect_attempts
+    deal.follow_attempts += 1
+    deal.save(update_fields=["follow_attempts"])
+    return deal.follow_attempts
 
 
 def deal_to_profile_dict(deal) -> dict:
     """Convert a Deal (with select_related lead) to a profile dict."""
     base = deal.lead.to_profile_dict()
     base["meta"] = {
-        "connect_attempts": deal.connect_attempts,
+        "follow_attempts": deal.follow_attempts,
         "backoff_hours": deal.backoff_hours,
         "reason": deal.reason,
     }

@@ -25,13 +25,13 @@ const shortcuts: ShortcutCard[] = [
   { href: "/leads", title: "Leads", description: "Browse and filter all leads." },
   { href: "/deals", title: "Deals", description: "Pipeline by deal state." },
   { href: "/tasks", title: "Tasks", description: "Background task queue and statuses." },
-  { href: "/messages", title: "Drafts (HITL)", description: "Approve outbound message drafts." },
-  { href: "/campaigns", title: "Campaigns", description: "Configured outreach campaigns." },
-  { href: "/linkedin-profiles", title: "LinkedIn Profiles", description: "Operator profiles and limits." },
-  { href: "/search-keywords", title: "Search Keywords", description: "Per-campaign keywords pool." },
+  { href: "/messages", title: "Drafts (HITL)", description: "Approve Instagram DM drafts before send." },
+  { href: "/campaigns", title: "Campaigns", description: "Configured Instagram outreach campaigns." },
+  { href: "/instagram-profiles", title: "Instagram Profiles", description: "Operator accounts, follow & DM limits." },
+  { href: "/search-keywords", title: "Search Keywords", description: "Per-campaign Instagram keyword pool." },
   { href: "/site-configuration", title: "Site Configuration", description: "LLM + Google Sheet sync." },
   { href: "/google", title: "Google Workspace", description: "Connection status and sheets." },
-  { href: "/action-logs", title: "Action Logs", description: "Connect/follow-up audit trail." },
+  { href: "/action-logs", title: "Action Logs", description: "DM audit trail." },
 ];
 
 export default function HomePage() {
@@ -94,7 +94,7 @@ export default function HomePage() {
     <div className="space-y-4">
       <PageHeader
         title="Welcome to Leadway"
-        description="Quick access to every workspace and live snapshot of your outreach engine."
+        description="Quick access to the Instagram automation workspace — discover, follow, DM, and review."
         actions={
           <div className="flex items-center gap-3 text-xs text-slate-400">
             {refreshedAt ? (

@@ -28,7 +28,7 @@ class QualificationPipelineTest(TestCase):
         return Lead.objects.create(
             first_name="Test",
             last_name="Lead",
-            linkedin_url=f"https://www.linkedin.com/in/{public_id}/",
+            instagram_url=f"https://www.instagram.com/{public_id}/",
             public_identifier=public_id,
             embedding=embedding,
         )

@@ -2,10 +2,10 @@ import os
 from django.test import TestCase
 from django.utils import timezone
 from unittest.mock import MagicMock, patch
-from linkedin.models import ActionLog, OutreachEvent, SiteConfig, Task, Campaign, LinkedInProfile
+from linkedin.models import ActionLog, OutreachEvent, SiteConfig, Task, Campaign, InstagramProfile
 from crm.models import Lead, Deal
 from linkedin.tasks.connect import handle_connect, enqueue_connect
-from linkedin.exceptions import TaskSkipped, ReachedConnectionLimit
+from linkedin.exceptions import TaskSkipped, ReachedFollowLimit
 from linkedin.enums import ProfileState
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
@@ -13,27 +13,27 @@ os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 class TaskHardeningTest(TestCase):
     def setUp(self):
         self.campaign = Campaign.objects.create(name="Test Campaign")
-        # Need a user for LinkedInProfile
+        # Need a user for InstagramProfile
         from django.contrib.auth.models import User
         self.user = User.objects.create_user(username="testuser")
-        self.profile = LinkedInProfile.objects.create(user=self.user)
+        self.profile = InstagramProfile.objects.create(user=self.user)
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = False
+        cfg.pause_new_follows = False
         cfg.global_pause_outreach = False
-        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+        cfg.save(update_fields=["pause_new_follows", "global_pause_outreach"])
         
     def test_enqueue_connect_with_deal(self):
         lead = Lead.objects.create(
             first_name="John", 
             last_name="Doe", 
             public_identifier="johndoe",
-            linkedin_url="https://www.linkedin.com/in/johndoe/"
+            instagram_url="https://www.instagram.com/johndoe/"
         )
         deal = Deal.objects.create(lead=lead, campaign=self.campaign)
         
         enqueue_connect(self.campaign.id, delay_seconds=10, deal=deal)
         
-        task = Task.objects.get(task_type=Task.TaskType.CONNECT)
+        task = Task.objects.get(task_type=Task.TaskType.FOLLOW)
         self.assertEqual(task.deal, deal)
         self.assertEqual(task.payload['campaign_id'], self.campaign.id)
 
@@ -58,15 +58,15 @@ class TaskHardeningTest(TestCase):
             before = timezone.now()
             enqueue_connect(self.campaign.id, delay_seconds=3600, apply_time_limits=False)
 
-        task = Task.objects.get(task_type=Task.TaskType.CONNECT)
+        task = Task.objects.get(task_type=Task.TaskType.FOLLOW)
         self.assertGreaterEqual((task.scheduled_at - before).total_seconds(), 3500)
 
-    def test_pause_new_connection_invites_skips_connect_enqueue_only(self):
+    def test_pause_new_follows_skips_connect_enqueue_only(self):
         from linkedin.tasks.connect import enqueue_check_pending, enqueue_follow_up, enqueue_reply_check
 
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         lead = Lead.objects.create(public_identifier="warm-lead")
         deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.PENDING.value)
 
@@ -75,29 +75,29 @@ class TaskHardeningTest(TestCase):
         enqueue_follow_up(self.campaign.id, "warm-lead", delay_seconds=0, deal=deal)
         enqueue_reply_check(self.campaign.id, "warm-lead", delay_seconds=0, deal=deal)
 
-        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.CONNECT).exists())
+        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.FOLLOW).exists())
         self.assertTrue(Task.objects.filter(task_type=Task.TaskType.CHECK_PENDING).exists())
         self.assertTrue(Task.objects.filter(task_type=Task.TaskType.FOLLOW_UP).exists())
         self.assertTrue(Task.objects.filter(task_type=Task.TaskType.REPLY_CHECK).exists())
 
     def test_handle_connect_paused_skips_before_fresh_invite_side_effects(self):
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now(),
             started_at=timezone.now(),
             payload={"campaign_id": self.campaign.id},
         )
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
 
         with (
             patch("linkedin.tasks.connect.strategy_for") as mock_strategy_for,
-            patch.object(LinkedInProfile, "can_execute", return_value=True) as mock_can_execute,
-            patch("linkedin.actions.connect.send_connection_request") as mock_send,
+            patch.object(InstagramProfile, "can_execute", return_value=True) as mock_can_execute,
+            patch("linkedin.actions.connect.send_follow_request") as mock_send,
             patch("google_integration.sheet_sync.sync_pending_lead_to_google_sheet") as mock_sheet_sync,
         ):
             with self.assertRaises(TaskSkipped):
@@ -107,25 +107,25 @@ class TaskHardeningTest(TestCase):
         mock_can_execute.assert_not_called()
         mock_send.assert_not_called()
         mock_sheet_sync.assert_not_called()
-        self.assertFalse(OutreachEvent.objects.filter(event_type=OutreachEvent.EventType.INVITE_SENT).exists())
+        self.assertFalse(OutreachEvent.objects.filter(event_type=OutreachEvent.EventType.FOLLOW_SENT).exists())
         self.assertFalse(
-            ActionLog.objects.filter(action_type=ActionLog.ActionType.CONNECT, status="success").exists()
+            ActionLog.objects.filter(action_type=ActionLog.ActionType.FOLLOW, status="success").exists()
         )
-        self.assertEqual(Task.objects.filter(task_type=Task.TaskType.CONNECT).count(), 1)
+        self.assertEqual(Task.objects.filter(task_type=Task.TaskType.FOLLOW).count(), 1)
 
     def test_handle_connect_paused_does_not_create_freemium_deal(self):
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         self.campaign.is_freemium = True
         self.campaign.save(update_fields=["is_freemium"])
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now(),
             started_at=timezone.now(),
             payload={"campaign_id": self.campaign.id},
         )
-        session = MagicMock(campaign=self.campaign, linkedin_profile=self.profile)
+        session = MagicMock(campaign=self.campaign, instagram_profile=self.profile)
 
         with patch("linkedin.db.deals.create_freemium_deal") as mock_create_deal:
             with self.assertRaises(TaskSkipped):
@@ -134,15 +134,15 @@ class TaskHardeningTest(TestCase):
         mock_create_deal.assert_not_called()
         self.assertFalse(Deal.objects.filter(campaign=self.campaign).exists())
 
-    def test_heal_tasks_paused_skips_connect_seed_but_preserves_monitoring(self):
+    def test_heal_tasks_seeds_drafts_for_qualified_skips_check_pending(self):
         from linkedin.daemon import heal_tasks
 
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         pending_lead = Lead.objects.create(
             public_identifier="pending-monitor",
-            linkedin_url="https://www.linkedin.com/in/pending-monitor/",
+            instagram_url="https://www.instagram.com/pending-monitor/",
         )
         pending_deal = Deal.objects.create(
             lead=pending_lead,
@@ -150,23 +150,21 @@ class TaskHardeningTest(TestCase):
             state=ProfileState.PENDING.value,
             backoff_hours=1,
         )
-        connected_lead = Lead.objects.create(
-            public_identifier="connected-warm",
-            linkedin_url="https://www.linkedin.com/in/connected-warm/",
+        qualified_lead = Lead.objects.create(
+            public_identifier="qualified-warm",
+            instagram_url="https://www.instagram.com/qualified-warm/",
         )
-        connected_deal = Deal.objects.create(
-            lead=connected_lead,
+        qualified_deal = Deal.objects.create(
+            lead=qualified_lead,
             campaign=self.campaign,
-            state=ProfileState.CONNECTED.value,
-            connection_assessment_source="api_degree_1",
-            connection_assessment_confidence=0.95,
+            state=ProfileState.QUALIFIED.value,
         )
         running_task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
             status=Task.Status.RUNNING,
             scheduled_at=timezone.now(),
-            deal=connected_deal,
-            payload={"campaign_id": self.campaign.id, "public_id": connected_lead.public_identifier},
+            deal=qualified_deal,
+            payload={"campaign_id": self.campaign.id, "public_id": qualified_lead.public_identifier},
         )
         session = MagicMock(campaigns=[self.campaign], campaign=self.campaign)
 
@@ -174,16 +172,18 @@ class TaskHardeningTest(TestCase):
 
         running_task.refresh_from_db()
         self.assertEqual(running_task.status, Task.Status.PENDING)
-        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.CONNECT).exists())
-        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.CHECK_PENDING, deal=pending_deal).exists())
-        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.FOLLOW_UP, deal=connected_deal).exists())
+        # pause_new_follows blocks expansion seed
+        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.FOLLOW).exists())
+        # DM-first: do not seed check_pending for PENDING deals
+        self.assertFalse(Task.objects.filter(task_type=Task.TaskType.CHECK_PENDING, deal=pending_deal).exists())
+        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.FOLLOW_UP, deal=qualified_deal).exists())
 
     def test_task_queue_ignores_due_connect_tasks_while_paused(self):
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         connect_task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now(),
             payload={"campaign_id": self.campaign.id},
         )
@@ -197,8 +197,8 @@ class TaskHardeningTest(TestCase):
         connect_task.refresh_from_db()
         self.assertEqual(connect_task.status, Task.Status.PENDING)
 
-        cfg.pause_new_connection_invites = False
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = False
+        cfg.save(update_fields=["pause_new_follows"])
         monitor_task.delete()
         self.assertEqual(Task.objects.claim_next(), connect_task)
 
@@ -211,17 +211,17 @@ class TaskHardeningTest(TestCase):
         # strategy_for is mocked to avoid DB lookups for qualifiers.
         # find_candidate is never reached because can_execute=False fires first.
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now(),
             started_at=timezone.now()
         )
         
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         
         # Mock can_execute to return False (simulating rate limit)
-        with patch.object(LinkedInProfile, 'can_execute', return_value=False):
+        with patch.object(InstagramProfile, 'can_execute', return_value=False):
             with self.assertRaises(TaskSkipped):
                 handle_connect(task, session, {})
         
@@ -230,7 +230,7 @@ class TaskHardeningTest(TestCase):
         self.assertEqual(Task.objects.count(), 2)
         new_task = Task.objects.exclude(id=task.id).first()
         self.assertEqual(new_task.status, Task.Status.PENDING)
-        self.assertEqual(new_task.task_type, Task.TaskType.CONNECT)
+        self.assertEqual(new_task.task_type, Task.TaskType.FOLLOW)
 
     def test_check_pending_expiry(self):
         # [NEW-CRIT-01] Test 30-day age limit logic
@@ -238,8 +238,8 @@ class TaskHardeningTest(TestCase):
         from linkedin.tasks.check_pending import handle_check_pending
         from linkedin.enums import ProfileState
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
         
         lead = Lead.objects.create(public_identifier="old_guy")
         deal = Deal.objects.create(lead=lead, campaign=self.campaign)
@@ -289,7 +289,7 @@ class TaskHardeningTest(TestCase):
         session.campaign = self.campaign
 
         with patch(
-            "linkedin.actions.status.get_connection_assessment",
+            "linkedin.actions.status.get_follow_assessment",
             side_effect=SkipProfile("Top Card section not found"),
         ):
             handle_check_pending(task, session, {})
@@ -316,7 +316,7 @@ class TaskHardeningTest(TestCase):
         
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         
         with self.assertRaisesRegex(RuntimeError, "ChatMessage 9999 is not available"):
             handle_send_message(task, session)
@@ -328,11 +328,11 @@ class TaskHardeningTest(TestCase):
         
         msg = ChatMessage.objects.create(
             content="Hello", 
-            linkedin_urn="test_urn",
+            instagram_message_id="test_urn",
             content_type_id=1,
             object_id=1,  # dummy
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         
         task = Task.objects.create(
@@ -343,7 +343,7 @@ class TaskHardeningTest(TestCase):
         
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         
         with self.assertRaisesRegex(RuntimeError, "No Deal found"):
             handle_send_message(task, session)
@@ -368,12 +368,12 @@ class TaskHardeningTest(TestCase):
         from linkedin.tasks.follow_up import handle_follow_up
         from chat.models import ChatMessage
         cfg = SiteConfig.load()
-        cfg.pause_new_connection_invites = True
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = True
+        cfg.save(update_fields=["pause_new_follows"])
 
         from linkedin.enums import ProfileState
         lead = Lead.objects.create(public_identifier="dedup_test")
-        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.QUALIFIED.value)
 
         task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
@@ -383,14 +383,13 @@ class TaskHardeningTest(TestCase):
 
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
 
         decision = MagicMock()
         decision.action = "send_message"
         decision.message = "Hello again"
 
-        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
-        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+        with patch(
             'linkedin.agents.follow_up.run_follow_up_agent',
             return_value=decision,
         ):
@@ -406,7 +405,7 @@ class TaskHardeningTest(TestCase):
         from linkedin.tasks.follow_up import handle_follow_up
 
         lead = Lead.objects.create(public_identifier="quota_follow_up")
-        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.QUALIFIED.value)
         task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
             status=Task.Status.RUNNING,
@@ -415,13 +414,12 @@ class TaskHardeningTest(TestCase):
         )
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         quota_error = Exception(
             "429 RESOURCE_EXHAUSTED generate_content_free_tier_requests Please retry in 46.0s"
         )
 
-        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
-        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+        with patch(
             "linkedin.agents.follow_up.run_follow_up_agent",
             side_effect=quota_error,
         ):
@@ -441,19 +439,15 @@ class TaskHardeningTest(TestCase):
         from linkedin.tasks.follow_up import handle_follow_up
 
         lead = Lead.objects.create(public_identifier="wait_follow_up")
-        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        deal = Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.QUALIFIED.value)
         task = MagicMock(payload={"campaign_id": self.campaign.id, "public_id": "wait_follow_up"})
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         session.django_user = self.user
-        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
         decision = MagicMock(action="wait", follow_up_hours=2)
 
         with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}), patch(
-            "linkedin.actions.status.get_connection_assessment",
-            return_value=assessment,
-        ), patch(
             "linkedin.agents.follow_up.run_follow_up_agent",
             return_value=decision,
         ):
@@ -463,39 +457,60 @@ class TaskHardeningTest(TestCase):
         queued = Task.objects.get(task_type=Task.TaskType.FOLLOW_UP, deal=deal)
         self.assertGreaterEqual((queued.scheduled_at - before).total_seconds(), 2 * 3600 - 5)
 
-    def test_follow_up_does_not_draft_when_not_connected(self):
+    def test_follow_up_drafts_when_qualified_without_follow(self):
         from chat.models import ChatMessage
         from linkedin.tasks.follow_up import handle_follow_up
 
-        lead = Lead.objects.create(public_identifier="not_connected_follow_up")
-        deal = Deal.objects.create(
+        lead = Lead.objects.create(public_identifier="qualified_follow_up")
+        Deal.objects.create(
             lead=lead,
             campaign=self.campaign,
-            state=ProfileState.CONNECTED.value,
-            backoff_hours=1,
+            state=ProfileState.QUALIFIED.value,
         )
         task = Task.objects.create(
             task_type=Task.TaskType.FOLLOW_UP,
-            payload={"campaign_id": self.campaign.id, "public_id": "not_connected_follow_up"},
+            payload={"campaign_id": self.campaign.id, "public_id": "qualified_follow_up"},
             scheduled_at=timezone.now(),
         )
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
-        assessment = MagicMock(state=ProfileState.QUALIFIED, source="ui_connect_visible", confidence=0.8)
+        session.instagram_profile = self.profile
+        decision = MagicMock(action="send_message", message="Hi from Eshway")
 
-        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
-            "linkedin.agents.follow_up.run_follow_up_agent",
-        ) as mock_agent:
-            with self.assertRaisesRegex(TaskSkipped, "requires an API-verified connected profile"):
+        with patch("linkedin.agents.follow_up.run_follow_up_agent", return_value=decision):
+            handle_follow_up(task, session, {})
+
+        self.assertTrue(
+            ChatMessage.objects.filter(object_id=lead.pk, is_draft=True, content="Hi from Eshway").exists()
+        )
+
+    def test_follow_up_skips_pending_deals(self):
+        from chat.models import ChatMessage
+        from linkedin.tasks.follow_up import handle_follow_up
+
+        lead = Lead.objects.create(public_identifier="pending_follow_up")
+        Deal.objects.create(
+            lead=lead,
+            campaign=self.campaign,
+            state=ProfileState.PENDING.value,
+        )
+        task = Task.objects.create(
+            task_type=Task.TaskType.FOLLOW_UP,
+            payload={"campaign_id": self.campaign.id, "public_id": "pending_follow_up"},
+            scheduled_at=timezone.now(),
+        )
+        session = MagicMock()
+        session.campaign = self.campaign
+        session.instagram_profile = self.profile
+
+        with patch("linkedin.agents.follow_up.run_follow_up_agent") as mock_agent:
+            with self.assertRaisesRegex(TaskSkipped, "Qualified or Connected"):
                 handle_follow_up(task, session, {})
 
         mock_agent.assert_not_called()
-        deal.refresh_from_db()
-        self.assertEqual(deal.state, ProfileState.QUALIFIED)
         self.assertFalse(ChatMessage.objects.filter(object_id=lead.pk, is_draft=True).exists())
 
-    def test_message_drafts_api_only_shows_connected_deal_drafts(self):
+    def test_message_drafts_api_shows_qualified_deal_drafts(self):
         import json
         from datetime import timedelta
         from django.contrib.contenttypes.models import ContentType
@@ -507,29 +522,27 @@ class TaskHardeningTest(TestCase):
         self.user.save(update_fields=["is_staff"])
         self.campaign.users.add(self.user)
         lead_ct = ContentType.objects.get_for_model(Lead)
-        connected_lead = Lead.objects.create(
-            public_identifier="connected-draft",
-            linkedin_url="https://www.linkedin.com/in/connected-draft/",
+        qualified_lead = Lead.objects.create(
+            public_identifier="qualified-draft",
+            instagram_url="https://www.instagram.com/qualified-draft/",
         )
         pending_lead = Lead.objects.create(
             public_identifier="pending-draft",
-            linkedin_url="https://www.linkedin.com/in/pending-draft/",
+            instagram_url="https://www.instagram.com/pending-draft/",
         )
         other_profile_lead = Lead.objects.create(
             public_identifier="other-profile-draft",
-            linkedin_url="https://www.linkedin.com/in/other-profile-draft/",
+            instagram_url="https://www.instagram.com/other-profile-draft/",
         )
-        other_profile = LinkedInProfile.objects.create(
+        other_profile = InstagramProfile.objects.create(
             user=self.user,
-            linkedin_username="other-profile@example.com",
+            instagram_username="other-profile@example.com",
             active=False,
         )
-        connected_deal = Deal.objects.create(
-            lead=connected_lead,
+        qualified_deal = Deal.objects.create(
+            lead=qualified_lead,
             campaign=self.campaign,
-            state=ProfileState.CONNECTED.value,
-            connection_assessment_source="api_degree_1",
-            connection_assessment_confidence=0.95,
+            state=ProfileState.QUALIFIED.value,
         )
         Deal.objects.create(
             lead=pending_lead,
@@ -539,18 +552,16 @@ class TaskHardeningTest(TestCase):
         Deal.objects.create(
             lead=other_profile_lead,
             campaign=self.campaign,
-            state=ProfileState.CONNECTED.value,
-            connection_assessment_source="api_degree_1",
-            connection_assessment_confidence=0.95,
+            state=ProfileState.QUALIFIED.value,
         )
-        connected_draft = ChatMessage.objects.create(
+        qualified_draft = ChatMessage.objects.create(
             content_type=lead_ct,
-            object_id=connected_lead.pk,
+            object_id=qualified_lead.pk,
             campaign=self.campaign,
             owner=self.user,
-            linkedin_profile=self.profile,
-            content="Connected draft",
-            linkedin_urn="draft_connected_visible",
+            instagram_profile=self.profile,
+            content="Qualified draft",
+            instagram_message_id="draft_qualified_visible",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -560,9 +571,9 @@ class TaskHardeningTest(TestCase):
             object_id=pending_lead.pk,
             campaign=self.campaign,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             content="Pending draft",
-            linkedin_urn="draft_pending_hidden",
+            instagram_message_id="draft_pending_hidden",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -572,9 +583,9 @@ class TaskHardeningTest(TestCase):
             object_id=other_profile_lead.pk,
             campaign=self.campaign,
             owner=self.user,
-            linkedin_profile=other_profile,
+            instagram_profile=other_profile,
             content="Other profile draft",
-            linkedin_urn="draft_other_profile_hidden",
+            instagram_message_id="draft_other_profile_hidden",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -585,9 +596,9 @@ class TaskHardeningTest(TestCase):
             scheduled_at=timezone.now() - timedelta(hours=1),
             payload={
                 "campaign_id": self.campaign.pk,
-                "public_id": connected_lead.public_identifier,
+                "public_id": qualified_lead.public_identifier,
                 "owner_id": self.user.pk,
-                "linkedin_profile_id": self.profile.pk,
+                "instagram_profile_id": self.profile.pk,
             },
         )
         Task.objects.create(
@@ -598,7 +609,7 @@ class TaskHardeningTest(TestCase):
                 "campaign_id": self.campaign.pk,
                 "public_id": other_profile_lead.public_identifier,
                 "owner_id": self.user.pk,
-                "linkedin_profile_id": other_profile.pk,
+                "instagram_profile_id": other_profile.pk,
             },
         )
         Task.objects.create(
@@ -609,7 +620,7 @@ class TaskHardeningTest(TestCase):
                 "campaign_id": self.campaign.pk,
                 "public_id": other_profile_lead.public_identifier,
                 "owner_id": self.user.pk,
-                "linkedin_profile_id": other_profile.pk,
+                "instagram_profile_id": other_profile.pk,
             },
             error="Other profile failure",
         )
@@ -619,7 +630,7 @@ class TaskHardeningTest(TestCase):
         list_request.user = self.user
         response = api_message_drafts(list_request)
         payload = json.loads(response.content)
-        self.assertEqual([item["id"] for item in payload["items"]], [connected_draft.pk])
+        self.assertEqual([item["id"] for item in payload["items"]], [qualified_draft.pk])
 
         diagnostics_request = rf.get("/api/messages/diagnostics/")
         diagnostics_request.user = self.user
@@ -633,7 +644,7 @@ class TaskHardeningTest(TestCase):
 
         approve_request = rf.post(
             "/api/messages/drafts/approve/",
-            data=json.dumps({"ids": [connected_draft.pk, pending_draft.pk]}),
+            data=json.dumps({"ids": [qualified_draft.pk, pending_draft.pk]}),
             content_type="application/json",
         )
         approve_request.user = self.user
@@ -643,16 +654,16 @@ class TaskHardeningTest(TestCase):
         pending_draft.refresh_from_db()
         self.assertTrue(pending_draft.is_draft)
         self.assertFalse(pending_draft.is_approved)
-        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.SEND_MESSAGE, deal=connected_deal).exists())
+        self.assertTrue(Task.objects.filter(task_type=Task.TaskType.SEND_MESSAGE, deal=qualified_deal).exists())
 
-    def test_follow_up_draft_dedup_is_scoped_to_linkedin_profile_owner(self):
+    def test_follow_up_draft_dedup_is_scoped_to_instagram_profile_owner(self):
         from django.contrib.auth.models import User
         from django.contrib.contenttypes.models import ContentType
         from linkedin.tasks.follow_up import handle_follow_up
         from chat.models import ChatMessage
 
         lead = Lead.objects.create(public_identifier="owner_scoped_draft")
-        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.CONNECTED.value)
+        Deal.objects.create(lead=lead, campaign=self.campaign, state=ProfileState.QUALIFIED.value)
         other_user = User.objects.create_user(username="other_draft_owner")
         lead_ct = ContentType.objects.get_for_model(Lead)
         ChatMessage.objects.create(
@@ -661,7 +672,7 @@ class TaskHardeningTest(TestCase):
             campaign=self.campaign,
             owner=other_user,
             content="Other account draft",
-            linkedin_urn="draft_other_owner",
+            instagram_message_id="draft_other_owner",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -677,12 +688,11 @@ class TaskHardeningTest(TestCase):
         )
         session = MagicMock()
         session.campaign = self.campaign
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
         session.django_user = self.user
         decision = MagicMock(action="send_message", message="Owner-specific draft")
 
-        assessment = MagicMock(state=ProfileState.CONNECTED, source="api_degree_1", confidence=0.95)
-        with patch("linkedin.actions.status.get_connection_assessment", return_value=assessment), patch(
+        with patch(
             "linkedin.agents.follow_up.run_follow_up_agent",
             return_value=decision,
         ):

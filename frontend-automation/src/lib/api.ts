@@ -14,8 +14,8 @@ import type {
   GoogleSheetItem,
   GoogleStatus,
   Lead,
-  LinkedInProfileCreatePayload,
-  LinkedInProfileItem,
+  InstagramProfileCreatePayload,
+  InstagramProfileItem,
   MessagingDiagnostics,
   FollowupSuggestion,
   LeadInsights,
@@ -57,6 +57,42 @@ function cacheKeyFor(path: string) {
 function clearApiCache() {
   responseCache.clear();
   inflight.clear();
+}
+
+class ApiHttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiHttpError";
+    this.status = status;
+  }
+}
+
+type RawProfile = Record<string, unknown>;
+
+function asNumber(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+/** Normalize Instagram profile payloads from `/api/instagram-profiles/`. */
+function normalizeProfileItem(raw: RawProfile | null | undefined): InstagramProfileItem {
+  const r = raw || {};
+  return {
+    id: asNumber(r.id, 0),
+    userId: asNumber(r.userId, 0),
+    djangoUser: asString(r.djangoUser),
+    djangoEmail: asString(r.djangoEmail),
+    username: asString(r.username ?? r.instagramUsername),
+    active: Boolean(r.active),
+    dmDailyLimit: asNumber(r.dmDailyLimit ?? r.followUpDailyLimit, 15),
+    hasCookies: Boolean(r.hasCookies),
+    createdAt: typeof r.createdAt === "string" ? r.createdAt : null,
+  };
 }
 
 async function request<T>(
@@ -101,11 +137,15 @@ async function request<T>(
         : ({ ok: false, error: raw || `Unexpected response (${res.status})` } as Record<string, unknown>);
     if (!res.ok) {
       if (res.redirected || (res.status >= 300 && res.status < 400)) {
-        throw new Error(
+        throw new ApiHttpError(
           `Got redirect (${res.status}) fetching API — disable cache / hard reload (DevTools Network: disable cache)`,
+          res.status,
         );
       }
-      throw new Error(data?.error || `Request failed (${res.status})`);
+      throw new ApiHttpError(
+        (typeof data?.error === "string" && data.error) || `Request failed (${res.status})`,
+        res.status,
+      );
     }
     return data as ApiResult<T>;
   })();
@@ -226,19 +266,32 @@ export const api = {
     request<{ items: ActionLog[]; pagination: { page: number; pageSize: number; total: number } }>(
       `/api/action-logs?${params.toString()}`,
     ),
-  linkedinProfiles: () => request<{ items: LinkedInProfileItem[] }>("/api/linkedin-profiles/"),
-  createLinkedinProfile: (payload: LinkedInProfileCreatePayload) =>
-    request<{ item: LinkedInProfileItem }>("/api/linkedin-profiles/", {
+  instagramProfiles: async () => {
+    const data = await request<{ items: RawProfile[] }>("/api/instagram-profiles/");
+    return { ...data, items: (data.items || []).map(normalizeProfileItem) };
+  },
+  createInstagramProfile: async (payload: InstagramProfileCreatePayload) => {
+    const body = {
+      username: payload.username,
+      password: payload.password,
+      instagramUsername: payload.username,
+      instagramPassword: payload.password,
+      active: payload.active,
+      dmDailyLimit: payload.dmDailyLimit,
+      followUpDailyLimit: payload.dmDailyLimit,
+    };
+    const data = await request<{ item: RawProfile }>("/api/instagram-profiles/", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
+    });
+    return { ...data, item: normalizeProfileItem(data.item) };
+  },
+  deleteInstagramProfile: (profileId: number) =>
+    request<{ deleted: boolean; id: number }>(`/api/instagram-profiles/${profileId}/`, {
+      method: "DELETE",
     }),
-  deleteLinkedinProfile: (profileId: number) =>
-    request<{ deleted: boolean; id: number }>(
-      `/api/linkedin-profiles/${profileId}/`,
-      { method: "DELETE" },
-    ),
-  toggleLinkedinProfile: (profileId: number) =>
-    request<{ active: boolean }>(`/api/linkedin-profiles/${profileId}/toggle/`, {
+  toggleInstagramProfile: (profileId: number) =>
+    request<{ active: boolean }>(`/api/instagram-profiles/${profileId}/toggle/`, {
       method: "POST",
       body: JSON.stringify({}),
     }),

@@ -1,62 +1,54 @@
-# Leadway Next.js Frontend
+# Leadway Next.js Frontend — Instagram Outreach
 
-This is a full frontend rebuilt in Next.js + Tailwind and connected to the Django backend.
+Operator UI for Leadway Instagram automation (Eshway website-dev + agency collab campaigns).
 
 ## Stack
 
-- Next.js App Router
-- Tailwind CSS
-- Typed API client
-- Backend proxy route (`/api/backend/*`) to forward cookies/session to Django
+- Next.js App Router + Tailwind
+- Typed API client with backend proxy (`/api/backend/*`)
 
-## Features Implemented
+## Features
 
-- Login/logout using Django staff credentials
-- Dashboard stats
-- Campaign listing
-- Leads table with search/state filter
-- Deals table
-- Task queue view
-- HITL message drafts + batch approve action
-- Google Workspace page (embedded + open in new tab)
+- Login via Django staff credentials
+- Dashboard, campaigns, leads, deals, tasks
+- Instagram profiles (credentials + limits)
+- HITL message drafts + batch approve (DM copy from messaging skill on backend)
+- Google Workspace / Sheets
+- Daemon controls
 
-## Backend API Added (Django)
+## Messaging skill note
 
-The frontend consumes these Django JSON endpoints:
+UI does not embed the outreach skill. Backend draft/regenerate endpoints use `skills/eshway_client_outreach_skill.md` for **Instagram DM wording only**. Search/qualify stay ICP-driven.
 
-- `/api/csrf/`
-- `/api/auth/login/`
-- `/api/auth/logout/`
-- `/api/auth/me/`
-- `/api/dashboard/`
-- `/api/campaigns/`
-- `/api/leads/`
-- `/api/deals/`
-- `/api/tasks/`
-- `/api/messages/drafts/`
-- `/api/messages/drafts/approve/`
+## Local run
 
-## Local Run
-
-### 1) Start Django backend (repo root)
+### 1) Backend (repo)
 
 ```bash
+cd ../backend-automation
 source .venv/bin/activate
+python manage.py migrate    # Instagram schema — required
 python manage.py runserver
+# optional worker:
+python manage.py rundaemon
 ```
 
-### 2) Start Next.js frontend (`Automation_frontend`)
+### 2) Frontend
 
 ```bash
-cd Automation_frontend
-cp .env.local.example .env.local
+cd frontend-automation
+# optional: cp .env.local.example .env.local when present
 npm install
 npm run dev
 ```
 
+Or from monorepo root: `./run-dev.sh` / `./run-dev.sh --daemon`
+
 Open [http://localhost:3000](http://localhost:3000).
 
-## Notes
+## API
 
-- The frontend uses Django session auth; login is handled through `/api/auth/login/`.
-- For production, set `BACKEND_BASE_URL` and `NEXT_PUBLIC_BACKEND_URL` in `.env.local`.
+Profile routes: `/api/instagram-profiles/`.
+
+See [`../INSTAGRAM_CONVERSION_NOTES.md`](../INSTAGRAM_CONVERSION_NOTES.md) and [`../docs/TESTING_CHECKLIST.md`](../docs/TESTING_CHECKLIST.md).
+Phased testing can start after backend `migrate`; live E2E still needs a real Instagram session.

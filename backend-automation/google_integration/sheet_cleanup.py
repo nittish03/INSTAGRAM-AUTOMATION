@@ -24,8 +24,19 @@ logger = logging.getLogger(__name__)
 # Tabs we refuse to modify unless explicitly overridden (team / default sheets).
 _FORBIDDEN_TAB_NORMALIZED = frozenset({"sheet1"})
 
-# Read enough columns for legacy sheets that put LinkedIn outside A–G.
+# Read enough columns for sheets that put profile URLs outside A–G.
 _READ_RANGE_COLUMNS = "A:Z"
+
+
+def _is_instagram_or_legacy_profile_url(s: str) -> bool:
+    """True for Instagram profile URLs; also accepts legacy LinkedIn /in|/pub cells."""
+    u = (s or "").lower()
+    if "instagram.com/" in u:
+        # Exclude posts/reels/explore noise when scanning cells
+        if any(x in u for x in ("/p/", "/reel/", "/reels/", "/explore/", "/stories/")):
+            return False
+        return True
+    return "linkedin.com/in/" in u or "linkedin.com/pub/" in u
 
 
 def _col_index_to_a1_letter(idx: int) -> str:
@@ -74,22 +85,27 @@ def _url_from_sheets_cell(raw: str) -> str:
     return s
 
 
-def detect_linkedin_url_column(header_row: list[str]) -> int:
-    """Return 0-based column index for LinkedIn URL (defaults to 3 = column D)."""
+def detect_instagram_url_column(header_row: list[str]) -> int:
+    """Return 0-based column index for Instagram URL (defaults to 3 = column D)."""
     header_row = _pad_row(header_row, 26)
     for i, cell in enumerate(header_row):
         h = (cell or "").strip().lower()
+        if "instagram" in h:
+            return i
+    for i, cell in enumerate(header_row):
+        h = (cell or "").strip().lower()
+        # Legacy sheets may still label the profile column with "linkedin".
         if "linkedin" in h:
             return i
     return 3
 
 
-def infer_linkedin_column_from_data_rows(
+def infer_profile_column_from_data_rows(
     rows: list[list[str]],
     *,
     max_scan: int = 80,
 ) -> int | None:
-    """When headers omit \"LinkedIn\", pick the column with the most profile URLs."""
+    """When headers omit Instagram (or legacy LinkedIn), pick the column with the most profile URLs."""
     if len(rows) < 2:
         return None
     counts = [0] * 26
@@ -98,8 +114,7 @@ def infer_linkedin_column_from_data_rows(
         pad = _pad_row(row, 26)
         for j in range(26):
             t = _url_from_sheets_cell(_cell_to_str(pad[j]))
-            low = (t or "").lower()
-            if "linkedin.com/in/" in low or "linkedin.com/pub/" in low:
+            if _is_instagram_or_legacy_profile_url(t):
                 counts[j] += 1
     best = max(range(26), key=lambda i: counts[i])
     if counts[best] > 0:
@@ -107,37 +122,33 @@ def infer_linkedin_column_from_data_rows(
     return None
 
 
-def resolve_linkedin_column_index(rows: list[list[str]]) -> tuple[int, str]:
+def resolve_instagram_column_index(rows: list[list[str]]) -> tuple[int, str]:
     """Header-based detection, else vote from data rows."""
     header = rows[0] if rows else []
-    li = detect_linkedin_url_column(header)
+    col = detect_instagram_url_column(header)
     joined = " ".join(_cell_to_str(c) for c in header).lower()
-    if "linkedin" in joined:
-        return li, "header"
-    inferred = infer_linkedin_column_from_data_rows(rows)
+    if "instagram" in joined or "linkedin" in joined:
+        return col, "header"
+    inferred = infer_profile_column_from_data_rows(rows)
     if inferred is not None:
         return inferred, "data_scan"
-    return li, "default_d"
+    return col, "default_d"
 
 
-def extract_linkedin_url_from_row(
+def extract_instagram_url_from_row(
     row: list[str],
     preferred_col: int,
 ) -> tuple[str, bool]:
     """Return (url_or_empty, used_fallback_scan).
 
-    Prefer the detected column; if empty or non-URL text there, scan the row for
-    ``linkedin.com/in/`` or ``linkedin.com/pub/`` (legacy layouts / jagged API rows).
+    Prefer the detected column; if empty or non-profile text there, scan the row for
+    ``instagram.com/<user>`` (or legacy LinkedIn /in|/pub).
     """
     row = _pad_row(row, max(preferred_col + 1, 26))
 
-    def _is_profile_url(s: str) -> bool:
-        u = (s or "").lower()
-        return "linkedin.com/in/" in u or "linkedin.com/pub/" in u
-
     raw_primary = row[preferred_col] if preferred_col < len(row) else ""
     primary = _url_from_sheets_cell(raw_primary)
-    if primary and "linkedin.com" in primary.lower():
+    if primary and _is_instagram_or_legacy_profile_url(primary):
         return primary, False
 
     found = ""
@@ -146,7 +157,7 @@ def extract_linkedin_url_from_row(
         text = _url_from_sheets_cell((cell or "").strip())
         if not text:
             continue
-        if _is_profile_url(text):
+        if _is_instagram_or_legacy_profile_url(text):
             found = text
             used_fallback = j != preferred_col or (not raw_primary.strip())
             break
@@ -293,14 +304,43 @@ def assert_safe_target_tab(tab: str, *, force_unsafe_tab: bool = False) -> None:
         )
 
 
-def extract_public_id_from_linkedin_url(url: str) -> str | None:
+def extract_public_id_from_instagram_url(url: str) -> str | None:
+    """Extract Instagram username (or legacy LinkedIn /in|/pub id) from a sheet cell URL."""
     raw = (url or "").strip()
     if not raw:
         return None
-    m = re.search(r"linkedin\.com/in/([^/?#]+)", raw, re.IGNORECASE)
+
+    low = raw.lower()
+
+    # Instagram profile URLs / bare @handles — do not run LinkedIn paths through IG parser.
+    if "instagram.com/" in low or ("://" not in raw and "/" not in raw):
+        try:
+            from linkedin.url_utils import url_to_public_id
+
+            pid = url_to_public_id(raw)
+            if pid:
+                return pid
+        except Exception:
+            pass
+        ig = re.search(r"instagram\.com/([^/?#\"')\s]+)", raw, re.IGNORECASE)
+        if ig:
+            handle = unquote(ig.group(1)).strip().lstrip("@")
+            reserved = {
+                "p", "reel", "reels", "stories", "explore", "accounts",
+                "direct", "about", "legal", "tags", "tv",
+            }
+            if handle and handle.lower() not in reserved:
+                return handle
+        if "://" not in raw and "/" not in raw:
+            handle = raw.lstrip("@").strip()
+            return handle or None
+        return None
+
+    # Legacy LinkedIn cells still present on some sheets.
+    m = re.search(r"linkedin\.com/(?:in|pub)/([^/?#\"')\s]+)", raw, re.IGNORECASE)
     if not m:
         return None
-    return unquote(m.group(1)).strip()
+    return unquote(m.group(1)).strip() or None
 
 
 def _pick_primary_pipeline_deal(lead):
@@ -316,7 +356,7 @@ def _pick_primary_pipeline_deal(lead):
 
 
 def lead_for_sheet_row(url_cell: str):
-    """Resolve a CRM Lead from a LinkedIn URL cell (flexible matching)."""
+    """Resolve a CRM Lead from a Instagram URL cell (flexible matching)."""
     from django.db.models.functions import Lower
 
     from crm.models import Lead
@@ -325,18 +365,18 @@ def lead_for_sheet_row(url_cell: str):
     if not url:
         return None
 
-    lead = Lead.objects.filter(linkedin_url=url).first()
+    lead = Lead.objects.filter(instagram_url=url).first()
     if lead:
         return lead
 
-    pid = extract_public_id_from_linkedin_url(url)
+    pid = extract_public_id_from_instagram_url(url)
     if pid:
         lead = Lead.objects.filter(public_identifier__iexact=pid).first()
         if lead:
             return lead
 
     base = url.rstrip("/").lower()
-    return Lead.objects.annotate(_lu=Lower("linkedin_url")).filter(_lu=base).first()
+    return Lead.objects.annotate(_lu=Lower("instagram_url")).filter(_lu=base).first()
 
 
 def rebuild_verified_tab_only(
@@ -395,12 +435,12 @@ def rebuild_verified_tab_only(
     rows = _get_values(sheets, sid, rng)
 
     header = rows[0] if rows else []
-    li_col, li_src = resolve_linkedin_column_index(rows)
+    ig_col, ig_src = resolve_instagram_column_index(rows)
     logger.info(
-        "LinkedIn URL column: %s (%s) [%s]",
-        _col_index_to_a1_letter(li_col),
-        (header[li_col] if li_col < len(header) else "") or "(inferred)",
-        li_src,
+        "Instagram URL column: %s (%s) [%s]",
+        _col_index_to_a1_letter(ig_col),
+        (header[ig_col] if ig_col < len(header) else "") or "(inferred)",
+        ig_src,
     )
 
     verification_reject_counts: Counter[str] = Counter()
@@ -419,9 +459,9 @@ def rebuild_verified_tab_only(
         "tab_requested": (tab or "").strip(),
         "sheet_gid_requested": sheet_gid,
         "spreadsheet_id": sid,
-        "linkedin_column_index": li_col,
-        "linkedin_column_letter": _col_index_to_a1_letter(li_col),
-        "linkedin_detection": li_src,
+        "instagram_column_index": ig_col,
+        "instagram_column_letter": _col_index_to_a1_letter(ig_col),
+        "instagram_detection": ig_src,
         "rows_read": max(0, len(rows) - 1),
         "mode": mode,
         "dropped_no_url": 0,
@@ -445,7 +485,7 @@ def rebuild_verified_tab_only(
     for i, row in enumerate(rows):
         if i == 0:
             continue  # header
-        url_cell, used_fallback = extract_linkedin_url_from_row(row, li_col)
+        url_cell, used_fallback = extract_instagram_url_from_row(row, ig_col)
         if used_fallback:
             stats["urls_from_row_scan_fallback"] += 1
 

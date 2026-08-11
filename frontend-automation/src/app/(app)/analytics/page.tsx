@@ -138,7 +138,7 @@ export default function AnalyticsPage() {
                         <div
                           className="bg-violet-500"
                           style={{ width: `${(row.connect / dailyMax) * 100}%` }}
-                          title={`Connects: ${row.connect}`}
+                          title={`Follows: ${row.connect}`}
                         />
                         <div
                           className="bg-emerald-500"
@@ -155,7 +155,7 @@ export default function AnalyticsPage() {
               })}
               <div className="mt-3 flex items-center gap-4 text-xs text-slate-400">
                 <span className="inline-flex items-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded bg-violet-500" /> Connect
+                  <span className="inline-block h-3 w-3 rounded bg-violet-500" /> Follow
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <span className="inline-block h-3 w-3 rounded bg-emerald-500" /> Follow-up

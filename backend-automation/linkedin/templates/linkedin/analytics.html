@@ -237,12 +237,12 @@
       {% with t=totals %}
       <div class="kpi"><div class="num">{{ t.leads }}</div><div class="label">Leads</div><div class="sub">{{ t.leads_disqualified }} disqualified</div></div>
       <div class="kpi"><div class="num">{{ t.deals }}</div><div class="label">Deals</div><div class="sub">{{ t.pipeline_leads }} unique in pipeline</div></div>
-      <div class="kpi"><div class="num accent">{{ invites_30d }}</div><div class="label">Invites (30d)</div><div class="sub">connect actions</div></div>
+      <div class="kpi"><div class="num accent">{{ follows_30d }}</div><div class="label">Follows (30d)</div><div class="sub">follow actions</div></div>
       <div class="kpi"><div class="num accent">{{ followups_30d }}</div><div class="label">Follow-ups (30d)</div></div>
       <div class="kpi"><div class="num">{{ t.action_logs }}</div><div class="label">Action logs</div></div>
       <div class="kpi"><div class="num">{{ t.tasks }}</div><div class="label">Tasks</div><div class="sub">{{ t.tasks_pending }} pending</div></div>
       <div class="kpi"><div class="num">{{ t.campaigns }}</div><div class="label">Campaigns</div></div>
-      <div class="kpi"><div class="num">{{ t.linkedin_profiles_active }}</div><div class="label">Active LI profiles</div><div class="sub">of {{ t.linkedin_profiles }} total</div></div>
+      <div class="kpi"><div class="num">{{ t.instagram_profiles_active }}</div><div class="label">Active Instagram profiles</div><div class="sub">of {{ t.instagram_profiles }} total</div></div>
       <div class="kpi"><div class="num">{{ t.search_keywords_used }}</div><div class="label">Keywords used</div><div class="sub">of {{ t.search_keywords }}</div></div>
       <div class="kpi"><div class="num">{{ t.messages }}</div><div class="label">Chat messages</div><div class="sub">{{ t.messages_drafts }} drafts</div></div>
       {% endwith %}
@@ -250,7 +250,7 @@
 
     <div class="grid-2">
       <div class="card">
-        <h3>Invites &amp; follow-ups / day</h3>
+        <h3>Follows &amp; follow-ups / day</h3>
         <p class="hint">ActionLog · last 30 days</p>
         <div class="chart-box"><canvas id="chartActions" aria-label="Actions chart"></canvas></div>
       </div>
@@ -404,7 +404,7 @@
           data: {
             labels: labelShort,
             datasets: [
-              { label: "Connect", data: payload.actionsConnect, borderColor: "#9333ea", backgroundColor: "rgba(147, 51, 234, 0.12)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
+              { label: "Follow", data: payload.actionsFollow, borderColor: "#9333ea", backgroundColor: "rgba(147, 51, 234, 0.12)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
               { label: "Follow-up", data: payload.actionsFollowUp, borderColor: "#6366f1", backgroundColor: "rgba(99, 102, 241, 0.1)", fill: true, tension: 0.15, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
             ],
           },

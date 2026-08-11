@@ -70,7 +70,8 @@ def _classify_follow_up_mode(
     """Classify the next action mode before any LLM drafting.
 
     Stages:
-    - DISCOVERY: no conversation yet → process question only (no product pitch)
+    - DISCOVERY: no conversation yet → first Instagram DM using messaging skill
+      (CLIENT / COLLABORATION angle; Eshway intro allowed; not a search/qualify prompt)
     - REPLY: prospect messaged last → contextual reply; soft pitch allowed
     - FOLLOW_UP: we messaged last and delay elapsed → bump without hard pitch
     - WAIT: too soon to message again, or ambiguous timestamps
@@ -78,7 +79,8 @@ def _classify_follow_up_mode(
     if not messages:
         return (
             "DISCOVERY",
-            "No conversation exists yet, so draft a discovery question about their process (no product pitch).",
+            "No conversation exists yet, so draft a first Instagram DM using the Eshway messaging skill "
+            "(CLIENT or COLLABORATION angle with brief Eshway intro and one low-pressure CTA).",
             None,
         )
 

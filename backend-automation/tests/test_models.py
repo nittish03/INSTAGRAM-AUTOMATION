@@ -1,6 +1,6 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
-from linkedin.models import LinkedInProfile, Task, Campaign
+from linkedin.models import InstagramProfile, Task, Campaign
 from django.utils import timezone
 import os
 from unittest.mock import patch
@@ -12,27 +12,27 @@ class ModelHardeningTest(TestCase):
         self.user = User.objects.create_user(username="tester")
         self.campaign = Campaign.objects.create(name="Test Campaign")
 
-    def test_linkedin_profile_encryption(self):
-        profile = LinkedInProfile.objects.create(
+    def test_instagram_profile_encryption(self):
+        profile = InstagramProfile.objects.create(
             user=self.user,
-            linkedin_username="test@example.com",
-            linkedin_password="secretpassword"
+            instagram_username="test@example.com",
+            instagram_password="secretpassword"
         )
         
         # Verify transparency
-        self.assertEqual(profile.linkedin_password, "secretpassword")
+        self.assertEqual(profile.instagram_password, "secretpassword")
         
         # Verify DB storage is encrypted
         from django.db import connection
         with connection.cursor() as cursor:
-            cursor.execute("SELECT linkedin_password FROM linkedin_linkedinprofile WHERE id=%s", [profile.id])
+            cursor.execute("SELECT instagram_password FROM linkedin_instagramprofile WHERE id=%s", [profile.id])
             raw_value = cursor.fetchone()[0]
             self.assertTrue(raw_value.startswith("gAAAA"))
             self.assertNotEqual(raw_value, "secretpassword")
 
     def test_task_status_methods(self):
         task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             scheduled_at=timezone.now()
         )
         
@@ -65,17 +65,17 @@ class ModelHardeningTest(TestCase):
         self.assertEqual(logs.records[0].levelname, "DEBUG")
 
     def test_time_limits_env_can_disable_profile_rate_limits(self):
-        profile = LinkedInProfile.objects.create(
+        profile = InstagramProfile.objects.create(
             user=self.user,
-            connect_daily_limit=0,
-            connect_weekly_limit=0,
+            follow_daily_limit=0,
+            follow_weekly_limit=0,
             follow_up_daily_limit=0,
         )
 
         with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "true"}):
-            self.assertFalse(profile.can_execute("connect"))
+            self.assertFalse(profile.can_execute("follow"))
             self.assertFalse(profile.can_execute("follow_up"))
 
         with patch.dict(os.environ, {"BOT_TIME_LIMITS_ENABLED": "false"}):
-            self.assertTrue(profile.can_execute("connect"))
+            self.assertTrue(profile.can_execute("follow"))
             self.assertTrue(profile.can_execute("follow_up"))

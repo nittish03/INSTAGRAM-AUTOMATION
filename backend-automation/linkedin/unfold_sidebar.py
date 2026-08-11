@@ -29,7 +29,7 @@ _SIDEBAR_GROUPS = [
         ],
     },
     {
-        "title": _("LinkedIn"),
+        "title": _("Instagram"),
         "separator": True,
         "items": [
             {
@@ -43,9 +43,9 @@ _SIDEBAR_GROUPS = [
                 "link": reverse_lazy("admin:linkedin_campaign_changelist"),
             },
             {
-                "title": _("LinkedIn profiles"),
+                "title": _("Instagram profiles"),
                 "icon": "person",
-                "link": reverse_lazy("admin:linkedin_linkedinprofile_changelist"),
+                "link": reverse_lazy("admin:linkedin_instagramprofile_changelist"),
             },
             {
                 "title": _("Search keywords"),

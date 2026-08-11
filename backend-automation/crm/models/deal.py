@@ -36,27 +36,27 @@ class Deal(models.Model):
         default="",
     )
     reason = models.TextField(blank=True, default="")
-    connect_attempts = models.IntegerField(default=0)
+    follow_attempts = models.IntegerField(default=0)
     backoff_hours = models.IntegerField(default=0)
     creation_date = models.DateTimeField(default=timezone.now)
     update_date = models.DateTimeField(auto_now=True)
 
-    # Latest connection *inference* (API/UI heuristic). Export uses OutreachEvent + confidence, not this alone.
-    connection_assessment_source = models.CharField(
+    # Latest follow *inference* (API/UI heuristic). Export uses OutreachEvent + confidence, not this alone.
+    follow_assessment_source = models.CharField(
         max_length=64,
         blank=True,
         default="",
-        help_text="How we last assessed connection (e.g. api_degree_1, ui_message_button).",
+        help_text="How we last assessed follow status (e.g. api_follows_viewer, ui_message_button).",
     )
-    connection_assessment_confidence = models.FloatField(
+    follow_assessment_confidence = models.FloatField(
         null=True,
         blank=True,
-        help_text="0–1 confidence for the last connection assessment.",
+        help_text="0–1 confidence for the last follow assessment.",
     )
-    connection_assessed_at = models.DateTimeField(
+    follow_assessed_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When connection_assessment_* was last updated.",
+        help_text="When follow_assessment_* was last updated.",
     )
 
     history = HistoricalRecords()

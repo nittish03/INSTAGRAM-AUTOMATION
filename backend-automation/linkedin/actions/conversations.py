@@ -1,209 +1,200 @@
 # linkedin/actions/conversations.py
-"""Retrieve past LinkedIn conversations for a given profile."""
-import logging
-from datetime import datetime, timezone
+"""Sync Instagram DM threads via Playwright UI."""
+from __future__ import annotations
 
-from linkedin.api.client import PlaywrightLinkedinAPI
-from linkedin.api.messaging import fetch_conversations, fetch_messages, encode_urn
+import hashlib
+import logging
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from linkedin.actions.message import open_inbox
+from linkedin.actions.search import _go_to_profile
+from linkedin.url_utils import public_id_to_url
 
 logger = logging.getLogger(__name__)
 
 
-def _payload_mentions_urn(value, target_urn: str) -> bool:
-    """Return True when a nested Voyager payload explicitly mentions target_urn."""
-    if isinstance(value, str):
-        if value == target_urn:
-            return True
-        index = value.find(target_urn)
-        if index == -1:
-            return False
-        end = index + len(target_urn)
-        # Conversation URNs can embed member URNs; avoid accepting prefix matches
-        # like "...:abc1234" when the target is "...:abc123".
-        return end == len(value) or not (value[end].isalnum() or value[end] in "-_")
-    if isinstance(value, dict):
-        return any(_payload_mentions_urn(v, target_urn) for v in value.values())
-    if isinstance(value, list):
-        return any(_payload_mentions_urn(v, target_urn) for v in value)
+def _stable_message_id(username: str, text: str, idx: int) -> str:
+    digest = hashlib.sha1(f"{username}|{idx}|{text}".encode("utf-8")).hexdigest()[:24]
+    return f"ig_{username}_{digest}"
+
+
+def _open_thread_with_user(session, username: str) -> bool:
+    """Open DM thread for username via profile Message button or inbox search."""
+    page = session.page
+    username = username.lstrip("@")
+
+    # Prefer profile → Message (creates/opens thread)
+    try:
+        _go_to_profile(session, public_id_to_url(username), username)
+        session.wait()
+        for sel in (
+            'header button:has-text("Message"):visible',
+            'main button:has-text("Message"):visible',
+            'div[role="button"]:has-text("Message"):visible',
+        ):
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                loc.first.click()
+                session.wait(2, 4)
+                return "/direct/" in (page.url or "")
+    except Exception as exc:
+        logger.debug("Profile→Message open failed for %s: %s", username, exc)
+
+    # Inbox search fallback
+    try:
+        open_inbox(session)
+        session.wait()
+        # New message / search
+        for label in ("New message", "Search", "To:"):
+            try:
+                el = page.get_by_text(label, exact=False).first
+                if el.count() > 0:
+                    el.click(timeout=2000)
+                    session.wait()
+                    break
+            except Exception:
+                continue
+        search = page.locator('input[placeholder*="Search" i], input[name="queryBox"], input[type="text"]').first
+        if search.count() > 0:
+            search.fill(username)
+            session.wait(1, 2)
+            result = page.locator(f'text=/{re.escape(username)}/i').first
+            if result.count() > 0:
+                result.click()
+                session.wait()
+                # Chat / Next
+                for btn_label in ("Chat", "Next", "Message"):
+                    try:
+                        b = page.get_by_role("button", name=btn_label)
+                        if b.count() > 0:
+                            b.first.click(timeout=2000)
+                            session.wait()
+                            break
+                    except Exception:
+                        continue
+                return True
+    except Exception as exc:
+        logger.debug("Inbox search open failed for %s: %s", username, exc)
     return False
 
 
-def _conversation_urn_from_target_element(element: dict, target_urn: str) -> str | None:
-    if not isinstance(element, dict):
-        return None
+def scrape_thread_messages(session, username: str) -> list[dict]:
+    """Return parsed messages from the open / opened DM thread.
 
-    conversation = element.get("conversation")
-    conversation_urn = conversation.get("entityUrn") if isinstance(conversation, dict) else None
-    if not conversation_urn:
-        return None
+    Each item: {entityUrn, text, sender_name, sender_host_urn, delivered_at, is_outgoing}
+    """
+    page = session.page
+    username = username.lstrip("@")
+    self_username = ""
+    try:
+        self_username = (session.self_profile.get("username")
+                         or session.self_profile.get("public_identifier")
+                         or session.instagram_profile.instagram_username
+                         or "").lstrip("@")
+    except Exception:
+        self_username = (getattr(session.instagram_profile, "instagram_username", "") or "").lstrip("@")
 
-    sender = element.get("sender")
-    if isinstance(sender, dict) and sender.get("hostIdentityUrn") == target_urn:
-        return conversation_urn
+    if not _open_thread_with_user(session, username):
+        logger.debug("No DM thread for %s", username)
+        return []
 
-    if _payload_mentions_urn(conversation, target_urn):
-        return conversation_urn
+    session.wait(1, 2)
+    # TODO: Instagram thread DOM is highly variable; collect text bubbles best-effort.
+    bubbles = page.locator(
+        'div[role="listbox"] div[dir="auto"], '
+        'div[role="row"] div[dir="auto"], '
+        'div[class*="message"] div[dir="auto"]'
+    )
+    texts: list[str] = []
+    try:
+        count = min(bubbles.count(), 80)
+        for i in range(count):
+            txt = (bubbles.nth(i).inner_text() or "").strip()
+            if txt:
+                texts.append(txt)
+    except Exception as exc:
+        logger.debug("Bubble scrape failed: %s", exc)
 
-    participants = element.get("conversationParticipants")
-    if _payload_mentions_urn(participants, target_urn):
-        return conversation_urn
+    # Heuristic outgoing: we can't reliably get sender from DOM — alternate is unsafe.
+    # Prefer marking unknown as incoming unless bubble is near our composer (last few).
+    # For HITL sync, store texts with synthetic ids; is_outgoing inferred weakly.
+    messages: list[dict] = []
+    for idx, text in enumerate(texts):
+        # Without reliable attribution, treat all scraped as incoming unless already known
+        # outgoing placeholders match by content in db/chat.py.
+        messages.append(
+            {
+                "entityUrn": _stable_message_id(username, text, idx),
+                "text": text,
+                "sender_name": username,
+                "sender_host_urn": f"instagram:{username}",
+                "delivered_at": None,
+                "is_outgoing": False,
+            }
+        )
+    logger.debug("Scraped %d DM texts for %s (self=%s)", len(messages), username, self_username)
+    return messages
 
-    return None
 
-
-def find_conversation_urn(api: PlaywrightLinkedinAPI, target_urn: str, mailbox_urn: str) -> str | None:
-    """Find conversation URN for a target profile URN by scanning recent conversations."""
-    elements = fetch_conversations(api, mailbox_urn) or []
-    if not isinstance(elements, list):
-        logger.warning("Unexpected conversations payload type: %s", type(elements).__name__)
-        return None
-
-    for conv in elements:
-        if not isinstance(conv, dict):
-            continue
-        for p in conv.get("conversationParticipants", []):
-            if p.get("hostIdentityUrn") == target_urn:
-                return conv.get("entityUrn")
+def find_conversation_urn(api, target_urn: str, mailbox_urn: str) -> str | None:
+    """Deprecated helper — Instagram uses usernames, not conversation URNs."""
     return None
 
 
 def find_conversation_urn_via_navigation(session, target_urn: str) -> str | None:
-    """Navigate to the messaging page for a profile and capture the conversation URN.
-
-    Works for older conversations not in the first page of API results.
-    """
-    page = session.page
-    captured_urn = [None]
-
-    def on_response(response):
-        if "messengerMessages" not in response.url:
-            return
-        try:
-            data = response.json()
-            elements = data.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
-            for element in elements:
-                conversation_urn = _conversation_urn_from_target_element(element, target_urn)
-                if conversation_urn:
-                    captured_urn[0] = conversation_urn
-                    break
-        except Exception:
-            pass
-
-    session.context.on("response", on_response)
-    try:
-        url = f"https://www.linkedin.com/messaging/thread/new/?recipient={encode_urn(target_urn)}"
-        logger.debug("Navigating to messaging thread → %s", url)
-        page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_timeout(8_000)
-    except Exception as e:
-        logger.warning("Navigation to messaging thread failed: %s", e)
-    finally:
-        session.context.remove_listener("response", on_response)
-
-    return captured_urn[0]
+    """Deprecated — kept so imports do not break; returns synthetic thread key."""
+    username = (target_urn or "").replace("instagram:", "").lstrip("@")
+    if not username:
+        return None
+    if _open_thread_with_user(session, username):
+        return f"instagram:thread:{username}"
+    return None
 
 
 def parse_message_element(msg: dict) -> dict | None:
-    """Parse a single Voyager message element into a dict.
-
-    Returns {entityUrn, text, sender_name, sender_host_urn, delivered_at, is_outgoing (unset)}
-    or None if the element should be skipped.
-    """
-    body = msg.get("body", {})
-    text = body.get("text", "") if isinstance(body, dict) else str(body)
+    """Normalize a scraped / legacy message dict."""
+    if not isinstance(msg, dict):
+        return None
+    text = msg.get("text") or ""
+    if not text and isinstance(msg.get("body"), dict):
+        text = msg["body"].get("text", "")
     if not text:
         return None
-
-    sender = msg.get("sender", {})
-    participant = sender.get("participantType", {}).get("member", {})
-    first = (participant.get("firstName") or {}).get("text", "")
-    last = (participant.get("lastName") or {}).get("text", "")
-    sender_name = f"{first} {last}".strip() or "unknown"
-
-    delivered_at = msg.get("deliveredAt")
-    ts = (
-        datetime.fromtimestamp(delivered_at / 1000, tz=timezone.utc)
-        if delivered_at
-        else None
-    )
-
+    delivered_at = msg.get("delivered_at")
+    if isinstance(delivered_at, (int, float)):
+        delivered_at = datetime.fromtimestamp(delivered_at / 1000, tz=timezone.utc)
     return {
-        "entityUrn": msg.get("entityUrn"),
+        "entityUrn": msg.get("entityUrn") or msg.get("instagram_message_id") or "",
         "text": text,
-        "sender_name": sender_name,
-        "sender_host_urn": sender.get("hostIdentityUrn", ""),
-        "delivered_at": ts,
+        "sender_name": msg.get("sender_name") or "unknown",
+        "sender_host_urn": msg.get("sender_host_urn") or "",
+        "delivered_at": delivered_at,
+        "is_outgoing": bool(msg.get("is_outgoing", False)),
     }
 
 
 def parse_messages(elements: list[dict]) -> list[dict]:
-    """Parse message elements into a list of {sender, text, timestamp} dicts."""
-    if not isinstance(elements, list):
-        return []
-
-    messages = []
-    for msg in elements:
-        if not isinstance(msg, dict):
-            continue
+    out = []
+    for msg in elements or []:
         parsed = parse_message_element(msg)
         if not parsed:
             continue
         ts = parsed["delivered_at"]
-        messages.append({
-            "sender": parsed["sender_name"],
-            "text": parsed["text"],
-            "timestamp": ts.strftime("%Y-%m-%d %H:%M") if ts else "",
-        })
+        out.append(
+            {
+                "sender": parsed["sender_name"],
+                "text": parsed["text"],
+                "timestamp": ts.strftime("%Y-%m-%d %H:%M") if ts else "",
+            }
+        )
+    return out
 
-    messages.sort(key=lambda m: m["timestamp"])
-    return messages
 
-
-def get_conversation(session, target_urn: str, mailbox_urn: str) -> list[dict] | None:
-    """Retrieve past messages with a profile.
-
-    Args:
-        session: Browser session.
-        target_urn: Target profile URN.
-        mailbox_urn: Authenticated user's profile URN.
-
-    Returns a list of {sender, text, timestamp} dicts, or None if no conversation exists.
-    """
-    session.ensure_browser()
-    api = PlaywrightLinkedinAPI(session=session)
-
-    conversation_urn = find_conversation_urn(api, target_urn, mailbox_urn)
-    if not conversation_urn:
-        logger.debug("Not in recent conversations, trying navigation fallback")
-        conversation_urn = find_conversation_urn_via_navigation(session, target_urn)
-    if not conversation_urn:
-        logger.info("No conversation found for %s", target_urn)
+def get_conversation(session, target_urn: str, mailbox_urn: str = "") -> list[dict] | None:
+    username = (target_urn or "").replace("instagram:", "").lstrip("@")
+    elements = scrape_thread_messages(session, username)
+    if not elements:
         return None
-
-    elements = fetch_messages(api, conversation_urn)
     return parse_messages(elements)
-
-
-if __name__ == "__main__":
-    from crm.models import Lead
-    from linkedin.browser.registry import cli_parser, cli_session
-
-    parser = cli_parser("Retrieve LinkedIn conversation history")
-    parser.add_argument("--profile", required=True, help="Public identifier of target profile")
-    args = parser.parse_args()
-    session = cli_session(args)
-
-    print(f"Fetching conversation as {session} → {args.profile}")
-    lead = Lead.objects.get(public_identifier=args.profile)
-    target_urn = lead.get_urn(session)
-    mailbox_urn = session.self_profile["urn"]
-    messages = get_conversation(session, target_urn, mailbox_urn)
-
-    if messages is None:
-        print(f"No conversation found with {args.profile}")
-    elif not messages:
-        print("Conversation found but no messages parsed")
-    else:
-        print(f"\n--- Conversation with {args.profile} ({len(messages)} messages) ---\n")
-        for msg in messages:
-            print(f"[{msg['timestamp']}] {msg['sender']}: {msg['text']}\n")

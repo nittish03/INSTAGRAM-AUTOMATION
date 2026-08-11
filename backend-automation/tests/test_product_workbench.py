@@ -24,7 +24,7 @@ class ProductWorkbenchApiTests(TestCase):
             first_name="Ada",
             last_name="Lovelace",
             company_name="Analytical",
-            linkedin_url="https://www.linkedin.com/in/adalovelace/",
+            instagram_url="https://www.instagram.com/adalovelace/",
             public_identifier="adalovelace",
             profile_data={"headline": "Engineer"},
         )
@@ -69,7 +69,7 @@ class ProductWorkbenchApiTests(TestCase):
             data={
                 "enabled": True,
                 "globalPauseOutreach": True,
-                "pauseNewConnectionInvites": True,
+                "pauseNewFollows": True,
                 "maxBulkApprove": 3,
                 "maxBulkExport": 4,
             },
@@ -78,24 +78,24 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertEqual(patch_resp.status_code, 200)
         cfg = SiteConfig.load(self.user)
         self.assertTrue(cfg.global_pause_outreach)
-        self.assertTrue(cfg.pause_new_connection_invites)
+        self.assertTrue(cfg.pause_new_follows)
         self.assertEqual(cfg.max_bulk_approve, 3)
         self.assertEqual(cfg.max_bulk_export, 4)
 
     def test_site_config_save_does_not_update_invite_pause(self):
         cfg = SiteConfig.load(self.user)
-        cfg.pause_new_connection_invites = False
-        cfg.save(update_fields=["pause_new_connection_invites"])
+        cfg.pause_new_follows = False
+        cfg.save(update_fields=["pause_new_follows"])
 
         response = self.client.post(
             "/api/site-config/save/",
-            data={"pauseNewConnectionInvites": True},
+            data={"pauseNewFollows": True},
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, 200)
         cfg.refresh_from_db()
-        self.assertFalse(cfg.pause_new_connection_invites)
+        self.assertFalse(cfg.pause_new_follows)
 
     def test_site_config_save_requires_staff(self):
         non_staff = User.objects.create_user(username="site_viewer", password="pass123")
@@ -118,7 +118,7 @@ class ProductWorkbenchApiTests(TestCase):
         cfg.save(update_fields=["safe_mode_enabled", "max_bulk_approve"])
 
         Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             status=Task.Status.FAILED,
             scheduled_at=timezone.now(),
             deal=self.deal,
@@ -134,11 +134,11 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Safe mode limit exceeded", response.json()["error"])
 
-    def test_pause_new_connection_invites_is_not_global_pause_for_warm_retry(self):
+    def test_pause_new_follows_is_not_global_pause_for_warm_retry(self):
         cfg = SiteConfig.load(self.user)
-        cfg.pause_new_connection_invites = True
+        cfg.pause_new_follows = True
         cfg.global_pause_outreach = False
-        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+        cfg.save(update_fields=["pause_new_follows", "global_pause_outreach"])
 
         response = self.client.post(f"/api/tasks/{self.failed_task.id}/retry/")
 
@@ -151,13 +151,13 @@ class ProductWorkbenchApiTests(TestCase):
             ).exists()
         )
 
-    def test_pause_new_connection_invites_does_not_retry_connect_tasks(self):
+    def test_pause_new_follows_does_not_retry_connect_tasks(self):
         cfg = SiteConfig.load(self.user)
-        cfg.pause_new_connection_invites = True
+        cfg.pause_new_follows = True
         cfg.global_pause_outreach = False
-        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+        cfg.save(update_fields=["pause_new_follows", "global_pause_outreach"])
         connect_task = Task.objects.create(
-            task_type=Task.TaskType.CONNECT,
+            task_type=Task.TaskType.FOLLOW,
             status=Task.Status.FAILED,
             scheduled_at=timezone.now(),
             deal=self.deal,
@@ -170,14 +170,14 @@ class ProductWorkbenchApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["item"]["taskId"], connect_task.id)
         self.assertFalse(
-            Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+            Task.objects.filter(task_type=Task.TaskType.FOLLOW, status=Task.Status.PENDING).exists()
         )
 
     def test_global_pause_behavior_remains_hard_pause(self):
         cfg = SiteConfig.load(self.user)
-        cfg.pause_new_connection_invites = False
+        cfg.pause_new_follows = False
         cfg.global_pause_outreach = True
-        cfg.save(update_fields=["pause_new_connection_invites", "global_pause_outreach"])
+        cfg.save(update_fields=["pause_new_follows", "global_pause_outreach"])
 
         response = self.client.post(f"/api/tasks/{self.failed_task.id}/retry/")
 

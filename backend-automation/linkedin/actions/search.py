@@ -1,206 +1,212 @@
 # linkedin/actions/search.py
+"""Instagram search / hashtag discovery + profile visit helpers."""
+from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, Any
-from urllib.parse import urlparse, parse_qs, urlencode
+from typing import Any, Dict
+from urllib.parse import quote
 
-from linkedin.browser.nav import goto_page, human_type, extract_in_urls
+from linkedin.browser.nav import extract_profile_urls, goto_page, human_type
 from linkedin.db.leads import discover_and_enrich
+from linkedin.url_utils import public_id_to_url, url_to_public_id
 
 logger = logging.getLogger(__name__)
 
-SELECTORS = {
-    "search_bar": "//input[contains(@placeholder, 'Search')]",
-    "profile_links": 'a[href*="/in/"]',
-    "results_container": "ul[role='list'], div.search-results-container, main",
-    "no_results_text": "No results found",
-}
+# TODO: Instagram search UI / URL shapes change frequently.
+SEARCH_INPUT_SELECTORS = [
+    'input[placeholder*="Search" i]',
+    'input[aria-label*="Search" i]',
+    'input[type="text"][placeholder]',
+]
 
 
 def _go_to_profile(session: "AccountSession", url: str, public_identifier: str):
     session.ensure_browser()
     if not session.page:
         raise RuntimeError("Browser page is unavailable after ensure_browser().")
-    if f"/in/{public_identifier}" in session.page.url:
+    username = public_identifier.lstrip("@")
+    if f"/{username}" in session.page.url.rstrip("/") and "/p/" not in session.page.url:
         return
-    logger.debug("Direct navigation → %s", public_identifier)
+    logger.debug("Direct navigation → %s", username)
     goto_page(
         session,
-        action=lambda: session.page.goto(url),
-        expected_url_pattern=f"/in/{public_identifier}",
-        error_message="Failed to navigate to the target profile"
+        action=lambda: session.page.goto(url if url else public_id_to_url(username)),
+        expected_url_pattern=f"/{username}",
+        error_message="Failed to navigate to the target Instagram profile",
     )
 
 
 def visit_profile(session: "AccountSession", profile: Dict[str, Any]):
-    public_identifier = profile.get("public_identifier")
-
-    # Ensure browser is alive before doing anything
+    public_identifier = (profile.get("public_identifier") or "").lstrip("@")
     session.ensure_browser()
 
-    already_there = f"/in/{public_identifier}" in session.page.url
-
+    already_there = (
+        f"/{public_identifier}" in (session.page.url or "")
+        and "/p/" not in session.page.url
+        and "/reel/" not in session.page.url
+    )
     if already_there:
         return
 
-    # Try simulating a human search first
     found_via_search = _simulate_human_search(session, profile)
-    
     if not found_via_search:
-        # Fallback to direct URL navigation if search fails
-        url = profile.get("url")
+        url = profile.get("url") or public_id_to_url(public_identifier)
         _go_to_profile(session, url, public_identifier)
 
-    # Discover and enrich new profiles visible on the page
-    urls = extract_in_urls(session.page)
+    urls = extract_profile_urls(session.page)
     discover_and_enrich(session, urls)
+
+
+def _is_hashtag(keyword: str) -> bool:
+    return keyword.strip().startswith("#")
 
 
 def _initiate_search(session: "AccountSession", keyword: str):
-    """Navigate directly to LinkedIn People search results for *keyword*."""
+    """Open Instagram search results for people or a hashtag page."""
     page = session.page
-    params = urlencode({"keywords": keyword, "origin": "GLOBAL_SEARCH_HEADER"})
-    url = f"https://www.linkedin.com/search/results/people/?{params}"
+    raw = keyword.strip()
+    if _is_hashtag(raw):
+        tag = raw.lstrip("#").strip()
+        url = f"https://www.instagram.com/explore/tags/{quote(tag)}/"
+        goto_page(
+            session,
+            action=lambda: page.goto(url),
+            expected_url_pattern="/explore/tags/",
+            error_message="Failed to reach Instagram hashtag page",
+        )
+        return
 
-    goto_page(
-        session,
-        action=lambda: page.goto(url),
-        expected_url_pattern="/search/results/people/",
-        error_message="Failed to reach People search results",
-    )
+    # People/top search results page (web)
+    url = f"https://www.instagram.com/explore/search/keyword/?q={quote(raw)}"
+    try:
+        goto_page(
+            session,
+            action=lambda: page.goto(url),
+            expected_url_pattern="/explore/search/",
+            error_message="Failed to reach Instagram keyword search",
+        )
+    except RuntimeError:
+        # Fallback: home → type into search box
+        goto_page(
+            session,
+            action=lambda: page.goto("https://www.instagram.com/"),
+            expected_url_pattern="instagram.com",
+            error_message="Failed to open Instagram home for search",
+        )
+        session.wait()
+        search = None
+        for sel in SEARCH_INPUT_SELECTORS:
+            loc = page.locator(f"{sel}:visible")
+            if loc.count() > 0:
+                search = loc.first
+                break
+        if search is None:
+            # Try clicking Search nav then input
+            try:
+                page.get_by_role("link", name="Search").first.click(timeout=3000)
+                session.wait()
+            except Exception:
+                pass
+            for sel in SEARCH_INPUT_SELECTORS:
+                loc = page.locator(f"{sel}:visible")
+                if loc.count() > 0:
+                    search = loc.first
+                    break
+        if search is None:
+            raise RuntimeError("Instagram search input not found")
+        search.click()
+        human_type(search, raw)
+        session.wait(2, 4)
 
 
 def _paginate_to_next_page(session: "AccountSession", page_num: int):
+    """Instagram web search is infinite-scroll — scroll instead of page query params."""
     page = session.page
-    current = urlparse(page.url)
-    params = parse_qs(current.query)
-    params["page"] = [str(page_num)]
-    new_url = current._replace(query=urlencode(params, doseq=True)).geturl()
-
-    logger.debug("Scanning search page %s", page_num)
-    goto_page(
-        session,
-        action=lambda: page.goto(new_url),
-        expected_url_pattern="/search/results/",
-        error_message="Pagination failed"
-    )
+    logger.debug("Scrolling Instagram results (pass %s)", page_num)
+    try:
+        page.mouse.wheel(0, 2400)
+    except Exception:
+        page.evaluate("window.scrollBy(0, 2400)")
+    session.wait(1, 2)
 
 
 def _extract_search_urls_with_retry(session: "AccountSession", attempts: int = 3) -> set[str]:
-    """Extract profile URLs with lazy-load aware retries.
-
-    LinkedIn search results are often rendered after initial navigation and may
-    require short wait+scroll cycles before profile links appear.
-    """
     page = session.page
     urls: set[str] = set()
-
     for i in range(attempts):
         try:
-            page.locator(SELECTORS["results_container"]).first.wait_for(state="visible", timeout=5000)
-        except Exception:
-            pass
-
-        urls = extract_in_urls(page)
+            urls |= extract_profile_urls(page)
+        except Exception as exc:
+            logger.debug("URL extract attempt %s failed: %s", i + 1, exc)
         if urls:
             return urls
-
-        if page.get_by_text(SELECTORS["no_results_text"], exact=False).count() > 0:
-            logger.info("Search returned 'No results found'")
-            return set()
-
-        # Trigger lazy rendering for results grids before retrying.
-        page.mouse.wheel(0, 1800)
-        time.sleep(1.2 + (i * 0.4))
-
+        try:
+            page.mouse.wheel(0, 1200)
+        except Exception:
+            pass
+        time.sleep(1.0)
     return urls
 
 
-def search_people(session: "AccountSession", keyword: str, page: int = 1):
-    """Search LinkedIn People by keyword and navigate to the given page."""
+def _simulate_human_search(session: "AccountSession", profile: Dict[str, Any]) -> bool:
+    """Try to land on a profile via Instagram search (more human than direct URL)."""
+    public_identifier = (profile.get("public_identifier") or "").lstrip("@")
+    if not public_identifier:
+        return False
+    try:
+        _initiate_search(session, public_identifier)
+        session.wait()
+        # Click a result matching the username
+        page = session.page
+        candidates = page.locator(f'a[href="/{public_identifier}/"], a[href*="/{public_identifier}/"]')
+        if candidates.count() == 0:
+            return False
+        candidates.first.click()
+        session.wait()
+        return f"/{public_identifier}" in (page.url or "")
+    except Exception as exc:
+        logger.debug("Human search simulation failed for %s: %s", public_identifier, exc)
+        return False
+
+
+def search_and_discover(session: "AccountSession", keyword: str, max_pages: int = 3) -> int:
+    """Run keyword/hashtag search and enrich newly discovered profiles.
+
+    Returns number of URLs seen across scrolls (not necessarily newly created leads).
+    """
     session.ensure_browser()
     _initiate_search(session, keyword)
-    if page > 1:
-        _paginate_to_next_page(session, page)
-
-    urls = _extract_search_urls_with_retry(session)
-    if not urls:
-        logger.debug("No /in/ links extracted for keyword=%r page=%s", keyword, page)
-    discover_and_enrich(session, urls)
-
-
-def _simulate_human_search(session: "AccountSession", profile: Dict[str, Any]) -> bool:
-    full_name = profile.get("full_name")
-    public_identifier = profile.get("public_identifier")
-
-    # Reconstruct full_name if it's missing
-    if not full_name:
-        first = profile.get("first_name", "").strip()
-        last = profile.get("last_name", "").strip()
-        if first or last:
-            full_name = f"{first} {last}".strip() if first and last else (first or last)
-        else:
-            logger.error(f"No name available for {public_identifier}")
-            logger.debug(profile)
-            return False
-
-    if not public_identifier:
-        logger.error(f"Missing public_identifier for '{full_name}'")
-        raise ValueError("public_identifier is required")
-
-    logger.info(f"Human search → '{full_name}' (target: {public_identifier})")
-
-    _initiate_search(session, full_name)
-
-    max_pages_to_scan = 1
-
-    for current_page in range(1, max_pages_to_scan + 1):
-        logger.info("Scanning search results page %s", current_page)
-
-        target_locator = None
-        for link in session.page.locator(SELECTORS["profile_links"]).all():
-            href = link.get_attribute("href") or ""
-            if f"/in/{public_identifier}" in href:
-                target_locator = link
-                break
-
-        if target_locator:
-            logger.info("Target found in results → clicking")
-            target_locator.click()
-            session.wait()
-            return True
-
-        if session.page.get_by_text("No results found", exact=False).count() > 0:
-            logger.info("No results found → stopping search")
-            break
-
-        if current_page < max_pages_to_scan:
-            _paginate_to_next_page(session, current_page + 1)
-            session.wait()
-
-    logger.info("Target %s not found → falling back to direct URL", public_identifier)
-    return False
+    all_urls: set[str] = set()
+    for page_num in range(1, max_pages + 1):
+        urls = _extract_search_urls_with_retry(session)
+        all_urls |= urls
+        discover_and_enrich(session, urls)
+        if page_num < max_pages:
+            _paginate_to_next_page(session, page_num + 1)
+    return len(all_urls)
 
 
-# ——————————————————————————————————————————————————————————————
 if __name__ == "__main__":
     from linkedin.browser.registry import cli_parser, cli_session
 
-    parser = cli_parser("Navigate to a LinkedIn profile")
-    parser.add_argument("--profile", required=True, help="Public identifier of the target profile")
+    parser = cli_parser("Visit / search Instagram profiles")
+    parser.add_argument("--profile", default=None, help="Username to visit")
+    parser.add_argument("--keyword", default=None, help="Search keyword or #hashtag")
     args = parser.parse_args()
     session = cli_session(args)
 
-    test_profile = {
-        "url": f"https://www.linkedin.com/in/{args.profile}/",
-        "public_identifier": args.profile,
-    }
-
-    print(f"Navigating to profile as {session} → {args.profile}")
-
-    visit_profile(session, test_profile)
-
-    logger.info("Search complete! Final URL → %s", session.page.url)
-    input("Press Enter to close browser...")
-    session.close()
+    if args.keyword:
+        n = search_and_discover(session, args.keyword)
+        print(f"Discovered URLs seen: {n}")
+    elif args.profile:
+        visit_profile(
+            session,
+            {
+                "url": public_id_to_url(args.profile),
+                "public_identifier": args.profile,
+            },
+        )
+        print(f"Visited @{args.profile}")
+    else:
+        parser.print_help()

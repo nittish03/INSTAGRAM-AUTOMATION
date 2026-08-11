@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Add seed LinkedIn profile URLs as QUALIFIED leads for a campaign."
+    help = "Add seed Instagram profile URLs as QUALIFIED leads for a campaign."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -24,14 +24,14 @@ class Command(BaseCommand):
 
         if sys.stdin.isatty():
             self.stdout.write(
-                "Paste LinkedIn profile URLs (one per line).\n"
+                "Paste Instagram profile URLs (one per line).\n"
                 "Press Ctrl-D when done:\n"
             )
 
         text = sys.stdin.read()
         public_ids = parse_seed_urls(text)
         if not public_ids:
-            self.stderr.write("No valid LinkedIn URLs found.")
+            self.stderr.write("No valid Instagram URLs found.")
             return
 
         created = create_seed_leads(campaign, public_ids)

@@ -9,7 +9,7 @@ describe("SafeModeBanner", () => {
         settings={{
           enabled: true,
           globalPauseOutreach: false,
-          pauseNewConnectionInvites: true,
+          pauseNewFollows: true,
           maxBulkApprove: 20,
           maxBulkExport: 40,
         }}
@@ -17,7 +17,7 @@ describe("SafeModeBanner", () => {
     );
 
     expect(screen.getByText("Safe Mode: Enabled")).toBeInTheDocument();
-    expect(screen.getByText(/New invites paused: On/)).toBeInTheDocument();
+    expect(screen.getByText(/New outreach paused: On/)).toBeInTheDocument();
     expect(screen.getByText(/Max bulk approve: 20/)).toBeInTheDocument();
   });
 });

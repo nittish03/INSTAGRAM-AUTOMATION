@@ -192,7 +192,7 @@ export default function SearchKeywordsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Search Keywords"
-        description="Per-campaign keyword pool used by the bot for prospect discovery."
+        description="Per-campaign Instagram keyword pool for prospect discovery (webdev clients + agency collabs)."
         actions={
           <input
             className="input max-w-[260px]"

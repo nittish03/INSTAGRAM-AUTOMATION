@@ -30,8 +30,8 @@ SHEET_HEADER = [
     "Name",
     "Company Name",
     "Position",
-    "LinkedIn Profile",
-    "Connected",
+    "Instagram Profile",
+    "Followed",
     "Status",
     "Action",
     "Review",
@@ -63,12 +63,16 @@ def normalize_sheet_status(raw: str) -> str:
     mapped_to_connected = frozenset(
         {
             "Verified (API)",
+            "Verified (follow-back)",
             "Accepted (post-invite)",
+            "Accepted (post-follow)",
             "Unverified (manual bypass)",
         }
     )
     if s in mapped_to_connected:
         return ProfileState.CONNECTED.value
+    if s in ("Messaged",):
+        return ProfileState.QUALIFIED.value
     if s in (
         ProfileState.QUALIFIED.value,
         ProfileState.PENDING.value,
@@ -130,7 +134,7 @@ def _next_empty_row_index(rows: list[list[str]]) -> int:
     return max(len(rows) + 1, 2)
 
 
-def _normalize_linkedin_cell(raw: str) -> str:
+def _normalize_instagram_cell(raw: str) -> str:
     """Normalize profile URL/cell text enough to match plain and URL-encoded rows."""
     return unquote((raw or "").strip()).rstrip("/").lower()
 
@@ -143,31 +147,43 @@ def _sheet_text(raw: str) -> str:
     return value
 
 
-def _extract_public_id_from_linkedin_cell(raw: str) -> str:
-    """Extract exact /in/<public_id> from a URL or HYPERLINK formula cell."""
-    cell = _normalize_linkedin_cell(raw)
+def _extract_public_id_from_instagram_cell(raw: str) -> str:
+    """Extract Instagram handle; also accepts legacy linkedin.com/in/<id> cells."""
+    cell = _normalize_instagram_cell(raw)
+    ig = re.search(r"instagram\.com/([^/?#\"')\s]+)", cell, re.IGNORECASE)
+    if ig:
+        handle = ig.group(1).strip().lstrip("@")
+        if handle.lower() not in {"p", "reel", "reels", "stories", "explore", "accounts"}:
+            return handle
+    # Backward compat: older sheets may still contain LinkedIn /in/ cells.
     match = re.search(r"linkedin\.com/in/([^/?#\"')\s]+)", cell)
     if not match:
         return ""
     return match.group(1).strip()
 
 
-def _linkedin_column_index(header_row: list[str]) -> int:
+def _instagram_column_index(header_row: list[str]) -> int:
+    """Prefer Instagram Profile column; accept legacy 'linkedin' header as backward compat."""
     for idx, value in enumerate(header_row):
+        h = (value or "").strip().lower()
+        if "instagram" in h:
+            return idx
+    for idx, value in enumerate(header_row):
+        # Legacy sheets may still label the profile column "LinkedIn Profile".
         if "linkedin" in (value or "").strip().lower():
             return idx
     return 3
 
 
 def _lead_sheet_url(lead: "Lead") -> str:
-    return _normalize_linkedin_cell(lead.linkedin_url or "")
+    return _normalize_instagram_cell(lead.instagram_url or "")
 
 
 def _lead_sheet_public_id(lead: "Lead") -> str:
-    public_id = _normalize_linkedin_cell(lead.public_identifier or "")
+    public_id = _normalize_instagram_cell(lead.public_identifier or "")
     if public_id:
         return public_id
-    return _extract_public_id_from_linkedin_cell(lead.linkedin_url or "")
+    return _extract_public_id_from_instagram_cell(lead.instagram_url or "")
 
 
 def _find_existing_lead_row(
@@ -176,18 +192,18 @@ def _find_existing_lead_row(
     tab: str,
     lead: "Lead",
 ) -> tuple[int | None, list[str] | None]:
-    """Return the 1-based row index for this lead, matching only the LinkedIn URL column."""
+    """Return the 1-based row index for this lead, matching only the Instagram URL column."""
     lead_url = _lead_sheet_url(lead)
     lead_public_id = _lead_sheet_public_id(lead)
     if not lead_url and not lead_public_id:
         return None, None
 
     rows = get_values(account, sid, f"{tab}!A:J", value_render_option="FORMULA")
-    linkedin_col = _linkedin_column_index(rows[0] if rows else [])
+    instagram_col = _instagram_column_index(rows[0] if rows else [])
     for idx, row in enumerate(rows, start=1):
-        cell = row[linkedin_col] if len(row) > linkedin_col else ""
-        cell_url = _normalize_linkedin_cell(cell)
-        cell_public_id = _extract_public_id_from_linkedin_cell(cell)
+        cell = row[instagram_col] if len(row) > instagram_col else ""
+        cell_url = _normalize_instagram_cell(cell)
+        cell_public_id = _extract_public_id_from_instagram_cell(cell)
         if lead_url and cell_url == lead_url:
             return idx, row
         if lead_public_id and cell_public_id == lead_public_id:
@@ -302,7 +318,7 @@ def build_sheet_row(
         _sheet_text(name),
         _sheet_text(lead.company_name or ""),
         _sheet_text(_lead_position(lead)),
-        lead.linkedin_url or "",
+        lead.instagram_url or "",
         "TRUE" if norm == "Connected" else "FALSE",
         norm,
         active,
@@ -320,7 +336,7 @@ def _sync_lead_status_to_google_sheet(
     skip_if_existing_statuses: set[str] | None = None,
     config_user=None,
 ) -> bool:
-    """Write or update one lead row by LinkedIn profile URL/public id."""
+    """Write or update one lead row by Instagram profile URL/public id."""
     from linkedin.models import SiteConfig
 
     owner = _config_user_for_lead(lead, config_user)
@@ -341,9 +357,9 @@ def _sync_lead_status_to_google_sheet(
         )
         return False
 
-    if not lead.linkedin_url:
+    if not lead.instagram_url:
         logger.info(
-            "Google Sheet sync skipped lead pk=%s [%s]: no linkedin_url",
+            "Google Sheet sync skipped lead pk=%s [%s]: no instagram_url",
             lead.pk,
             reason_code,
         )
@@ -435,7 +451,8 @@ def sync_pending_lead_to_google_sheet(
         return False
     if lead.deal_set.filter(
         state=ProfileState.CONNECTED,
-        connection_assessment_source="api_degree_1",
+        # api_degree_1 kept for backward compat with old Deal rows
+        follow_assessment_source__in=("api_follows_viewer", "api_degree_1"),
     ).exists():
         return False
 
@@ -462,7 +479,8 @@ def sync_qualified_lead_to_google_sheet(
         return False
     if lead.deal_set.filter(
         state=ProfileState.CONNECTED,
-        connection_assessment_source="api_degree_1",
+        # api_degree_1 kept for backward compat with old Deal rows
+        follow_assessment_source__in=("api_follows_viewer", "api_degree_1"),
     ).exists():
         return False
 
@@ -481,9 +499,10 @@ def sync_messaged_lead_to_google_sheet(
     reason_code: str = "message_sent",
     config_user=None,
 ) -> bool:
-    """Export CONNECTED leads with proven outbound messaging (successful FOLLOW_UP ActionLog).
+    """Export leads with proven outbound messaging (successful FOLLOW_UP ActionLog).
 
-    Does not require CONNECTION_DETECTED verification — these leads have a sent message.
+    DM-first: QUALIFIED or CONNECTED deals with a sent message are eligible.
+    Does not require FOLLOW_BACK_DETECTED verification.
     """
     from linkedin.enums import ProfileState
     from linkedin.models import ActionLog, SiteConfig
@@ -506,17 +525,19 @@ def sync_messaged_lead_to_google_sheet(
         )
         return False
 
-    if not lead.linkedin_url:
+    if not lead.instagram_url:
         logger.info(
-            "Google Sheet sync skipped lead pk=%s [%s]: no linkedin_url",
+            "Google Sheet sync skipped lead pk=%s [%s]: no instagram_url",
             lead.pk,
             reason_code,
         )
         return False
 
-    if not lead.deal_set.filter(state=ProfileState.CONNECTED).exists():
+    if not lead.deal_set.filter(
+        state__in=[ProfileState.QUALIFIED, ProfileState.CONNECTED]
+    ).exists():
         logger.info(
-            "Google Sheet sync skipped lead pk=%s [%s]: no CONNECTED deal",
+            "Google Sheet sync skipped lead pk=%s [%s]: no QUALIFIED/CONNECTED deal",
             lead.pk,
             reason_code,
         )
@@ -544,9 +565,15 @@ def sync_messaged_lead_to_google_sheet(
         )
         return False
 
+    # Prefer Connected label when already connected; otherwise Qualified (messaged).
+    status_label = (
+        ProfileState.CONNECTED.value
+        if lead.deal_set.filter(state=ProfileState.CONNECTED).exists()
+        else ProfileState.QUALIFIED.value
+    )
     return _sync_lead_status_to_google_sheet(
         lead,
-        status_label=ProfileState.CONNECTED.value,
+        status_label=status_label,
         reason_code=reason_code,
         config_user=owner,
     )
@@ -594,8 +621,8 @@ def sync_lead_to_google_sheet(
         logger.info("Google Sheet sync skipped lead pk=%s: no sheet ID configured", lead.pk)
         return False
 
-    if not lead.linkedin_url:
-        logger.info("Google Sheet sync skipped lead pk=%s: no linkedin_url", lead.pk)
+    if not lead.instagram_url:
+        logger.info("Google Sheet sync skipped lead pk=%s: no instagram_url", lead.pk)
         return False
 
     has_connected_deal = lead.deal_set.filter(state=ProfileState.CONNECTED).exists()

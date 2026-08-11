@@ -5,12 +5,19 @@ from django.db import migrations, models
 
 
 def backfill_message_profiles(apps, schema_editor):
+    """Attach each owner's active InstagramProfile to messages missing a profile FK.
+
+    Field is still named ``linkedin_profile`` here so ``0007_instagram_fields`` can
+    RenameField → ``instagram_profile`` on all DBs (including ones that applied an
+    older LinkedIn-era 0006). Model target is InstagramProfile because this
+    migration depends on ``linkedin.0021_instagram_conversion``.
+    """
     ChatMessage = apps.get_model("chat", "ChatMessage")
-    LinkedInProfile = apps.get_model("linkedin", "LinkedInProfile")
+    InstagramProfile = apps.get_model("linkedin", "InstagramProfile")
 
     profile_by_user: dict[int, int] = {}
     profiles = (
-        LinkedInProfile.objects.filter(user_id__isnull=False)
+        InstagramProfile.objects.filter(user_id__isnull=False)
         .order_by("user_id", "-active", "-created_at", "id")
         .values_list("user_id", "id")
     )
@@ -25,7 +32,11 @@ def backfill_message_profiles(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("linkedin", "0019_siteconfig_per_user"),
+        # 0021 renames LinkedInProfile → InstagramProfile. This migration must run
+        # after that rename so the FK target resolves (user DBs may already have
+        # 0021 applied). Do NOT reverse this to depend on 0020 + make 0021 depend
+        # on 0006 — that breaks DBs where 0021 is already recorded as applied.
+        ("linkedin", "0021_instagram_conversion"),
         ("chat", "0005_chatmessage_campaign"),
     ]
 
@@ -38,8 +49,8 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="messages",
-                to="linkedin.linkedinprofile",
-                verbose_name="LinkedIn Profile",
+                to="linkedin.instagramprofile",
+                verbose_name="Instagram Profile",
             ),
         ),
         migrations.RunPython(backfill_message_profiles, migrations.RunPython.noop),

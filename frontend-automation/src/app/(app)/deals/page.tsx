@@ -182,7 +182,7 @@ export default function DealsPage() {
                   <td className="td">{d.lead.name}</td>
                   <td className="td">{d.campaign.name}</td>
                   <td className="td">{d.state}</td>
-                  <td className="td">{d.connectAttempts}</td>
+                  <td className="td">{d.followAttempts}</td>
                   <td className="td">{d.backoffHours}</td>
                   <td className="td">{d.reason || "-"}</td>
                   <td className="td">

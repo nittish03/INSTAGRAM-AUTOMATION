@@ -15,7 +15,7 @@ from unfold.admin import ModelAdmin
 from linkedin.models import (
     ActionLog,
     Campaign,
-    LinkedInProfile,
+    InstagramProfile,
     OutreachEvent,
     SearchKeyword,
     SiteConfig,
@@ -70,13 +70,13 @@ class SiteConfigAdmin(ModelAdmin):
                     "google_sheet_tab",
                     "google_sheet_sync_user",
                     "sheet_export_min_confidence_api",
-                    "sheet_export_min_confidence_after_invite",
+                    "sheet_export_min_confidence_after_follow",
                 ),
                 "description": _(
                     "Enable sync, paste the full Google Sheets link or the bare spreadsheet id, and ensure "
                     "the chosen user (or a superuser) has connected Google under /admin/google/. "
                     "Rows are appended only for **verified** outcomes (explicit outreach events + confidence thresholds). "
-                    "Columns A–G: Name, Company, Position, LinkedIn URL, Connected, Status, Action."
+                    "Columns A–G: Name, Company, Position, Instagram URL, Connected, Status, Action."
                 ),
             },
         ),
@@ -86,14 +86,14 @@ class SiteConfigAdmin(ModelAdmin):
                 "fields": (
                     "safe_mode_enabled",
                     "global_pause_outreach",
-                    "pause_new_connection_invites",
+                    "pause_new_follows",
                     "max_bulk_approve",
                     "max_bulk_export",
                 ),
                 "description": _(
                     "Use global pause for a hard stop on operator-triggered outreach. "
-                    "Use pause new connection invites to stop only fresh top-of-funnel invite expansion "
-                    "while monitoring, replies, follow-ups, and pending invite checks continue."
+                    "Use pause new follows to stop only fresh top-of-funnel discover/qualify "
+                    "expansion while drafts, approvals, sends, and reply checks continue."
                 ),
             },
         ),
@@ -262,7 +262,7 @@ class CampaignAdmin(ModelAdmin):
                 public_ids, skipped = parse_seed_csv(csv_file.read())
                 
                 if not public_ids:
-                    self.message_user(request, "No valid LinkedIn URLs found.", level="WARNING")
+                    self.message_user(request, "No valid Instagram URLs found.", level="WARNING")
                     return HttpResponseRedirect(request.get_full_path())
 
                 for campaign in queryset:
@@ -304,18 +304,18 @@ class CampaignAdmin(ModelAdmin):
 
 
 
-@admin.register(LinkedInProfile)
-class LinkedInProfileAdmin(ModelAdmin):
-    list_display = ("user", "linkedin_username", "active", "legal_accepted")
+@admin.register(InstagramProfile)
+class InstagramProfileAdmin(ModelAdmin):
+    list_display = ("user", "instagram_username", "active", "legal_accepted")
     list_filter = ("active", "legal_accepted")
     icon = "user_check"
     
     fieldsets = (
         (_("Account Authentication"), {
-            "fields": ("user", "linkedin_username", "linkedin_password", "active")
+            "fields": ("user", "instagram_username", "instagram_password", "active")
         }),
         (_("Throttling and Limits"), {
-            "fields": (("connect_daily_limit", "connect_weekly_limit"), "follow_up_daily_limit")
+            "fields": (("follow_daily_limit", "follow_weekly_limit"), "follow_up_daily_limit")
         }),
         (_("Compliance Status"), {
             "fields": ("legal_accepted", "subscribe_newsletter")
@@ -339,7 +339,7 @@ class SearchKeywordAdmin(ModelAdmin):
 class ActionLogAdmin(ModelAdmin):
     list_display = ("action_type", "target_info", "status_pill", "note_preview", "created_at")
     list_filter = ("action_type", "status", "campaign")
-    readonly_fields = ("linkedin_profile", "campaign", "action_type", "target_name", "target_public_id", "status", "note", "created_at")
+    readonly_fields = ("instagram_profile", "campaign", "action_type", "target_name", "target_public_id", "status", "note", "created_at")
     date_hierarchy = "created_at"
     icon = "activity"
 
@@ -378,7 +378,7 @@ class ActionLogAdmin(ModelAdmin):
         return False
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("campaign", "linkedin_profile")
+        return super().get_queryset(request).select_related("campaign", "instagram_profile")
 
 from simple_history.admin import SimpleHistoryAdmin
 
@@ -413,7 +413,7 @@ class TaskAdmin(SimpleHistoryAdmin, ModelAdmin):
             return format_html('<span class="text-gray-400">{}</span>', public_id)
         
         name = f"{lead.first_name} {lead.last_name}" if (lead.first_name or lead.last_name) else lead.public_identifier
-        url = lead.linkedin_url
+        url = lead.instagram_url
         
         return format_html(
             '<div class="flex flex-col">'
@@ -441,7 +441,7 @@ class TaskAdmin(SimpleHistoryAdmin, ModelAdmin):
 class ChatMessageAdmin(ModelAdmin):
     list_display = ("display_content", "owner", "is_outgoing", "is_draft", "is_approved", "creation_date")
     list_filter = ("is_draft", "is_approved", "is_outgoing", "owner")
-    readonly_fields = ("content_type", "object_id", "content", "owner", "creation_date", "linkedin_urn")
+    readonly_fields = ("content_type", "object_id", "content", "owner", "creation_date", "instagram_message_id")
     icon = "message_square"
     actions = ["approve_and_send"]
 

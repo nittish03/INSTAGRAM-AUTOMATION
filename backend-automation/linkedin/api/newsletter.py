@@ -14,7 +14,7 @@ BREVO_FORM_URL = (
 )
 
 
-def subscribe_to_newsletter(email: str, linkedin: str | None = None) -> bool:
+def subscribe_to_newsletter(email: str, instagram_url: str | None = None) -> bool:
     """
     Subscribe email to Leadway newsletter via Brevo form.
     Returns True if successful or already subscribed.
@@ -24,8 +24,9 @@ def subscribe_to_newsletter(email: str, linkedin: str | None = None) -> bool:
         "email_address_check": "",  # leave empty (honeypot)
         "locale": "en"
     }
-    if linkedin:
-        data["LINKEDIN"] = linkedin
+    if instagram_url:
+        # Brevo hosted form field id is still named LINKEDIN; value is the Instagram URL.
+        data["LINKEDIN"] = instagram_url
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -61,18 +62,18 @@ def subscribe_to_newsletter(email: str, linkedin: str | None = None) -> bool:
         return False
 
 
-def ensure_newsletter_subscription(session: AccountSession, linkedin_url: str | None = None):
+def ensure_newsletter_subscription(session: AccountSession, instagram_url: str | None = None):
     """Subscribe the account to the Leadway newsletter if enabled."""
-    lp = session.linkedin_profile
+    lp = session.instagram_profile
 
     if not lp.subscribe_newsletter:
         logger.debug("Newsletter disabled for %s", session)
         return
 
-    email = lp.linkedin_username
+    email = lp.instagram_username
     if not email or "@" not in str(email):
         logger.warning("No valid email for newsletter: %s", session)
         return
 
     logger.debug("Subscribing %s to Leadway newsletter...", email)
-    subscribe_to_newsletter(email, linkedin=linkedin_url)
+    subscribe_to_newsletter(email, instagram_url=instagram_url)

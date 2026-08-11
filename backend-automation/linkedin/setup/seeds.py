@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_seed_csv(file_bytes: bytes) -> tuple[list[str], list[str]]:
-    """Parse CSV bytes to extract LinkedIn public IDs from any column.
+    """Parse CSV bytes to extract Instagram public IDs from any column.
 
     Handles UTF-8 with BOM (Excel) and returns (public_ids, skipped_rows).
     """
@@ -58,7 +58,7 @@ def create_seed_leads(campaign, public_ids: list[str]) -> int:
     for public_id in public_ids:
         url = public_id_to_url(public_id)
 
-        lead, _ = Lead.objects.get_or_create(public_identifier=public_id, defaults={"linkedin_url": url})
+        lead, _ = Lead.objects.get_or_create(public_identifier=public_id, defaults={"instagram_url": url})
 
         if Deal.objects.filter(lead=lead, campaign=campaign).exists():
             logger.debug("Seed %s already has a deal, skipping", public_id)

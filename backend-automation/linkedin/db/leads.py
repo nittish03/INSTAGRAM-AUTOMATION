@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def lead_exists(url: str) -> bool:
-    """Check if Lead already exists for this LinkedIn URL."""
+    """Check if Lead already exists for this Instagram URL."""
     from crm.models import Lead
 
     pid = url_to_public_id(url)
@@ -28,7 +28,7 @@ def create_enriched_lead(session, url: str, profile: Dict[str, Any]) -> Optional
     """
     from crm.models import Lead
 
-    # Use canonical public_identifier from Voyager response when available.
+    # Prefer canonical public_identifier from Instagram enrichment when available.
     canonical_pid = profile.get("public_identifier")
     public_id = canonical_pid or url_to_public_id(url)
     clean_url = public_id_to_url(public_id)
@@ -36,7 +36,7 @@ def create_enriched_lead(session, url: str, profile: Dict[str, Any]) -> Optional
     with transaction.atomic():
         if Lead.objects.filter(public_identifier=public_id).exists():
             return None
-        lead = Lead.objects.create(linkedin_url=clean_url, public_identifier=public_id)
+        lead = Lead.objects.create(instagram_url=clean_url, public_identifier=public_id)
         _update_lead_fields(lead, profile)
 
     lead.get_embedding(session)
@@ -99,11 +99,11 @@ def disqualify_lead(public_id: str):
 
 
 def discover_and_enrich(session, urls: set):
-    """For each new URL, call Voyager API, create enriched Lead (with embedding).
+    """For each new URL, scrape Instagram profile and create enriched Lead (with embedding).
 
     Skips URLs that already have a Lead. Rate-limits with enrich_min_interval.
     """
-    from linkedin.api.client import PlaywrightLinkedinAPI
+    from linkedin.api.client import PlaywrightInstagramAPI
     from linkedin.conf import CAMPAIGN_CONFIG, bot_pacing_delay_seconds
 
     new_urls = [u for u in urls if not lead_exists(u)]
@@ -114,7 +114,7 @@ def discover_and_enrich(session, urls: set):
 
     min_interval = bot_pacing_delay_seconds(CAMPAIGN_CONFIG.get("enrich_min_interval", 1))
     session.ensure_browser()
-    api = PlaywrightLinkedinAPI(session=session)
+    api = PlaywrightInstagramAPI(session=session)
     enriched = 0
 
     for url in new_urls:
@@ -125,7 +125,7 @@ def discover_and_enrich(session, urls: set):
         try:
             profile, _raw = api.get_profile(profile_url=url)
         except Exception:
-            logger.warning("Voyager API failed for %s — skipping", url)
+            logger.warning("Instagram profile scrape failed for %s — skipping", url)
             continue
 
         if not profile:
@@ -142,7 +142,7 @@ def discover_and_enrich(session, urls: set):
 
 
 def _update_lead_fields(lead, profile: Dict[str, Any]):
-    """Update Lead model fields from parsed LinkedIn profile."""
+    """Update Lead model fields from parsed Instagram profile."""
     lead.first_name = profile.get("first_name", "") or ""
     lead.last_name = profile.get("last_name", "") or ""
 

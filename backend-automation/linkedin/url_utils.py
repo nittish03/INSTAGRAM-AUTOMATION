@@ -4,27 +4,63 @@ from urllib.parse import quote, urlparse, unquote
 
 def url_to_public_id(url: str) -> Optional[str]:
     """
-    Strict LinkedIn public ID extractor:
-    - Path MUST start with /in/
-    - Returns the second segment, percent-decoded
-    - Returns None for empty or non-profile URLs
+    Extract an Instagram username from a profile URL.
+
+    Accepts:
+    - https://www.instagram.com/username/
+    - https://instagram.com/username
+    - Bare usernames (returned as-is when no scheme/path)
+
+    Returns None for empty values or non-profile paths (e.g. /p/, /reel/, /explore/).
     """
     if not url:
         return None
 
-    path = urlparse(url.strip()).path
-    parts = path.strip("/").split("/")
-
-    if len(parts) < 2 or parts[0] != "in":
+    raw = url.strip()
+    if not raw:
         return None
 
-    public_id = parts[1]
-    return unquote(public_id)
+    # Bare username (no URL)
+    if "://" not in raw and "/" not in raw and raw.startswith("@"):
+        return raw[1:].strip() or None
+    if "://" not in raw and "/" not in raw:
+        return raw.lstrip("@") or None
+
+    path = urlparse(raw).path
+    parts = [p for p in path.strip("/").split("/") if p]
+    if not parts:
+        return None
+
+    reserved = {
+        "p",
+        "reel",
+        "reels",
+        "stories",
+        "explore",
+        "accounts",
+        "direct",
+        "about",
+        "legal",
+        "developer",
+        "graphql",
+        "api",
+        "tags",
+        "tv",
+    }
+    username = parts[0]
+    if username.lower() in reserved:
+        return None
+    return unquote(username.lstrip("@")) or None
 
 
 def public_id_to_url(public_id: str) -> str:
-    """Convert public_identifier back to a clean LinkedIn profile URL."""
+    """Convert Instagram username back to a clean profile URL."""
     if not public_id:
         return ""
-    public_id = public_id.strip("/")
-    return f"https://www.linkedin.com/in/{quote(public_id, safe='')}/"
+    public_id = public_id.strip().lstrip("@").strip("/")
+    return f"https://www.instagram.com/{quote(public_id, safe='')}/"
+
+
+# Back-compat aliases used by older call sites during the Instagram cutover.
+username_from_url = url_to_public_id
+username_to_url = public_id_to_url

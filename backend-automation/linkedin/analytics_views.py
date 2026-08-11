@@ -14,7 +14,7 @@ from django.utils import timezone
 from chat.models import ChatMessage
 from crm.models.deal import Deal
 from crm.models.lead import Lead
-from linkedin.models import ActionLog, Campaign, LinkedInProfile, SearchKeyword, Task
+from linkedin.models import ActionLog, Campaign, InstagramProfile, SearchKeyword, Task
 
 
 def _date_range_days(n: int) -> tuple[timezone.datetime, list[str]]:
@@ -61,9 +61,9 @@ def analytics_dashboard(request: HttpRequest) -> HttpResponse:
         deals=Count("pk"),
         pipeline_leads=Count("lead", distinct=True),
     )
-    prof_a = LinkedInProfile.objects.aggregate(
-        linkedin_profiles=Count("pk"),
-        linkedin_profiles_active=Count("pk", filter=Q(active=True)),
+    prof_a = InstagramProfile.objects.aggregate(
+        instagram_profiles=Count("pk"),
+        instagram_profiles_active=Count("pk", filter=Q(active=True)),
     )
     kw_a = SearchKeyword.objects.aggregate(
         search_keywords=Count("pk"),
@@ -84,8 +84,8 @@ def analytics_dashboard(request: HttpRequest) -> HttpResponse:
         "deals": deal_a["deals"] or 0,
         "pipeline_leads": deal_a["pipeline_leads"] or 0,
         "campaigns": Campaign.objects.count(),
-        "linkedin_profiles": prof_a["linkedin_profiles"] or 0,
-        "linkedin_profiles_active": prof_a["linkedin_profiles_active"] or 0,
+        "instagram_profiles": prof_a["instagram_profiles"] or 0,
+        "instagram_profiles_active": prof_a["instagram_profiles_active"] or 0,
         "search_keywords": kw_a["search_keywords"] or 0,
         "search_keywords_used": kw_a["search_keywords_used"] or 0,
         "action_logs": ActionLog.objects.count(),
@@ -120,12 +120,12 @@ def analytics_dashboard(request: HttpRequest) -> HttpResponse:
         )
     ]
 
-    invites_30d = sum(c for _, t, c in action_day_rows if t == ActionLog.ActionType.CONNECT)
+    follows_30d = sum(c for _, t, c in action_day_rows if t == ActionLog.ActionType.FOLLOW)
     followups_30d = sum(c for _, t, c in action_day_rows if t == ActionLog.ActionType.FOLLOW_UP)
 
     action_series = _series_from_day_counts(labels_30d, action_day_rows)
-    connect_series = action_series.get("connect", list(zero_series))
-    follow_series = action_series.get("follow_up", list(zero_series))
+    follow_series = action_series.get("follow", list(zero_series))
+    follow_up_series = action_series.get("follow_up", list(zero_series))
 
     task_day_rows = [
         (row["day"], row["status"], row["c"])
@@ -161,8 +161,8 @@ def analytics_dashboard(request: HttpRequest) -> HttpResponse:
 
     chart_payload = {
         "labels30": labels_30d,
-        "actionsConnect": connect_series,
-        "actionsFollowUp": follow_series,
+        "actionsFollow": follow_series,
+        "actionsFollowUp": follow_up_series,
         "tasksCompleted": task_series.get(Task.Status.COMPLETED, list(zero_series)),
         "tasksFailed": task_series.get(Task.Status.FAILED, list(zero_series)),
         "tasksSkipped": task_series.get(Task.Status.SKIPPED, list(zero_series)),
@@ -179,7 +179,7 @@ def analytics_dashboard(request: HttpRequest) -> HttpResponse:
         "task_by_type": task_by_type,
         "action_all": action_all,
         "top_campaigns": top_campaigns,
-        "invites_30d": invites_30d,
+        "follows_30d": follows_30d,
         "followups_30d": followups_30d,
         "chart_data": chart_payload,
         "generated_at": now,

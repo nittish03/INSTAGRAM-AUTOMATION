@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from chat.models import ChatMessage
 from crm.models import Lead
-from linkedin.models import LinkedInProfile
+from linkedin.models import InstagramProfile
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -21,89 +21,32 @@ class ChatSyncSafetyTest(TestCase):
             first_name="Neeraj",
             last_name="Kumar",
             public_identifier="neeraj-kumar-target",
-            linkedin_url="https://www.linkedin.com/in/neeraj-kumar-target/",
-            profile_data={"urn": "urn:li:fsd_profile:target"},
+            instagram_url="https://www.instagram.com/neeraj-kumar-target/",
+            profile_data={"urn": "ig_profile_target"},
         )
         self.lead_ct = ContentType.objects.get_for_model(Lead)
-        self.profile = LinkedInProfile.objects.create(user=self.user, active=True)
+        self.profile = InstagramProfile.objects.create(user=self.user, active=True)
 
-    def test_navigation_conversation_capture_requires_target_urn(self):
+    def test_navigation_conversation_opens_instagram_thread_key(self):
+        """Instagram navigation returns thread keys (not legacy URNs)."""
         from linkedin.actions.conversations import find_conversation_urn_via_navigation
 
-        class Response:
-            url = "https://www.linkedin.com/voyager/api/voyagerMessagingGraphQL/graphql?messengerMessages"
+        with patch(
+            "linkedin.actions.conversations._open_thread_with_user",
+            return_value=False,
+        ):
+            session = MagicMock()
+            self.assertIsNone(find_conversation_urn_via_navigation(session, "instagram:missinguser"))
 
-            def __init__(self, payload):
-                self._payload = payload
-
-            def json(self):
-                return self._payload
-
-        class Context:
-            def __init__(self, response):
-                self.response = response
-                self.callback = None
-
-            def on(self, _event, callback):
-                self.callback = callback
-
-            def remove_listener(self, _event, _callback):
-                pass
-
-        class Page:
-            def __init__(self, context):
-                self.context = context
-
-            def goto(self, *_args, **_kwargs):
-                self.context.callback(self.context.response)
-
-            def wait_for_timeout(self, *_args, **_kwargs):
-                pass
-
-        wrong_payload = {
-            "data": {
-                "messengerMessagesBySyncToken": {
-                    "elements": [
-                        {
-                            "conversation": {
-                                "entityUrn": "urn:li:msg_conversation:(urn:li:fsd_profile:target-extra,thread)"
-                            },
-                            "sender": {"hostIdentityUrn": "urn:li:fsd_profile:target-extra"},
-                        }
-                    ]
-                }
-            }
-        }
-        context = Context(Response(wrong_payload))
-        session = MagicMock(context=context, page=Page(context))
-
-        self.assertIsNone(find_conversation_urn_via_navigation(session, "urn:li:fsd_profile:target"))
-
-        right_payload = {
-            "data": {
-                "messengerMessagesBySyncToken": {
-                    "elements": [
-                        {
-                            "conversation": {
-                                "entityUrn": "urn:li:msg_conversation:(urn:li:fsd_profile:other,thread)"
-                            },
-                            "sender": {"hostIdentityUrn": "urn:li:fsd_profile:other"},
-                        },
-                        {
-                            "conversation": {"entityUrn": "urn:li:msg_conversation:right"},
-                            "sender": {"hostIdentityUrn": "urn:li:fsd_profile:target"},
-                        }
-                    ]
-                }
-            }
-        }
-        context = Context(Response(right_payload))
-        session = MagicMock(context=context, page=Page(context))
-
-        self.assertEqual(
-            find_conversation_urn_via_navigation(session, "urn:li:fsd_profile:target"),
-            "urn:li:msg_conversation:right",
-        )
+        with patch(
+            "linkedin.actions.conversations._open_thread_with_user",
+            return_value=True,
+        ):
+            session = MagicMock()
+            self.assertEqual(
+                find_conversation_urn_via_navigation(session, "instagram:neeraj-kumar-target"),
+                "instagram:thread:neeraj-kumar-target",
+            )
 
     def test_sync_matches_local_sent_placeholder_to_real_message(self):
         from linkedin.db.chat import sync_conversation
@@ -112,38 +55,38 @@ class ChatSyncSafetyTest(TestCase):
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             content="Thanks for connecting.",
-            linkedin_urn="sent_local_placeholder",
+            instagram_message_id="sent_local_placeholder",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=timezone.now(),
         )
         session = MagicMock()
-        session.self_profile = {"urn": "urn:li:fsd_profile:self"}
+        session.self_profile = {"urn": "ig_profile_self"}
         session.django_user = self.user
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
 
         api_message = {
-            "entityUrn": "urn:li:msg_message:real",
+            "entityUrn": "ig_msg_real",
             "body": {"text": "Thanks for connecting."},
             "sender": {
-                "hostIdentityUrn": "urn:li:fsd_profile:self",
+                "hostIdentityUrn": "ig_profile_self",
                 "participantType": {"member": {"firstName": {"text": "Me"}, "lastName": {"text": ""}}},
             },
             "deliveredAt": int(timezone.now().timestamp() * 1000),
         }
 
         with (
-            patch("linkedin.actions.conversations.find_conversation_urn", return_value="urn:li:msg_conversation:target"),
+            patch("linkedin.actions.conversations.find_conversation_urn", return_value="ig_thread_target"),
             patch("linkedin.api.messaging.fetch_messages", return_value=[api_message]),
-            patch("linkedin.api.client.PlaywrightLinkedinAPI"),
+            patch("linkedin.api.client.PlaywrightInstagramAPI"),
         ):
             messages = sync_conversation(session, self.lead.public_identifier, include_drafts=False)
 
         placeholder.refresh_from_db()
-        self.assertEqual(placeholder.linkedin_urn, "urn:li:msg_message:real")
+        self.assertEqual(placeholder.instagram_message_id, "ig_msg_real")
         self.assertEqual(ChatMessage.objects.count(), 1)
         self.assertEqual([m["text"] for m in messages], ["Thanks for connecting."])
 
@@ -154,23 +97,23 @@ class ChatSyncSafetyTest(TestCase):
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             content="Same text",
-            linkedin_urn="sent_duplicate_placeholder",
+            instagram_message_id="sent_duplicate_placeholder",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         ChatMessage.objects.create(
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             content="Same text",
-            linkedin_urn="urn:li:msg_message:real",
+            instagram_message_id="ig_msg_real",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
 
         messages = _read_from_db(self.lead, self.lead_ct, owner=self.user, include_drafts=False)
@@ -261,9 +204,9 @@ class ChatSyncSafetyTest(TestCase):
 
         prompt = structured_llm.invoke.call_args.args[0]
         self.assertIn("Mode: DISCOVERY", prompt)
-        self.assertIn("do not mention in the message", prompt)
+        self.assertIn("Follow this messaging skill strictly", prompt)
         self.assertNotIn("## Booking Link", prompt)
-        self.assertIn("never mention product names", prompt)
+        self.assertIn("DISCOVERY mode: first outbound DM", prompt)
 
     def test_follow_up_agent_passes_reply_mode_for_latest_prospect_message(self):
         from linkedin.agents.follow_up import FollowUpDecision, run_follow_up_agent
@@ -382,7 +325,7 @@ class ChatSyncSafetyTest(TestCase):
         from linkedin.actions.message import send_raw_message
 
         session = MagicMock()
-        profile = {"public_identifier": self.lead.public_identifier, "urn": "urn:li:fsd_profile:target"}
+        profile = {"public_identifier": self.lead.public_identifier, "urn": "ig_profile_target"}
 
         with (
             patch("linkedin.actions.search._go_to_profile"),

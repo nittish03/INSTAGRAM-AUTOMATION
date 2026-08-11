@@ -1,5 +1,5 @@
 # linkedin/ml/search_keywords.py
-"""LLM-based generation of LinkedIn People search keywords."""
+"""LLM-based generation of Instagram search keywords."""
 from __future__ import annotations
 
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class SearchKeywords(BaseModel):
     """Structured LLM output for search keyword generation."""
-    keywords: list[str] = Field(description="List of LinkedIn People search queries")
+    keywords: list[str] = Field(description="List of Instagram search queries")
 
 
 def generate_search_keywords(
@@ -25,7 +25,7 @@ def generate_search_keywords(
     *,
     user=None,
 ) -> list[str]:
-    """Call LLM to generate LinkedIn search keywords from campaign context.
+    """Call LLM to generate Instagram search keywords from campaign context.
 
     Returns a list of search query strings.
     """

@@ -10,7 +10,7 @@ from django.utils import timezone
 from chat.models import ChatMessage
 from crm.models import Deal, Lead
 from linkedin.enums import ProfileState
-from linkedin.models import Campaign, LinkedInProfile
+from linkedin.models import Campaign, InstagramProfile
 
 os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 
@@ -18,7 +18,7 @@ os.environ["LEADPILOT_ENCRYPTION_KEY"] = "a" * 32
 class DraftRegenerationTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="draft_owner", is_staff=True)
-        self.profile = LinkedInProfile.objects.create(user=self.user, active=True)
+        self.profile = InstagramProfile.objects.create(user=self.user, active=True)
         self.campaign = Campaign.objects.create(
             name="Draft Campaign",
             product_docs="We help teams reduce manual outreach work.",
@@ -29,19 +29,19 @@ class DraftRegenerationTest(TestCase):
             first_name="Ada",
             last_name="Lovelace",
             public_identifier="ada-lovelace",
-            linkedin_url="https://www.linkedin.com/in/ada-lovelace/",
+            instagram_url="https://www.instagram.com/ada-lovelace/",
             profile_data={
                 "public_identifier": "ada-lovelace",
                 "full_name": "Ada Lovelace",
-                "urn": "urn:li:fsd_profile:ada",
+                "urn": "ig_profile_ada",
             },
         )
         self.deal = Deal.objects.create(
             lead=self.lead,
             campaign=self.campaign,
             state=ProfileState.CONNECTED.value,
-            connection_assessment_source="api_degree_1",
-            connection_assessment_confidence=0.95,
+            follow_assessment_source="api_follows_viewer",
+            follow_assessment_confidence=0.95,
         )
         self.lead_ct = ContentType.objects.get_for_model(Lead)
 
@@ -53,7 +53,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Already sent",
-            linkedin_urn="real_message",
+            instagram_message_id="real_message",
             is_outgoing=True,
             is_draft=False,
             owner=self.user,
@@ -63,19 +63,19 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old unsent draft",
-            linkedin_urn="draft_old",
+            instagram_message_id="draft_old",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         ChatMessage.objects.create(
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Approved but not sent yet",
-            linkedin_urn="draft_approved",
+            instagram_message_id="draft_approved",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
@@ -95,11 +95,11 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="I sent this earlier.",
-            linkedin_urn="sent_real_context",
+            instagram_message_id="sent_real_context",
             is_outgoing=True,
             is_draft=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=old_sent_at,
         )
         ChatMessage.objects.create(
@@ -107,11 +107,11 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Can you share more details?",
-            linkedin_urn="inbound_real_context",
+            instagram_message_id="inbound_real_context",
             is_outgoing=False,
             is_draft=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=latest_reply_at,
         )
         ChatMessage.objects.create(
@@ -119,12 +119,12 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Approved but not sent yet",
-            linkedin_urn="draft_approved_context",
+            instagram_message_id="draft_approved_context",
             is_outgoing=True,
             is_draft=False,
             is_approved=True,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
             creation_date=timezone.now(),
         )
         draft = ChatMessage.objects.create(
@@ -132,12 +132,12 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Draft response",
-            linkedin_urn="draft_context",
+            instagram_message_id="draft_context",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         other_user = User.objects.create_user(username="other_draft_owner")
         ChatMessage.objects.create(
@@ -145,7 +145,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Different account newer reply",
-            linkedin_urn="inbound_other_owner_context",
+            instagram_message_id="inbound_other_owner_context",
             is_outgoing=False,
             is_draft=False,
             owner=other_user,
@@ -156,7 +156,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Other user's draft",
-            linkedin_urn="draft_other_context",
+            instagram_message_id="draft_other_context",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -189,18 +189,18 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_update",
+            instagram_message_id="draft_update",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         decision = MagicMock(action="send_message", message="New better draft")
         session = MagicMock()
         session.campaign = None
         session.django_user = self.user
-        session.linkedin_profile = self.profile
+        session.instagram_profile = self.profile
 
         with patch(
             "linkedin.agents.follow_up.run_follow_up_agent",
@@ -224,12 +224,12 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_dry_run",
+            instagram_message_id="draft_dry_run",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         decision = MagicMock(action="send_message", message="Dry run draft")
         session = MagicMock()
@@ -251,7 +251,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_wait",
+            instagram_message_id="draft_wait",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -277,7 +277,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Approved content",
-            linkedin_urn="draft_race",
+            instagram_message_id="draft_race",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -308,7 +308,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Original draft",
-            linkedin_urn="draft_edit_race",
+            instagram_message_id="draft_edit_race",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -344,7 +344,7 @@ class DraftRegenerationTest(TestCase):
             content_type=self.lead_ct,
             object_id=self.lead.pk,
             content="Legacy draft",
-            linkedin_urn="draft_no_campaign",
+            instagram_message_id="draft_no_campaign",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -360,12 +360,12 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_api",
+            instagram_message_id="draft_api",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         self.client.force_login(self.user)
 
@@ -395,7 +395,7 @@ class DraftRegenerationTest(TestCase):
 
     def test_regenerate_draft_api_requires_active_profile_for_draft_owner(self):
         other_user = User.objects.create_user(username="other_active")
-        LinkedInProfile.objects.create(user=other_user, active=True)
+        InstagramProfile.objects.create(user=other_user, active=True)
         self.profile.active = False
         self.profile.save(update_fields=["active"])
         draft = ChatMessage.objects.create(
@@ -403,7 +403,7 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_api_no_profile",
+            instagram_message_id="draft_api_no_profile",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
@@ -423,12 +423,12 @@ class DraftRegenerationTest(TestCase):
             object_id=self.lead.pk,
             campaign=self.campaign,
             content="Old draft",
-            linkedin_urn="draft_api_stale",
+            instagram_message_id="draft_api_stale",
             is_outgoing=True,
             is_draft=True,
             is_approved=False,
             owner=self.user,
-            linkedin_profile=self.profile,
+            instagram_profile=self.profile,
         )
         self.client.force_login(self.user)
         result = MagicMock(

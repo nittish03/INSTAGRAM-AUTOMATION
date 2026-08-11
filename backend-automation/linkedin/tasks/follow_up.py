@@ -1,9 +1,12 @@
 # linkedin/tasks/follow_up.py
-"""Follow-up task — runs the agentic follow-up for one CONNECTED profile.
+"""Follow-up task — drafts HITL Instagram DMs (and post-send bumps).
 
 HITL mode: when the agent suggests ``send_message``, we store a draft only in
-``ChatMessage`` and wait for admin approval. Nothing is typed into LinkedIn
+``ChatMessage`` and wait for admin approval. Nothing is typed into Instagram
 until approval creates the ``send_message`` task.
+
+DM-first outreach: drafts are allowed for QUALIFIED deals without Follow /
+follow-back. Connected remains supported for legacy rows and post-send bumps.
 """
 from __future__ import annotations
 
@@ -41,25 +44,23 @@ def handle_follow_up(task, session, qualifiers):
     from django.contrib.contenttypes.models import ContentType
 
     from linkedin.agents.follow_up import run_follow_up_agent
-    from linkedin.actions.status import get_connection_assessment
     from linkedin.db.deals import set_profile_state
     from linkedin.enums import ProfileState
-    from linkedin.outreach_tracking import update_deal_inference
-    from linkedin.tasks.connect import _seconds_until_tomorrow, enqueue_check_pending, enqueue_follow_up
+    from linkedin.tasks.connect import _seconds_until_tomorrow, enqueue_follow_up
 
     payload = task.payload
     public_id = payload["public_id"]
     campaign_id = payload["campaign_id"]
-    owner = session.linkedin_profile.user
+    owner = session.instagram_profile.user
     owner_id = owner.pk
-    linkedin_profile_id = getattr(session.linkedin_profile, "pk", None)
+    instagram_profile_id = getattr(session.instagram_profile, "pk", None)
 
     logger.info(
         "[%s] %s %s",
         session.campaign, colored("\u25b6 follow_up", "green", attrs=["bold"]), public_id,
     )
 
-    if not session.linkedin_profile.can_execute(ActionLog.ActionType.FOLLOW_UP):
+    if not session.instagram_profile.can_execute(ActionLog.ActionType.FOLLOW_UP):
         deal = Deal.objects.filter(lead__public_identifier=public_id, campaign=session.campaign).first()
         enqueue_follow_up(
             campaign_id,
@@ -67,7 +68,7 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=_seconds_until_tomorrow(),
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
         )
         raise TaskSkipped("Daily follow-up limit reached")
 
@@ -83,31 +84,10 @@ def handle_follow_up(task, session, qualifiers):
         logger.warning("follow_up: no Deal for %s — skipping draft", public_id)
         return
 
-    assessment = get_connection_assessment(session, profile)
-    update_deal_inference(deal, assessment.source, assessment.confidence)
-    verified_connected = (
-        assessment.state == ProfileState.CONNECTED
-        and assessment.source == "api_degree_1"
-    )
-    if not verified_connected:
-        state_to_store = (
-            ProfileState.PENDING
-            if assessment.state == ProfileState.CONNECTED
-            else assessment.state
-        )
-        set_profile_state(session, public_id, state_to_store.value)
-        if state_to_store == ProfileState.PENDING:
-            enqueue_check_pending(
-                campaign_id,
-                public_id,
-                backoff_hours=deal.backoff_hours or 6,
-                deal=deal,
-                owner_id=owner_id,
-                linkedin_profile_id=linkedin_profile_id,
-            )
+    if deal.state not in (ProfileState.QUALIFIED.value, ProfileState.CONNECTED.value):
         raise TaskSkipped(
-            "follow_up requires an API-verified connected profile before drafting "
-            f"(source={assessment.source}, state={assessment.state.value})"
+            f"follow_up requires Qualified or Connected deal before drafting "
+            f"(state={deal.state})"
         )
 
     try:
@@ -123,20 +103,20 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=retry_delay,
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
             apply_time_limits=False,
         )
         raise TaskSkipped(f"Gemini quota exhausted; follow_up rescheduled in {retry_delay}s") from exc
 
     if decision.action == "send_message":
         lead_ct = ContentType.objects.get_for_model(Lead)
-        linkedin_profile = getattr(session, "linkedin_profile", None)
+        instagram_profile = getattr(session, "instagram_profile", None)
         has_draft = ChatMessage.objects.filter(
             content_type=lead_ct,
             object_id=deal.lead.pk,
             campaign=deal.campaign,
             owner=owner,
-            linkedin_profile=linkedin_profile,
+            instagram_profile=instagram_profile,
             is_draft=True,
             is_approved=False,
         ).exists()
@@ -152,8 +132,8 @@ def handle_follow_up(task, session, qualifiers):
                 is_draft=True,
                 is_approved=False,
                 owner=owner,
-                linkedin_profile=linkedin_profile,
-                linkedin_urn=f"draft_{uuid.uuid4()}",
+                instagram_profile=instagram_profile,
+                instagram_message_id=f"draft_{uuid.uuid4()}",
             )
             logger.info(
                 "[%s] follow_up drafted message for %s (awaiting admin approval)",
@@ -173,6 +153,6 @@ def handle_follow_up(task, session, qualifiers):
             delay_seconds=wait_hours * 3600,
             deal=deal,
             owner_id=owner_id,
-            linkedin_profile_id=linkedin_profile_id,
+            instagram_profile_id=instagram_profile_id,
             apply_time_limits=False,
         )

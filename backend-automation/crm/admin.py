@@ -16,11 +16,11 @@ from import_export.admin import ImportExportModelAdmin
 
 @admin.register(Lead)
 class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
-    list_display = ("full_name", "company_name_status", "linkedin_link", "current_status", "creation_date")
+    list_display = ("full_name", "company_name_status", "instagram_link", "current_status", "creation_date")
     list_filter = ("disqualified", "company_name")
     search_fields = ("first_name", "last_name", "company_name", "public_identifier")
     readonly_fields = (
-        "linkedin_url",
+        "instagram_url",
         "public_identifier",
         "creation_date",
         "update_date",
@@ -131,12 +131,12 @@ class LeadAdmin(ImportExportModelAdmin, SimpleHistoryAdmin, ModelAdmin):
         )
     profile_summary.short_description = "Profile Intelligence"
 
-    def linkedin_link(self, obj):
+    def instagram_link(self, obj):
 
-        if not obj.linkedin_url:
+        if not obj.instagram_url:
             return "-"
-        return format_html('<a href="{}" target="_blank" class="text-blue-600 hover:underline">Profile &nearr;</a>', obj.linkedin_url)
-    linkedin_link.short_description = "LinkedIn URL"
+        return format_html('<a href="{}" target="_blank" class="text-blue-600 hover:underline">Profile &nearr;</a>', obj.instagram_url)
+    instagram_link.short_description = "Instagram URL"
 
     def has_add_permission(self, request):
         return False
@@ -183,11 +183,11 @@ class ChatMessageInline(GenericTabularInline):
 
 @admin.register(Deal)
 class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
-    list_display = ("lead", "campaign", "state_pill", "connect_attempts", "short_reason", "creation_date")
+    list_display = ("lead", "campaign", "state_pill", "follow_attempts", "short_reason", "creation_date")
     list_filter = ("state", "campaign", "closing_reason")
     search_fields = ("lead__first_name", "lead__last_name", "campaign__name")
     readonly_fields = ("lead", "campaign", "creation_date", "update_date", "reason_box", "history_feed",
-                        "connection_assessment_source", "connection_assessment_confidence", "connection_assessed_at")
+                        "follow_assessment_source", "follow_assessment_confidence", "follow_assessed_at")
     icon = "briefcase"
     inlines = [ChatMessageInline]
     actions = ["requeue_deal", "force_requalify"]
@@ -199,8 +199,8 @@ class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
         for deal in queryset:
             deal.state = ProfileState.QUALIFIED
             deal.closing_reason = ""
-            deal.connect_attempts = 0
-            deal.save(update_fields=["state", "closing_reason", "connect_attempts"])
+            deal.follow_attempts = 0
+            deal.save(update_fields=["state", "closing_reason", "follow_attempts"])
             count += 1
         self.message_user(request, f"Successfully re-queued {count} deal(s).")
 
@@ -217,7 +217,7 @@ class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
 
     fieldsets = (
         (_("Current Pipeline Status"), {
-            "fields": (("lead", "campaign"), ("state", "closing_reason"), "connect_attempts")
+            "fields": (("lead", "campaign"), ("state", "closing_reason"), "follow_attempts")
         }),
         (_("AI Reasoning & Qualifications"), {
             "fields": ("reason_box",)
@@ -229,9 +229,9 @@ class DealAdmin(SimpleHistoryAdmin, ModelAdmin):
             "fields": (
                 "creation_date",
                 "update_date",
-                "connection_assessment_source",
-                "connection_assessment_confidence",
-                "connection_assessed_at",
+                "follow_assessment_source",
+                "follow_assessment_confidence",
+                "follow_assessed_at",
             ),
             "classes": ("collapse",)
         }),

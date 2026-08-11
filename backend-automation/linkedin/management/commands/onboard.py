@@ -3,8 +3,8 @@ import sys
 from django.core.management.base import BaseCommand
 
 from linkedin.conf import (
-    DEFAULT_CONNECT_DAILY_LIMIT,
-    DEFAULT_CONNECT_WEEKLY_LIMIT,
+    DEFAULT_FOLLOW_DAILY_LIMIT,
+    DEFAULT_FOLLOW_WEEKLY_LIMIT,
     DEFAULT_FOLLOW_UP_DAILY_LIMIT,
 )
 
@@ -19,8 +19,8 @@ class Command(BaseCommand):
             help="JSON file with onboard config (avoids shell-escaping issues).",
         )
         # Individual flags (used when --config-file is not provided)
-        parser.add_argument("--linkedin-email", default="")
-        parser.add_argument("--linkedin-password", default="")
+        parser.add_argument("--instagram-username", default="")
+        parser.add_argument("--instagram-password", default="")
         parser.add_argument("--campaign-name", default="")
         parser.add_argument("--product-description", default="")
         parser.add_argument("--campaign-objective", default="")
@@ -34,8 +34,8 @@ class Command(BaseCommand):
         parser.add_argument("--azure-api-version", default="2024-10-21")
         parser.add_argument("--newsletter", action="store_true", default=True)
         parser.add_argument("--no-newsletter", dest="newsletter", action="store_false")
-        parser.add_argument("--connect-daily-limit", type=int, default=DEFAULT_CONNECT_DAILY_LIMIT)
-        parser.add_argument("--connect-weekly-limit", type=int, default=DEFAULT_CONNECT_WEEKLY_LIMIT)
+        parser.add_argument("--follow-daily-limit", type=int, default=DEFAULT_FOLLOW_DAILY_LIMIT)
+        parser.add_argument("--follow-weekly-limit", type=int, default=DEFAULT_FOLLOW_WEEKLY_LIMIT)
         parser.add_argument("--follow-up-daily-limit", type=int, default=DEFAULT_FOLLOW_UP_DAILY_LIMIT)
 
     def handle(self, *args, **options):
@@ -59,8 +59,8 @@ class Command(BaseCommand):
             config = OnboardConfig.from_json(options["config_file"])
         else:
             config = OnboardConfig(
-                linkedin_email=options["linkedin_email"],
-                linkedin_password=options["linkedin_password"],
+                instagram_username=options["instagram_username"],
+                instagram_password=options["instagram_password"],
                 campaign_name=options["campaign_name"],
                 product_description=options["product_description"],
                 campaign_objective=options["campaign_objective"],
@@ -73,16 +73,16 @@ class Command(BaseCommand):
                 azure_deployment=options["azure_deployment"],
                 azure_api_version=options["azure_api_version"],
                 newsletter=options["newsletter"],
-                connect_daily_limit=options["connect_daily_limit"],
-                connect_weekly_limit=options["connect_weekly_limit"],
+                follow_daily_limit=options["follow_daily_limit"],
+                follow_weekly_limit=options["follow_weekly_limit"],
                 follow_up_daily_limit=options["follow_up_daily_limit"],
             )
 
-        if not config.linkedin_email:
-            self.stderr.write("linkedin_email is required in non-interactive mode")
+        if not config.instagram_username:
+            self.stderr.write("instagram_username is required in non-interactive mode")
             sys.exit(1)
-        if not config.linkedin_password:
-            self.stderr.write("linkedin_password is required in non-interactive mode")
+        if not config.instagram_password:
+            self.stderr.write("instagram_password is required in non-interactive mode")
             sys.exit(1)
 
         apply(config)

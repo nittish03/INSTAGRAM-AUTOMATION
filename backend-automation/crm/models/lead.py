@@ -17,7 +17,7 @@ class Lead(models.Model):
     first_name = models.CharField(max_length=100, blank=True, default="")
     last_name = models.CharField(max_length=100, blank=True, default="")
     company_name = models.CharField(max_length=200, blank=True, default="")
-    linkedin_url = models.URLField(max_length=200, unique=True)
+    instagram_url = models.URLField(max_length=200, unique=True)
     public_identifier = models.CharField(max_length=200, unique=True)
     profile_data = models.JSONField(null=True, blank=True, default=None)
     embedding = models.BinaryField(null=True, blank=True)
@@ -43,7 +43,7 @@ class Lead(models.Model):
             name = f"({_('Disqualified')}) {name}"
         if self.company_name:
             return f"{name}, {self.company_name}"
-        return name or self.public_identifier or self.linkedin_url
+        return name or self.public_identifier or self.instagram_url
 
     @property
     def full_name(self):
@@ -57,12 +57,12 @@ class Lead(models.Model):
     # ------------------------------------------------------------------
 
     def get_profile(self, session) -> dict | None:
-        """Parsed profile dict. Fetches from Voyager API if not yet enriched."""
+        """Parsed profile dict. Fetches from Instagram if not yet enriched."""
         if self.profile_data is None:
-            from linkedin.api.client import PlaywrightLinkedinAPI
+            from linkedin.api.client import PlaywrightInstagramAPI
 
             session.ensure_browser()
-            api = PlaywrightLinkedinAPI(session=session)
+            api = PlaywrightInstagramAPI(session=session)
             profile, _raw = api.get_profile(public_identifier=self.public_identifier)
             if not profile:
                 return None
@@ -72,13 +72,15 @@ class Lead(models.Model):
             positions = profile.get("positions", [])
             if positions:
                 self.company_name = positions[0].get("company_name", "") or ""
+            elif profile.get("category_name"):
+                self.company_name = profile.get("category_name") or ""
             self.profile_data = profile
             self.save(update_fields=["first_name", "last_name", "company_name", "profile_data"])
 
         return self.profile_data
 
     def refresh_profile(self, session, profile_dict: dict | None = None) -> dict | None:
-        """Force re-fetch profile from Voyager API (invalidates cache).
+        """Force re-fetch profile from Instagram (invalidates cache).
 
         If profile_dict is passed, updates it in place with the fresh data.
         """
@@ -90,15 +92,20 @@ class Lead(models.Model):
         return fresh
 
     def get_urn(self, session) -> str:
-        """LinkedIn URN. Chains through get_profile; re-fetches if missing."""
+        """Stable Instagram identity key. Chains through get_profile; re-fetches if missing."""
         profile = self.get_profile(session)
         if not profile or "urn" not in profile:
             self.profile_data = None
             self.save(update_fields=["profile_data"])
             profile = self.get_profile(session)
         if not profile or "urn" not in profile:
-            raise ValueError(f"Lead {self.pk}: could not resolve URN after re-fetch")
+            # Fallback synthetic key so DM sync can proceed without GraphQL ids.
+            return f"instagram:{self.public_identifier}"
         return profile["urn"]
+
+    @property
+    def username(self) -> str:
+        return self.public_identifier or ""
 
     def get_embedding(self, session) -> np.ndarray | None:
         """384-dim embedding. Chains through get_profile → embed."""
@@ -122,7 +129,8 @@ class Lead(models.Model):
         return {
             "lead_id": self.pk,
             "public_identifier": self.public_identifier,
-            "url": self.linkedin_url or "",
+            "username": self.public_identifier,
+            "url": self.instagram_url or "",
             "profile": self.profile_data or {},
             "meta": {},
         }

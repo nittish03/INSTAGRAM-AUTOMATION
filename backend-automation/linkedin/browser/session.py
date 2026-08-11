@@ -12,8 +12,8 @@ from linkedin.conf import MIN_DELAY, MAX_DELAY, bot_sleep_enabled
 
 logger = logging.getLogger(__name__)
 
-# The main LinkedIn auth cookie
-_AUTH_COOKIE_NAME = "li_at"
+# Primary Instagram auth cookie
+_AUTH_COOKIE_NAME = "sessionid"
 
 
 def random_sleep(min_val, max_val):
@@ -26,9 +26,9 @@ def random_sleep(min_val, max_val):
 
 
 class AccountSession:
-    def __init__(self, linkedin_profile):
-        self.linkedin_profile = linkedin_profile
-        self.django_user = linkedin_profile.user
+    def __init__(self, instagram_profile):
+        self.instagram_profile = instagram_profile
+        self.django_user = instagram_profile.user
 
         # Active campaign — set by the daemon before each lane execution
         self.campaign = None
@@ -57,14 +57,10 @@ class AccountSession:
 
     @cached_property
     def self_profile(self) -> dict:
-        """Lazy accessor: return the authenticated user's profile dict (cached).
-
-        Reads from ``self_lead.profile_data`` if available, otherwise
-        discovers via Voyager API and persists.
-        """
-        self.linkedin_profile.refresh_from_db(fields=["self_lead"])
-        lead = self.linkedin_profile.self_lead
-        if lead and lead.profile_data and "urn" in lead.profile_data:
+        """Lazy accessor: return the authenticated user's profile dict (cached)."""
+        self.instagram_profile.refresh_from_db(fields=["self_lead"])
+        lead = self.instagram_profile.self_lead
+        if lead and lead.profile_data and lead.profile_data.get("username"):
             return lead.profile_data
 
         from linkedin.setup.self_profile import discover_self_profile
@@ -80,13 +76,12 @@ class AccountSession:
             except PlaywrightTimeoutError:
                 logger.debug("Page load state timed out on %s; continuing", self.page.url)
 
-
     def _maybe_refresh_cookies(self):
-        """Re-login if the li_at auth cookie in the saved DB state is expired."""
+        """Re-login if the sessionid auth cookie in the saved DB state is expired."""
         from linkedin.browser.login import start_browser_session
 
-        self.linkedin_profile.refresh_from_db(fields=["cookie_data"])
-        cookie_data = self.linkedin_profile.cookie_data
+        self.instagram_profile.refresh_from_db(fields=["cookie_data"])
+        cookie_data = self.instagram_profile.cookie_data
         if not cookie_data:
             return
         for cookie in cookie_data.get("cookies", []):
@@ -121,4 +116,4 @@ class AccountSession:
             pass
 
     def __repr__(self) -> str:
-        return self.linkedin_profile.linkedin_username
+        return self.instagram_profile.instagram_username

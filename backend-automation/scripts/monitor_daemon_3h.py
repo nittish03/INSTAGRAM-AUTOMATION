@@ -23,7 +23,7 @@ from django.utils import timezone as dj_tz
 
 from chat.models import ChatMessage
 from crm.models import Lead
-from linkedin.models import ActionLog, LinkedInProfile, Task
+from linkedin.models import ActionLog, InstagramProfile, Task
 
 STATE_DIR = Path.home() / ".leadway"
 LIVE_LOG = STATE_DIR / "daemon_live.log"
@@ -67,8 +67,8 @@ def _parse_start_from_log() -> datetime:
     return dj_tz.now() - timedelta(seconds=30)
 
 
-def _profile() -> LinkedInProfile | None:
-    return LinkedInProfile.objects.filter(user__username=HANDLE, active=True).first()
+def _profile() -> InstagramProfile | None:
+    return InstagramProfile.objects.filter(user__username=HANDLE, active=True).first()
 
 
 def _db_snapshot(since: datetime) -> dict:
@@ -99,7 +99,7 @@ def _db_snapshot(since: datetime) -> dict:
             created_at__gte=since,
         ).count(),
         "connects_sent_since_start": ActionLog.objects.filter(
-            action_type=ActionLog.ActionType.CONNECT,
+            action_type=ActionLog.ActionType.FOLLOW,
             status=ActionLog.Status.SUCCESS,
             created_at__gte=since,
         ).count(),
@@ -107,7 +107,7 @@ def _db_snapshot(since: datetime) -> dict:
     if profile:
         data["connect_actions_today"] = profile._daily_count("connect")
         data["follow_up_actions_today"] = profile._daily_count("follow_up")
-        data["connect_daily_limit"] = profile.connect_daily_limit
+        data["follow_daily_limit"] = profile.follow_daily_limit
         data["follow_up_daily_limit"] = profile.follow_up_daily_limit
     return data
 

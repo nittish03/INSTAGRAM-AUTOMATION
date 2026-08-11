@@ -12,9 +12,13 @@ RUN_DAEMON=0
 
 usage() {
   echo "Usage: ./run-dev.sh [current|system] [--daemon|-d]"
+  echo "  Leadway Instagram outreach (Eshway webdev + agency collab)"
   echo "  system (default): open separate macOS Terminal tabs"
   echo "  current: run servers in this terminal session"
-  echo "  --daemon, -d: also run the LinkedIn daemon"
+  echo "  --daemon, -d: also run the Instagram automation daemon (rundaemon)"
+  echo
+  echo "NOTE: run backend migrate before daemon. Phased testing checklist:"
+  echo "  docs/TESTING_CHECKLIST.md (skill = DM wording only)."
 }
 
 for arg in "$@"; do

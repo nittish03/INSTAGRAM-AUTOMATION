@@ -2,23 +2,41 @@
 
 This document explains the entire web app in depth: what it does, why it exists, how it works, and how its workflows move data across the system.
 
+**Platform:** Instagram (product name remains Leadway).
+**Motive:** Eshway website development clients + agency/creative collaborations.
+**Messaging skill:** `skills/eshway_client_outreach_skill.md` is **DM copy only** — not search/qualify/automation.
+**Ops notes:** see repo root `INSTAGRAM_CONVERSION_NOTES.md` (runbook + testing checklist).
+**Schema:** DB must be migrated to Instagram field names (`InstagramProfile`, `instagram_url`, `follow` tasks, etc.) — use Instagram-named models/columns after migrate.
+
 ---
 
 ## 1) Product Purpose and Why This Exists
 
-Leadway is a Django-based LinkedIn outreach automation platform with human-in-the-loop controls.
+Leadway is a Django-based **Instagram** outreach automation platform with human-in-the-loop controls, tuned for Eshway’s two ICP tracks:
+
+1. **CLIENT** — founders/businesses needing websites, redesigns, e-commerce, landing pages, or digital products.
+2. **COLLABORATION** — agencies/creatives who own clients and need a development partner.
 
 The system is designed to:
-- Discover and qualify LinkedIn prospects at scale.
+- Discover and qualify Instagram prospects at scale (ICP-driven search + qualify).
+- Draft Instagram DMs immediately after qualify (HITL) — no Follow / follow-back gate.
 - Manage campaign-specific pipeline state in a CRM model.
-- Automate operational steps (connect checks, follow-ups, scheduling).
-- Keep final outbound message control with a human approver in admin.
+- Approve → send DMs via Playwright; reply checks and follow-up bumps after messaging.
+- Export to Sheets (`message_sent` or legacy follow-back verification).
 
 In practical terms, it blends:
 - **Automation engine** (daemon + task queue),
-- **Operator console** (Django admin with Unfold),
-- **Decision intelligence** (LLM + ML qualifier),
+- **Operator console** (Django admin + Next.js frontend),
+- **Decision intelligence** (LLM + ML qualifier for ICP; separate messaging skill for DM wording),
 - **Data persistence** (Django ORM over Supabase Postgres only).
+
+### End-to-end loop
+
+```
+search → qualify → HITL draft approve → send DM
+  → on reply → follow-up messaging → export / Sheets
+(Legacy Follow / check_pending paths remain dormant; not on the product path.)
+```
 
 ---
 
@@ -28,19 +46,20 @@ In practical terms, it blends:
 
 1. **Control plane (web/admin):**
    - Django Admin at `/admin/`
+   - Next.js frontend at `:3000` (proxy to Django JSON APIs)
    - Unfold-based dashboard and custom admin actions
    - Models edited/reviewed by operators
 
 2. **Worker plane (background runtime):**
-   - `rundaemon` management command
-   - Database-backed task queue (`linkedin.Task`)
+   - `rundaemon` management command (Instagram browser/session worker)
+   - Database-backed task queue (`linkedin.Task` — package name transitional)
    - Single-thread loop dispatching task handlers
 
 ### 2.2 Core Apps
 
-- `linkedin`: orchestration, automation, queues, API clients, models for campaign/profile/task/action logs, daemon, settings, admin.
-- `crm`: lead/deal domain models and CRM-focused admin UI.
-- `chat`: conversation/draft persistence with moderation flags.
+- `linkedin`: orchestration, automation, queues, API clients, models for campaign/profile/task/action logs, daemon, settings, admin. (**App label may still say `linkedin`; domain objects are Instagram.**)
+- `crm`: lead/deal domain models (`instagram_url`, etc.) and CRM-focused admin UI.
+- `chat`: conversation/draft persistence (`instagram_message_id`, `instagram_profile`) with moderation flags.
 
 ### 2.3 Entry Points
 
@@ -48,24 +67,29 @@ In practical terms, it blends:
 - Common runtime commands:
   - `python manage.py runserver`
   - `python manage.py rundaemon`
-  - `python manage.py migrate`
+  - `python manage.py migrate` ← required for Instagram schema
   - `python manage.py onboard`
   - `python manage.py setup_crm`
+
+### 2.4 Prompts split (important)
+
+| Prompt | Role |
+|--------|------|
+| `qualify_lead.j2` | ICP qualification only (CLIENT / COLLABORATION fit) |
+| `search_keywords.j2` | Instagram search keyword generation only |
+| `follow_up_agent.j2` + `eshway_dm_messaging_skill.j2` | **DM copy** using the messaging skill |
+| `skills/eshway_client_outreach_skill.md` | Source of truth for DM wording — not for automation stages |
 
 ---
 
 ## 3) Routing and UI Surface
 
-URL routing is intentionally minimal:
-- `/admin/` is the main application UI.
-- No general front-end pages are exposed at `/`.
-- No broad public API routes are declared in Django URLconf.
+URL routing:
+- `/admin/` — Django admin
+- `/api/*` — JSON APIs for the Next.js frontend (includes `/api/instagram-profiles/`)
+- Frontend app at `frontend-automation` (port 3000)
 
-The primary user interaction model is admin-driven operations:
-- pipeline review,
-- draft approval,
-- imports,
-- monitoring.
+Primary operator flows: pipeline review, draft approval, Instagram profile management, imports, monitoring, Sheets.
 
 ---
 
@@ -110,14 +134,15 @@ Operational implication:
 ### `User` (Django auth)
 - Operator/account identity.
 
-### `LinkedInProfile` (`linkedin.models`)
-- One-to-one with `User`.
-- Stores LinkedIn username/password, cookie state, legal acceptance, rate limits, active status.
+### `InstagramProfile` (`linkedin.models`)
+- FK to `User` (multi-account per operator).
+- Stores Instagram username/password, cookie state, legal acceptance, follow/DM rate limits, active status.
 - Optional `self_lead` pointer into `crm.Lead`.
 - Password encrypted at rest.
 
 Purpose:
-- Represents the account that executes automation and owns LinkedIn session context.
+- Represents the Instagram account that executes automation and owns session context.
+- Requires Instagram-named DB columns via migrations (Instagram-named schema).
 
 ## 5.2 Campaign and Queue Layer
 
@@ -151,7 +176,7 @@ Purpose:
 
 ### `Lead` (`crm.models.lead`)
 - Global person identity:
-  - unique `linkedin_url`,
+  - unique `instagram_url`,
   - unique `public_identifier`,
   - profile snapshot JSON,
   - embedding bytes.
@@ -166,7 +191,7 @@ Relationship summary:
 - `Campaign` 1..* `Deal`
 - `Lead` 1..* `Deal`
 - `Deal` 1..* `Task`
-- `LinkedInProfile` 1..* `ActionLog`
+- `InstagramProfile` 1..* `ActionLog`
 - `Campaign` 1..* `ActionLog`
 
 ## 5.4 Chat Layer
@@ -174,7 +199,7 @@ Relationship summary:
 ### `ChatMessage`
 - Conversation records + AI draft artifacts.
 - Uses generic FK (content type + object id).
-- Stores LinkedIn message URN for deduplication.
+- Stores Instagram message id for deduplication.
 - Moderation flags:
   - `is_draft`
   - `is_approved`
@@ -216,7 +241,7 @@ This state machine is maintained by daemon handler execution wrappers.
 1. Run migrations.
 2. Run CRM bootstrap.
 3. Validate onboarding completeness (interactive/non-interactive path).
-4. Ensure active LinkedIn profile + LLM config.
+4. Ensure active Instagram profile + LLM config.
 5. Start daemon queue loop.
 
 ## 7.2 Daemon Queue Loop
@@ -235,10 +260,10 @@ This state machine is maintained by daemon handler execution wrappers.
 
 Search pipeline:
 1. Generate/select keyword.
-2. Search LinkedIn profiles.
+2. Search Instagram profiles.
 3. Extract `/in/...` URLs.
 4. Normalize/store unknown leads.
-5. Enrich lead profile via Voyager API.
+5. Enrich lead profile via Instagram UI scrape.
 6. Compute/store embeddings.
 
 ## 7.4 Qualification Logic
@@ -285,7 +310,7 @@ Send-message task:
 
 ---
 
-## 8) LinkedIn Integration Internals
+## 8) Instagram Integration Internals
 
 ## 8.1 Browser Automation Stack
 
@@ -294,7 +319,7 @@ Send-message task:
 - Login supports cookie reuse and credential fallback.
 - Cookie state persisted in DB.
 
-## 8.2 Voyager API Access Pattern
+## 8.2 Profile enrichment (Playwright UI)
 
 API calls are executed in browser context using page `fetch`:
 - preserves browser cookies/session naturally,
@@ -509,12 +534,12 @@ Problem observed:
 - Daemon then failed at startup with `No campaigns found for this user.`
 
 Root cause:
-- Campaign-user linking was tied to `_create_account()`, which only runs when a new `LinkedInProfile` is created.
+- Campaign-user linking was tied to `_create_account()`, which only runs when a new `InstagramProfile` is created.
 - If profile already existed, onboarding could skip account creation and skip campaign membership linking.
 
 Fix implemented in `linkedin/onboarding.py`:
 - After onboarding campaign resolution, explicitly link campaign to the user resolved from `config.linkedin_email` if that profile exists.
-- Added a safe auto-heal path: if campaign has zero users and there is exactly one active LinkedIn profile, auto-link that sole user.
+- Added a safe auto-heal path: if campaign has zero users and there is exactly one active Instagram profile, auto-link that sole user.
 
 Behavioral impact:
 - Re-running onboarding now repairs campaign membership for existing profiles instead of failing daemon startup later.
@@ -522,15 +547,15 @@ Behavioral impact:
 
 ---
 
-### 18.4 LinkedIn Login Resilience Iteration
+### 18.4 Instagram Login Resilience Iteration
 
 Problem observed:
-- Daemon reached LinkedIn login URL but failed with Playwright timeout waiting for `input#username`.
-- This blocked automation even with valid stored LinkedIn credentials/profile setup.
+- Daemon reached Instagram login URL but failed with Playwright timeout waiting for username input.
+- This blocked automation even with valid stored Instagram credentials/profile setup.
 
 Root cause:
 - Login automation depended on a single rigid selector set (`input#username`, `input#password`, generic submit button).
-- LinkedIn can serve variant login/challenge pages where those exact selectors are absent.
+- Instagram can serve variant login/challenge pages where those exact selectors are absent.
 
 Fix implemented in `linkedin/browser/login.py`:
 - Added fallback selector lists for email, password, and submit controls.
@@ -538,7 +563,7 @@ Fix implemented in `linkedin/browser/login.py`:
 - Added explicit `AuthenticationError` diagnostics with URL and page title when login controls are not found.
 
 Behavioral impact:
-- Existing-profile flows now tolerate common LinkedIn DOM variations.
+- Existing-profile flows now tolerate common Instagram DOM variations.
 - Failures are now actionable (`challenge/captcha` vs `missing fields`) instead of generic Playwright timeout traces.
 
 ---
@@ -563,7 +588,7 @@ Behavioral impact:
 ### 18.6 Search Extraction Reliability Iteration
 
 Problem observed:
-- Daemon repeatedly generated keywords and navigated to LinkedIn People search pages but extracted `0` `/in/` profile URLs.
+- Daemon repeatedly generated keywords and navigated to Instagram search pages but extracted `0` profile URLs.
 - This caused connect loop churn with periodic sleeps and no candidate discovery.
 
 Root cause:
@@ -579,7 +604,7 @@ Fix implemented in `linkedin/actions/search.py`:
 - `search_people()` now uses this retry-aware extraction path and logs contextual debug when no links are found.
 
 Behavioral impact:
-- Search workflows are more robust to delayed or lazy-rendered LinkedIn result pages.
+- Search workflows are more robust to delayed or lazy-rendered Instagram result pages.
 - Reduces false-negative extraction cycles where links exist but were not yet present at first read.
 
 ---
@@ -588,7 +613,7 @@ Behavioral impact:
 
 Goal:
 - Add Google sign-in for the app and a built-in Google Sheets workspace.
-- LinkedIn automation remains on its own credential/cookie path (Playwright). Google is for app + Sheets only — explicitly NOT used for LinkedIn auth.
+- Instagram automation remains on its own credential/cookie path (Playwright). Google is for app + Sheets only — explicitly NOT used for Instagram auth.
 
 New Django app: `google_integration/`
 - `models.py`
@@ -656,13 +681,13 @@ Operational steps for users:
 5. Manage spreadsheets at `/admin/google/sheets/`.
 
 Security considerations:
-- Tokens are encrypted at rest (Fernet) using the same key as LinkedIn passwords.
+- Tokens are encrypted at rest (Fernet) using the same key as Instagram passwords.
 - Sheets routes require `login_required`; OAuth state is validated against the session.
 - `drive.file` scope limits the app to files it creates or the user explicitly opens.
 
 Explicit non-goals:
-- Google sign-in is NOT wired to LinkedIn account creation. LinkedIn automation
-  continues to depend on `LinkedInProfile` credentials and Playwright cookie sessions.
+- Google sign-in is NOT wired to Instagram account creation. Instagram automation
+  continues to depend on `InstagramProfile` credentials and Playwright cookie sessions.
 
 ---
 

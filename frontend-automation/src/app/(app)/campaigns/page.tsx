@@ -5,10 +5,10 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { pageCache } from "@/lib/page-cache";
 import { TableSkeleton } from "@/components/skeleton";
-import type { Campaign, LinkedInProfileItem } from "@/lib/types";
+import type { Campaign, InstagramProfileItem } from "@/lib/types";
 
 const CAMPAIGNS_KEY = "campaigns.list";
-const PROFILES_KEY = "linkedin-profiles.list";
+const PROFILES_KEY = "instagram-profiles.list";
 
 type FormState = {
   name: string;
@@ -49,9 +49,9 @@ function campaignToForm(c: Campaign): FormState {
 
 export default function CampaignsPage() {
   const cachedCampaigns = pageCache.get<Campaign[]>(CAMPAIGNS_KEY);
-  const cachedProfiles = pageCache.get<LinkedInProfileItem[]>(PROFILES_KEY);
+  const cachedProfiles = pageCache.get<InstagramProfileItem[]>(PROFILES_KEY);
   const [items, setItems] = useState<Campaign[]>(cachedCampaigns ?? []);
-  const [profiles, setProfiles] = useState<LinkedInProfileItem[]>(cachedProfiles ?? []);
+  const [profiles, setProfiles] = useState<InstagramProfileItem[]>(cachedProfiles ?? []);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(!cachedCampaigns);
@@ -65,7 +65,7 @@ export default function CampaignsPage() {
     try {
       const [campaignsRes, profilesRes] = await Promise.all([
         api.campaigns(),
-        api.linkedinProfiles(),
+        api.instagramProfiles(),
       ]);
       setItems(campaignsRes.items);
       setProfiles(profilesRes.items);
@@ -189,8 +189,9 @@ export default function CampaignsPage() {
         <div>
           <h2 className="text-2xl font-semibold">Campaigns</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Each campaign runs against the LinkedIn accounts it is linked to. The
-            ICP / product description on a campaign decides who the bot reaches out to.
+            Each campaign runs against the Instagram accounts it is linked to.
+            Use ICP / product docs for website-development clients and agency
+            collaborations — the bot discovers, follows, and DMs from that context.
           </p>
         </div>
         <button
@@ -210,7 +211,7 @@ export default function CampaignsPage() {
       ) : items.length === 0 ? (
         <section className="card p-8 text-center text-sm text-slate-400">
           No campaigns yet. Click the <strong>+</strong> button above to create one and link
-          it to a LinkedIn account.
+          it to an Instagram account.
         </section>
       ) : (
         <section className="card overflow-hidden">
@@ -330,7 +331,7 @@ export default function CampaignsPage() {
                 <label className="mb-1 block text-sm text-slate-300">Name</label>
                 <input
                   className="input"
-                  placeholder="e.g. Q3 outbound"
+                  placeholder="e.g. Webdev clients + agency collabs Q3"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   autoFocus
@@ -385,7 +386,7 @@ export default function CampaignsPage() {
                 </label>
                 <input
                   className="input"
-                  placeholder="e.g. Book sales calls"
+                  placeholder="e.g. Book intro calls for website builds / agency partnerships"
                   value={form.objective}
                   onChange={(e) => setForm((f) => ({ ...f, objective: e.target.value }))}
                 />
@@ -397,26 +398,27 @@ export default function CampaignsPage() {
                 </label>
                 <textarea
                   className="input min-h-[160px] w-full"
-                  placeholder="Describe who you sell to, what you offer, and the kind of leads this campaign should target. The bot uses this to qualify and message prospects."
+                  placeholder="Eshway ICP: website/app/digital-product clients (coaches, local businesses, e‑commerce, founders) and collaboration partners (branding, marketing, UI/UX, social agencies). Describe niches, services, and how Eshway complements them — the bot uses this to qualify Instagram prospects and draft DMs."
                   value={form.productDocs}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, productDocs: e.target.value }))
                   }
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  This replaces the one-time onboarding ICP. Update it any time and
-                  this campaign&apos;s outreach adapts to it.
+                  Drives discovery, follow targeting, and DM drafts (CLIENT /
+                  COLLABORATION / BOTH). Update anytime — this campaign&apos;s
+                  outreach adapts to it.
                 </p>
               </div>
             </div>
 
             <div>
               <label className="mb-2 block text-sm text-slate-300">
-                Link to LinkedIn account(s)
+                Link to Instagram account(s)
               </label>
               {profiles.length === 0 ? (
                 <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
-                  No LinkedIn profiles found. Add a profile first.
+                  No Instagram profiles found. Add a profile first.
                 </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -440,7 +442,7 @@ export default function CampaignsPage() {
                         <div>
                           <div className="font-medium text-slate-100">{p.djangoUser}</div>
                           <div className="text-xs text-slate-400">
-                            {p.linkedinUsername || p.djangoEmail}
+                            @{p.username || p.djangoEmail}
                           </div>
                         </div>
                       </label>

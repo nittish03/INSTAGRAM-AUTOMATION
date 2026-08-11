@@ -22,7 +22,7 @@ from django.utils import timezone as dj_tz
 
 from chat.models import ChatMessage
 from crm.models import Lead
-from linkedin.models import ActionLog, LinkedInProfile, Task
+from linkedin.models import ActionLog, InstagramProfile, Task
 
 LIVE_LOG = Path.home() / ".leadway" / "daemon_live.log"
 REPORT = Path.home() / ".leadway" / "monitor_5m.jsonl"
@@ -40,7 +40,7 @@ SEND_RE = re.compile(r"Dispatching approved message for (\S+)", re.I)
 
 
 def _profile():
-    return LinkedInProfile.objects.filter(user__username=HANDLE, active=True).first()
+    return InstagramProfile.objects.filter(user__username=HANDLE, active=True).first()
 
 
 def snapshot(since_ts: float, since_dt, log_offset: int, tick: int) -> dict:

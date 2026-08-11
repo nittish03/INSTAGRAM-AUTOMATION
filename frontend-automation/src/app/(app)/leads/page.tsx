@@ -186,7 +186,7 @@ export default function LeadsPage() {
                 <th className="th">Company</th>
                 <th className="th">State</th>
                 <th className="th">Quality</th>
-                <th className="th">LinkedIn</th>
+                <th className="th">Instagram</th>
                 <th className="th">Sheet Exported</th>
               </tr>
             </thead>
@@ -206,8 +206,13 @@ export default function LeadsPage() {
                     {quality[l.id] !== undefined ? <QualityScoreBadge score={quality[l.id]!} /> : "-"}
                   </td>
                   <td className="td">
-                    <a href={l.linkedinUrl} target="_blank" rel="noreferrer" className="text-violet-300 hover:underline">
-                      Profile
+                    <a
+                      href={l.instagramUrl || "#"}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-violet-300 hover:underline"
+                    >
+                      {l.username || l.publicIdentifier ? `@${(l.username || l.publicIdentifier).replace(/^@/, "")}` : "Profile"}
                     </a>
                   </td>
                   <td className="td">{l.sheetExportedAt ? "Yes" : "No"}</td>

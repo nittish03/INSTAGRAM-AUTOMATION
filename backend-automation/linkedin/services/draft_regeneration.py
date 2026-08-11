@@ -21,7 +21,7 @@ def regenerate_draft(draft, session, *, dry_run: bool = False) -> DraftRegenerat
     """Regenerate one unapproved draft without approving or sending it.
 
     Existing draft text is excluded from the prompt history so the model does not
-    treat an unsent draft as a prior LinkedIn message.
+    treat an unsent draft as a prior Instagram message.
     """
     from crm.models import Deal, Lead
     from linkedin.agents.follow_up import run_follow_up_agent
