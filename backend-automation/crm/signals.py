@@ -1,7 +1,9 @@
 """CRM signals — Google Sheet export and follow-up enqueue for DM-first outreach.
 
-Sheet export remains verification-gated in ``sync_lead_to_google_sheet``.
-HITL draft tasks are enqueued when a Deal becomes QUALIFIED (DM-first path).
+DM-first path: QUALIFIED deals export as Status=Qualified; successful DM send
+upgrades the row via ``sync_messaged_lead_to_google_sheet``. CONNECTED still
+uses verification-gated ``sync_lead_to_google_sheet`` (legacy follow-back).
+HITL draft tasks are enqueued when a Deal becomes QUALIFIED.
 """
 from __future__ import annotations
 
@@ -26,6 +28,17 @@ def _sync_lead_after_commit(lead_pk: int) -> None:
     if not lead:
         return
     sync_lead_to_google_sheet(lead)
+
+
+def _sync_qualified_after_commit(lead_pk: int) -> None:
+    """Write/update sheet row when a deal first becomes QUALIFIED (DM-first)."""
+    from crm.models.lead import Lead
+    from google_integration.sheet_sync import sync_qualified_lead_to_google_sheet
+
+    lead = Lead.objects.filter(pk=lead_pk).first()
+    if not lead:
+        return
+    sync_qualified_lead_to_google_sheet(lead, reason_code="qualified_deal")
 
 
 def _enqueue_follow_up_after_commit(deal_pk: int) -> None:
@@ -110,7 +123,7 @@ def deal_pre_save_track_state(sender, instance: Deal, **kwargs):
 
 @receiver(post_save, sender=Deal)
 def deal_post_save_google_sheet(sender, instance: Deal, created: bool, **kwargs):
-    """Enqueue HITL drafts on QUALIFIED; sheet sync still runs on CONNECTED."""
+    """Enqueue HITL drafts + sheet row on QUALIFIED; verified export on CONNECTED."""
     if kwargs.get("raw"):
         return
 
@@ -122,6 +135,7 @@ def deal_post_save_google_sheet(sender, instance: Deal, created: bool, **kwargs)
 
     if new_state == ProfileState.QUALIFIED and (created or previous_state != ProfileState.QUALIFIED):
         transaction.on_commit(lambda pk=instance.pk: _enqueue_follow_up_after_commit(pk))
+        transaction.on_commit(lambda pk=lead_id: _sync_qualified_after_commit(pk))
 
     if new_state == ProfileState.CONNECTED and (created or previous_state != ProfileState.CONNECTED):
         transaction.on_commit(lambda pk=lead_id: _sync_lead_after_commit(pk))

@@ -1,8 +1,11 @@
-"""Push CRM leads to a configured Google Sheet (append rows).
+"""Push CRM leads to a configured Google Sheet (append / upsert rows).
 
-Exports are **verification-gated**: rows represent decision-grade outcomes only,
-not inferred Deal states. Eligibility is driven by explicit ``OutreachEvent``
-records (connection_detected, invite_sent) and confidence thresholds in SiteConfig.
+DM-first Instagram path:
+- QUALIFIED deal → Status=Qualified (pipeline visibility)
+- successful DM send → Status=Qualified/Connected via ``sync_messaged_lead_to_google_sheet``
+
+Legacy CONNECTED path remains **verification-gated** (``OutreachEvent`` follow-back
++ confidence thresholds in SiteConfig) via ``sync_lead_to_google_sheet``.
 
 Raw diagnostic data lives in ``SystemRawLog``; never mix it with sheet rows.
 """
@@ -471,7 +474,7 @@ def sync_qualified_lead_to_google_sheet(
     reason_code: str = "qualified_or_stale_connection",
     config_user=None,
 ) -> bool:
-    """Ensure a non-connected lead is not left as Connected in the sheet."""
+    """Upsert Status=Qualified for DM-first pipeline leads (and stale Connected downgrades)."""
     from linkedin.enums import ProfileState
 
     has_qualified_deal = lead.deal_set.filter(state=ProfileState.QUALIFIED).exists()
@@ -484,6 +487,8 @@ def sync_qualified_lead_to_google_sheet(
     ).exists():
         return False
 
+    # First-time QUALIFIED export must write even if skip would no-op on re-entry;
+    # skip only when the sheet already shows Qualified (idempotent upsert).
     return _sync_lead_status_to_google_sheet(
         lead,
         status_label=ProfileState.QUALIFIED.value,
