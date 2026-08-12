@@ -25,17 +25,27 @@ logger = logging.getLogger(__name__)
 def goto_page(
     session,
     action,
-    expected_url_pattern: str,
+    expected_url_pattern: str | tuple[str, ...],
     timeout: int = BROWSER_NAV_TIMEOUT_MS,
     error_message: str = "",
 ):
+    patterns = (
+        (expected_url_pattern,)
+        if isinstance(expected_url_pattern, str)
+        else tuple(expected_url_pattern)
+    )
+
+    def _url_matches(url: str) -> bool:
+        decoded = unquote(url or "")
+        return any(p in decoded for p in patterns)
+
     page = session.page
     try:
         action()
     except PlaywrightTimeoutError:
         # Instagram pages often keep resources pending; treat soft timeout if URL matches.
         current = unquote((session.page or page).url if (session.page or page) else "")
-        if expected_url_pattern not in current:
+        if not _url_matches(current):
             raise
         logger.warning(
             "Navigation action timed out after reaching %s; continuing",
@@ -47,17 +57,18 @@ def goto_page(
         return
 
     try:
-        page.wait_for_url(lambda url: expected_url_pattern in unquote(url), timeout=timeout)
+        page.wait_for_url(lambda url: _url_matches(url), timeout=timeout)
     except PlaywrightTimeoutError:
         pass
 
     session.wait()
 
     current = unquote(page.url)
-    if expected_url_pattern not in current:
+    if not _url_matches(current):
         if "/404" in current or "Page Not Found" in (page.title() or ""):
             raise SkipProfile(f"Profile returned 404 → {current}")
-        raise RuntimeError(f"{error_message} → expected '{expected_url_pattern}' | got '{current}'")
+        expected = "' or '".join(patterns)
+        raise RuntimeError(f"{error_message} → expected '{expected}' | got '{current}'")
 
     logger.debug("Navigated to %s", page.url)
 
@@ -82,6 +93,89 @@ def extract_profile_urls(page) -> set[str]:
         urls.add(public_id_to_url(pid))
     logger.debug("Extracted %d unique Instagram profiles", len(urls))
     return urls
+
+
+def extract_post_urls(page, *, limit: int = 24) -> list[str]:
+    """Collect `/p/` and `/reel/` URLs from keyword/hashtag result grids."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for link in page.locator('a[href*="/p/"], a[href*="/reel/"]').all():
+        try:
+            href = link.get_attribute("href") or ""
+        except Exception:
+            continue
+        if not href:
+            continue
+        full_url = urljoin(page.url, href.strip())
+        parsed = urlparse(full_url)
+        path = parsed.path.rstrip("/") + "/"
+        if "/p/" not in path and "/reel/" not in path:
+            continue
+        clean = parsed._replace(query="", fragment="", path=path).geturl()
+        if clean in seen:
+            continue
+        seen.add(clean)
+        ordered.append(clean)
+        if len(ordered) >= limit:
+            break
+    logger.debug("Extracted %d post/reel URLs from search grid", len(ordered))
+    return ordered
+
+
+def extract_author_from_post_page(page, *, skip_usernames: set[str] | None = None) -> str | None:
+    """Best-effort author username from an opened Instagram post/reel page."""
+    import re
+
+    from linkedin.url_utils import url_to_public_id
+
+    skip = {s.lstrip("@").lower() for s in (skip_usernames or set()) if s}
+
+    def _accept(pid: str | None) -> str | None:
+        if not pid:
+            return None
+        cleaned = pid.lstrip("@")
+        if cleaned.lower() in skip:
+            return None
+        return cleaned
+
+    # Header author link is the most reliable on post pages.
+    for sel in (
+        "article header a[href^='/']",
+        "main header a[href^='/']",
+        "header a[href^='/']",
+        'a[role="link"][href^="/"]',
+    ):
+        try:
+            for link in page.locator(sel).all()[:12]:
+                href = link.get_attribute("href") or ""
+                pid = _accept(url_to_public_id(urljoin(page.url, href)))
+                if pid:
+                    return pid
+        except Exception:
+            continue
+
+    try:
+        html = page.content()
+    except Exception:
+        html = ""
+
+    # Prefer explicit owner blocks over the first generic username (often the viewer).
+    for pat in (
+        r'"owner"\s*:\s*\{[^{}]*?"username"\s*:\s*"([A-Za-z0-9._]+)"',
+        r'"user"\s*:\s*\{[^{}]*?"username"\s*:\s*"([A-Za-z0-9._]+)"',
+        r'"author"\s*:\s*\{[^{}]*?"username"\s*:\s*"([A-Za-z0-9._]+)"',
+        r'content="https://www\.instagram\.com/([A-Za-z0-9._]+)/"',
+    ):
+        for match in re.finditer(pat, html, flags=re.I):
+            pid = _accept(match.group(1))
+            if pid:
+                return pid
+
+    for match in re.finditer(r'"username"\s*:\s*"([A-Za-z0-9._]+)"', html):
+        pid = _accept(match.group(1))
+        if pid:
+            return pid
+    return None
 
 
 # Back-compat alias used by older discovery call sites.

@@ -18,20 +18,26 @@ _PRODUCT_DOCS_FILE = _DEFAULTS_DIR / "eshway_product_docs.md"
 _OBJECTIVE_FILE = _DEFAULTS_DIR / "eshway_campaign_objective.md"
 
 DEFAULT_SEARCH_KEYWORDS = [
-    # CLIENT — website development
-    "founder website",
-    "local business owner",
-    "coach consultant",
+    # CLIENT — identity phrases that match Accounts/People name+bio
+    "fitness coach",
+    "business coach",
+    "life coach",
     "ecommerce brand",
+    "restaurant owner",
+    "salon owner",
+    "clinic owner",
+    "real estate agent",
     "startup founder",
-    "service business",
-    # COLLABORATION — agencies / creatives
+    "small business owner",
+    # COLLABORATION — agencies / creatives (Accounts tab)
     "branding agency",
-    "graphic designer",
-    "marketing agency",
-    "ui ux designer",
     "social media agency",
-    "creative studio",
+    "marketing agency",
+    "creative agency",
+    "seo agency",
+    "ui ux designer",
+    "brand designer",
+    "graphic design studio",
 ]
 
 

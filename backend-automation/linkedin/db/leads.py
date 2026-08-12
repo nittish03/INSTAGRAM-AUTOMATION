@@ -4,7 +4,11 @@ from typing import Dict, Any, Optional
 
 from django.db import transaction
 
-from linkedin.url_utils import url_to_public_id, public_id_to_url
+from linkedin.url_utils import (
+    is_plausible_instagram_username,
+    public_id_to_url,
+    url_to_public_id,
+)
 from linkedin.enums import ProfileState
 
 logger = logging.getLogger(__name__)
@@ -106,11 +110,24 @@ def discover_and_enrich(session, urls: set):
     from linkedin.api.client import PlaywrightInstagramAPI
     from linkedin.conf import CAMPAIGN_CONFIG, bot_pacing_delay_seconds
 
-    new_urls = [u for u in urls if not lead_exists(u)]
+    filtered_urls = []
+    for u in urls:
+        pid = url_to_public_id(u)
+        if not pid or not is_plausible_instagram_username(pid):
+            logger.debug("Skipping junk/non-profile discovery URL: %s", u)
+            continue
+        filtered_urls.append(u)
+
+    new_urls = [u for u in filtered_urls if not lead_exists(u)]
     if not new_urls:
         return
 
-    logger.info("Discovered %d new profiles (%d total on page)", len(new_urls), len(urls))
+    logger.info(
+        "Discovered %d new profiles (%d usable / %d raw on page)",
+        len(new_urls),
+        len(filtered_urls),
+        len(urls),
+    )
 
     min_interval = bot_pacing_delay_seconds(CAMPAIGN_CONFIG.get("enrich_min_interval", 1))
     session.ensure_browser()
@@ -119,7 +136,7 @@ def discover_and_enrich(session, urls: set):
 
     for url in new_urls:
         public_id = url_to_public_id(url)
-        if not public_id:
+        if not public_id or not is_plausible_instagram_username(public_id):
             continue
 
         try:

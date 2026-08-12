@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_search(session) -> str | None:
-    """Use the next search keyword to discover new profiles. Returns keyword or None."""
+    """Use the next search keyword to discover Instagram profiles. Returns keyword or None."""
     from linkedin.actions.search import search_people
     from linkedin.pipeline.search_keywords import generate_search_keywords
     from linkedin.models import SearchKeyword
@@ -55,5 +55,6 @@ def run_search(session) -> str | None:
     kw.save()
 
     logger.info(colored("\u25b6 search", "magenta", attrs=["bold"]) + " keyword=%r", kw.keyword)
+    # Instagram people/hashtag discovery → enrich leads for DM-first qualify/draft
     search_people(session, kw.keyword)
     return kw.keyword
